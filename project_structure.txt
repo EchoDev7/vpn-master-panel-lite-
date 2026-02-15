@@ -1,0 +1,70 @@
+vpn-master-panel/
+├── backend/                      # FastAPI Backend
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py              # FastAPI app
+│   │   ├── config.py            # Settings
+│   │   ├── database.py          # PostgreSQL/SQLite
+│   │   ├── models/              # SQLAlchemy models
+│   │   │   ├── user.py
+│   │   │   ├── vpn_server.py
+│   │   │   ├── tunnel.py
+│   │   │   └── traffic.py
+│   │   ├── api/                 # API endpoints
+│   │   │   ├── auth.py
+│   │   │   ├── users.py
+│   │   │   ├── servers.py
+│   │   │   ├── tunnels.py
+│   │   │   └── monitoring.py
+│   │   ├── services/            # Business logic
+│   │   │   ├── openvpn.py
+│   │   │   ├── wireguard.py
+│   │   │   ├── l2tp.py
+│   │   │   ├── cisco.py
+│   │   │   └── tunnel_manager.py
+│   │   ├── tunnels/             # Tunnel implementations
+│   │   │   ├── backhaul.py
+│   │   │   ├── rathole.py
+│   │   │   ├── frp.py
+│   │   │   ├── chisel.py
+│   │   │   ├── shadowtls.py
+│   │   │   └── persianshield.py  # Custom tunnel
+│   │   └── utils/
+│   │       ├── security.py
+│   │       ├── monitoring.py
+│   │       └── iran_bypass.py    # Anti-filter techniques
+│   ├── requirements.txt
+│   └── Dockerfile
+│
+├── frontend/                     # React Frontend
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── UserManager.jsx
+│   │   │   ├── ServerManager.jsx
+│   │   │   ├── TunnelConfig.jsx
+│   │   │   └── Monitoring.jsx
+│   │   ├── pages/
+│   │   ├── hooks/
+│   │   ├── utils/
+│   │   └── App.jsx
+│   ├── package.json
+│   └── tailwind.config.js
+│
+├── scripts/                      # Installation scripts
+│   ├── install_openvpn.sh
+│   ├── install_wireguard.sh
+│   ├── install_l2tp.sh
+│   ├── install_cisco.sh
+│   ├── setup_tunnel.sh
+│   └── install_panel.sh
+│
+├── monitoring/                   # Monitoring stack
+│   ├── prometheus.yml
+│   ├── grafana/
+│   │   └── dashboards/
+│   └── docker-compose.monitoring.yml
+│
+├── docker-compose.yml           # Main deployment
+├── .env.example
+└── README.md
