@@ -27,9 +27,13 @@ async def lifespan(app: FastAPI):
     Lifespan events - startup and shutdown
     """
     # Startup
-    logger.info("🚀 Starting VPN Master Panel...")
+    logger.info("Starting VPN Master Panel (Lite Edition)...") # Modified log message
     
     try:
+        # Create initial admin user if not exists
+        from .utils.security import create_initial_admin
+        create_initial_admin() # Moved up
+        
         # Initialize database
         init_db()
         logger.info("✅ Database initialized")
