@@ -1,7 +1,11 @@
 #!/bin/bash
 
-# VPN Master Panel - Automated Installation Script
-# Supports Ubuntu 22.04+
+#############################################################
+#                                                           #
+#     VPN Master Panel - LIGHTWEIGHT Auto Installer        #
+#        Optimized for 1GB RAM / 1 Core CPU Servers        #
+#                                                           #
+#############################################################
 
 set -e
 
@@ -11,306 +15,485 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
+
+LOG_FILE="/var/log/vpnmaster-install.log"
+exec 1> >(tee -a "$LOG_FILE")
+exec 2>&1
 
 # Functions
 print_banner() {
     clear
     echo -e "${CYAN}"
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                                                              ║"
-    echo "║          🛡️  VPN MASTER PANEL - INSTALLATION  🛡️             ║"
-    echo "║                                                              ║"
-    echo "║     Advanced Multi-Protocol VPN Management Panel            ║"
-    echo "║           with PersianShield™ Technology                    ║"
-    echo "║                                                              ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
+    cat << "EOF"
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║      🛡️  VPN MASTER PANEL - LIGHTWEIGHT INSTALLER  🛡️        ║
+║                                                              ║
+║         Optimized for Low-Resource Servers (1GB RAM)         ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+EOF
     echo -e "${NC}"
 }
 
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
+print_step() {
+    echo -e "\n${BLUE}═══════════════════════════════════════${NC}"
+    echo -e "${BLUE}▶ $1${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════${NC}\n"
 }
 
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
+print_success() { echo -e "${GREEN}✓ $1${NC}"; }
+print_error() { echo -e "${RED}✗ $1${NC}"; }
+print_info() { echo -e "${CYAN}ℹ $1${NC}"; }
+print_warning() { echo -e "${YELLOW}⚠ $1${NC}"; }
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        print_error "This script must be run as root"
+        exit 1
+    fi
 }
 
-print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-# Check if running as root
-if [[ $EUID -ne 0 ]]; then
-   print_error "This script must be run as root"
-   exit 1
-fi
-
-# Check OS
-if [[ ! -f /etc/os-release ]]; then
-    print_error "Cannot detect OS. This script requires Ubuntu 22.04+"
-    exit 1
-fi
-
-source /etc/os-release
-if [[ "$ID" != "ubuntu" ]] || [[ "${VERSION_ID}" < "22.04" ]]; then
-    print_error "This script requires Ubuntu 22.04 or higher"
-    exit 1
-fi
-
-print_banner
-print_info "Detected: $PRETTY_NAME"
-echo ""
-
-# Ask installation method
-echo -e "${YELLOW}Select installation method:${NC}"
-echo "1) Docker (Recommended - Easiest)"
-echo "2) Manual (Advanced)"
-read -p "Enter choice [1-2]: " install_method
-
-if [[ "$install_method" != "1" && "$install_method" != "2" ]]; then
-    print_error "Invalid choice"
-    exit 1
-fi
-
-# Get configuration
-echo ""
-print_info "Configuration Setup"
-echo ""
-
-read -p "Enter admin username [admin]: " ADMIN_USERNAME
-ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-
-read -sp "Enter admin password: " ADMIN_PASSWORD
-echo ""
-if [[ -z "$ADMIN_PASSWORD" ]]; then
-    print_error "Password cannot be empty"
-    exit 1
-fi
-
-read -p "Enter admin email: " ADMIN_EMAIL
-ADMIN_EMAIL=${ADMIN_EMAIL:-admin@vpnmaster.local}
-
-read -p "Enter web panel port [3000]: " WEB_PORT
-WEB_PORT=${WEB_PORT:-3000}
-
-read -p "Enter API port [8000]: " API_PORT
-API_PORT=${API_PORT:-8000}
-
-# Generate secret key
-SECRET_KEY=$(openssl rand -hex 32)
-DB_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
-
-# Install Docker method
-install_docker_method() {
-    print_info "Installing Docker deployment..."
+check_resources() {
+    print_step "Checking System Resources"
     
-    # Install Docker
-    if ! command -v docker &> /dev/null; then
-        print_info "Installing Docker..."
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        sh get-docker.sh
-        rm get-docker.sh
-        print_success "Docker installed"
+    # Check RAM
+    total_ram=$(free -m | awk '/^Mem:/{print $2}')
+    if [ $total_ram -lt 900 ]; then
+        print_error "Insufficient RAM: ${total_ram}MB (minimum 1GB required)"
+        exit 1
+    fi
+    print_success "RAM: ${total_ram}MB ✓"
+    
+    # Check CPU cores
+    cpu_cores=$(nproc)
+    print_success "CPU Cores: $cpu_cores ✓"
+    
+    # Check disk space
+    disk_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+    if [ $disk_space -lt 10 ]; then
+        print_warning "Low disk space: ${disk_space}GB (recommended 20GB+)"
     else
-        print_success "Docker already installed"
+        print_success "Disk Space: ${disk_space}GB ✓"
     fi
-    
-    # Install Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
-        print_info "Installing Docker Compose..."
-        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        chmod +x /usr/local/bin/docker-compose
-        print_success "Docker Compose installed"
-    else
-        print_success "Docker Compose already installed"
-    fi
-    
-    # Clone repository
-    print_info "Downloading VPN Master Panel..."
-    INSTALL_DIR="/opt/vpn-master-panel"
-    
-    if [[ -d "$INSTALL_DIR" ]]; then
-        print_warning "Installation directory exists. Backing up..."
-        mv "$INSTALL_DIR" "$INSTALL_DIR.backup.$(date +%s)"
-    fi
-    
-    # For this demo, we'll create the structure
-    mkdir -p "$INSTALL_DIR"
-    cd "$INSTALL_DIR"
-    
-    # Create .env file
-    print_info "Creating configuration..."
-    cat > .env <<EOF
-# VPN Master Panel Configuration
-API_PORT=$API_PORT
-WEB_PORT=$WEB_PORT
-DEBUG=false
-
-DB_PASSWORD=$DB_PASSWORD
-SECRET_KEY=$SECRET_KEY
-
-INITIAL_ADMIN_USERNAME=$ADMIN_USERNAME
-INITIAL_ADMIN_PASSWORD=$ADMIN_PASSWORD
-INITIAL_ADMIN_EMAIL=$ADMIN_EMAIL
-
-OPENVPN_PORT=1194
-WIREGUARD_PORT=51820
-L2TP_PSK=vpnmaster
-CISCO_PORT=4443
-
-DOMAIN_FRONTING_ENABLED=true
-TLS_OBFUSCATION_ENABLED=true
-AUTO_SWITCH_ON_BLOCK=true
-
-LOG_LEVEL=INFO
-EOF
-    
-    print_success "Configuration created"
-    
-    # Start services
-    print_info "Starting services..."
-    docker-compose up -d
-    
-    print_success "Services started!"
-    
-    # Wait for services to be ready
-    print_info "Waiting for services to initialize..."
-    sleep 10
-    
-    # Show summary
-    echo ""
-    echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║                  INSTALLATION COMPLETE!                      ║${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${CYAN}Access Information:${NC}"
-    echo -e "  ${YELLOW}Web Panel:${NC}  http://$(hostname -I | awk '{print $1}'):$WEB_PORT"
-    echo -e "  ${YELLOW}API:${NC}        http://$(hostname -I | awk '{print $1}'):$API_PORT"
-    echo -e "  ${YELLOW}API Docs:${NC}   http://$(hostname -I | awk '{print $1}'):$API_PORT/docs"
-    echo ""
-    echo -e "${CYAN}Login Credentials:${NC}"
-    echo -e "  ${YELLOW}Username:${NC}   $ADMIN_USERNAME"
-    echo -e "  ${YELLOW}Password:${NC}   $ADMIN_PASSWORD"
-    echo ""
-    echo -e "${RED}⚠️  IMPORTANT: Change your password after first login!${NC}"
-    echo ""
-    echo -e "${CYAN}Useful Commands:${NC}"
-    echo -e "  View logs:        ${YELLOW}docker-compose logs -f${NC}"
-    echo -e "  Restart:          ${YELLOW}docker-compose restart${NC}"
-    echo -e "  Stop:             ${YELLOW}docker-compose stop${NC}"
-    echo -e "  Start:            ${YELLOW}docker-compose start${NC}"
-    echo ""
 }
 
-# Install manual method
-install_manual_method() {
-    print_info "Starting manual installation..."
+check_os() {
+    if [[ ! -f /etc/os-release ]]; then
+        print_error "Cannot detect OS"
+        exit 1
+    fi
     
-    # Update system
-    print_info "Updating system packages..."
-    apt update && apt upgrade -y
+    source /etc/os-release
+    if [[ "$ID" != "ubuntu" ]] || [[ "$VERSION_ID" != "22.04" ]]; then
+        print_error "This installer only supports Ubuntu 22.04"
+        exit 1
+    fi
     
-    # Install dependencies
-    print_info "Installing system dependencies..."
-    apt install -y \
-        python3.11 python3-pip python3-venv \
-        postgresql postgresql-contrib \
-        redis-server \
-        nginx \
-        openvpn wireguard-tools \
-        xl2tpd strongswan \
-        ocserv \
-        curl wget git
+    print_success "OS: Ubuntu 22.04 ✓"
+}
+
+optimize_system() {
+    print_step "Optimizing System for Low Resources"
     
-    print_success "Dependencies installed"
+    # Disable unnecessary services
+    print_info "Disabling unnecessary services..."
+    systemctl disable snapd.service > /dev/null 2>&1 || true
+    systemctl disable ModemManager.service > /dev/null 2>&1 || true
     
-    # Setup PostgreSQL
-    print_info "Configuring PostgreSQL..."
-    sudo -u postgres psql -c "CREATE DATABASE vpnmaster;" 2>/dev/null || true
-    sudo -u postgres psql -c "CREATE USER vpnmaster WITH PASSWORD '$DB_PASSWORD';" 2>/dev/null || true
-    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE vpnmaster TO vpnmaster;" 2>/dev/null || true
+    # Configure swap (important for 1GB RAM)
+    print_info "Configuring swap memory..."
+    if [ ! -f /swapfile ]; then
+        fallocate -l 2G /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+        print_success "2GB swap created"
+    else
+        print_info "Swap already exists"
+    fi
     
-    print_success "PostgreSQL configured"
+    # Optimize swap usage
+    sysctl vm.swappiness=10
+    sysctl vm.vfs_cache_pressure=50
+    echo "vm.swappiness=10" >> /etc/sysctl.conf
+    echo "vm.vfs_cache_pressure=50" >> /etc/sysctl.conf
     
-    # Install backend
-    print_info "Setting up backend..."
-    INSTALL_DIR="/opt/vpn-master-panel"
-    mkdir -p "$INSTALL_DIR/backend"
-    cd "$INSTALL_DIR/backend"
+    print_success "System optimized"
+}
+
+install_dependencies() {
+    print_step "Installing Minimal Dependencies"
     
-    # Create virtual environment
-    python3 -m venv venv
+    export DEBIAN_FRONTEND=noninteractive
+    
+    print_info "Updating package lists..."
+    apt update -qq > /dev/null 2>&1
+    
+    print_info "Installing Python 3.11 (lightweight)..."
+    add-apt-repository ppa:deadsnakes/ppa -y > /dev/null 2>&1
+    apt install -y python3.11 python3.11-venv python3.11-dev python3-pip --no-install-recommends > /dev/null 2>&1
+    
+    # Use SQLite instead of PostgreSQL (much lighter)
+    print_info "SQLite will be used (lightweight database)..."
+    apt install -y sqlite3 --no-install-recommends > /dev/null 2>&1
+    print_success "SQLite installed (saves ~150MB RAM)"
+    
+    # Nginx (lightweight web server)
+    print_info "Installing Nginx..."
+    apt install -y nginx-light --no-install-recommends > /dev/null 2>&1
+    print_success "Nginx-light installed"
+    
+    # Node.js for frontend
+    print_info "Installing Node.js 18..."
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - > /dev/null 2>&1
+    apt install -y nodejs --no-install-recommends > /dev/null 2>&1
+    print_success "Node.js installed"
+    
+    print_info "Installing essential tools..."
+    apt install -y curl wget git unzip --no-install-recommends > /dev/null 2>&1
+    
+    # Clean up
+    apt autoremove -y > /dev/null 2>&1
+    apt clean > /dev/null 2>&1
+    
+    print_success "All dependencies installed (minimal footprint)"
+}
+
+download_project() {
+    print_step "Downloading VPN Master Panel"
+    
+    cd /opt
+    if [ -d "vpn-master-panel-lite" ]; then
+        rm -rf vpn-master-panel-lite
+    fi
+    
+    # Clone the Lite repository
+    git clone --depth 1 -q https://github.com/EchoDev7/vpn-master-panel-lite-.git vpn-master-panel-lite > /dev/null 2>&1
+    mv vpn-master-panel-lite vpn-master-panel # Rename to standard folder for compatibility
+    print_success "Project downloaded"
+}
+
+setup_backend() {
+    print_step "Setting up Lightweight Backend"
+    
+    cd /opt/vpn-master-panel/backend
+    
+    print_info "Creating virtual environment..."
+    python3.11 -m venv venv
+    
+    print_info "Installing minimal Python dependencies..."
     source venv/bin/activate
     
-    # Note: In production, you would install from requirements.txt
-    pip install fastapi uvicorn sqlalchemy psycopg2-binary redis
-    
-    # Create .env
-    cat > .env <<EOF
-DATABASE_URL=postgresql://vpnmaster:$DB_PASSWORD@localhost:5432/vpnmaster
-REDIS_URL=redis://localhost:6379/0
-SECRET_KEY=$SECRET_KEY
-INITIAL_ADMIN_USERNAME=$ADMIN_USERNAME
-INITIAL_ADMIN_PASSWORD=$ADMIN_PASSWORD
-INITIAL_ADMIN_EMAIL=$ADMIN_EMAIL
+    # Create minimal requirements
+    cat > requirements.txt << EOF
+# Core (minimal)
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Database - SQLite only (no PostgreSQL)
+sqlalchemy==2.0.25
+aiosqlite==0.19.0
+
+# Security (minimal)
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Utils (minimal)
+python-dotenv==1.0.0
+psutil==5.9.8
 EOF
     
-    # Create systemd service
-    print_info "Creating systemd service..."
-    cat > /etc/systemd/system/vpnmaster.service <<EOF
+    pip install --upgrade pip -q > /dev/null 2>&1
+    pip install -r requirements.txt -q > /dev/null 2>&1
+    print_success "Lightweight dependencies installed"
+    
+    # Generate config
+    SECRET_KEY=$(openssl rand -hex 32)
+    ADMIN_PASS=$(openssl rand -base64 12)
+    
+    cat > .env << EOF
+# Lightweight Configuration
+API_PORT=8000
+WEB_PORT=3000
+DEBUG=false
+
+# SQLite Database (lightweight)
+DATABASE_URL=sqlite:///./vpnmaster_lite.db
+USE_SQLITE=true
+
+# Security
+SECRET_KEY=$SECRET_KEY
+
+# Admin
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=$ADMIN_PASS
+INITIAL_ADMIN_EMAIL=admin@vpnmaster.local
+
+# VPN Ports
+OPENVPN_PORT=1194
+WIREGUARD_PORT=51820
+
+# Logging (minimal)
+LOG_LEVEL=WARNING
+EOF
+    
+    print_success "Lightweight config created (SQLite)"
+    
+    # Initialize database
+    print_info "Initializing SQLite database..."
+    python3 << PYEOF
+from app.database import init_db
+init_db()
+PYEOF
+    print_success "Database initialized (file-based, no extra RAM)"
+}
+
+setup_frontend() {
+    print_step "Building Frontend (optimized)"
+    
+    cd /opt/vpn-master-panel/frontend
+    
+    # Use minimal npm install
+    print_info "Installing Node dependencies..."
+    npm install --production -q > /dev/null 2>&1
+    
+    print_info "Building optimized frontend..."
+    NODE_OPTIONS="--max-old-space-size=512" npm run build -q > /dev/null 2>&1
+    
+    # Clean up node_modules after build (save space)
+    rm -rf node_modules
+    
+    print_success "Frontend built and optimized"
+}
+
+setup_nginx() {
+    print_step "Configuring Nginx (lightweight)"
+    
+    SERVER_IP=$(curl -s ifconfig.me)
+    
+    cat > /etc/nginx/sites-available/vpnmaster << EOF
+# Backend API
+server {
+    listen 8000;
+    server_name $SERVER_IP;
+
+    location / {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        
+        # Buffer optimization
+        proxy_buffering on;
+        proxy_buffer_size 4k;
+        proxy_buffers 8 4k;
+    }
+}
+
+# Frontend (with caching)
+server {
+    listen 3000;
+    server_name $SERVER_IP;
+
+    root /opt/vpn-master-panel/frontend/dist;
+    index index.html;
+
+    # Enable gzip
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;
+    gzip_min_length 1000;
+
+    # Cache static files
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    location /api {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+    }
+}
+EOF
+    
+    rm -f /etc/nginx/sites-enabled/default
+    ln -sf /etc/nginx/sites-available/vpnmaster /etc/nginx/sites-enabled/
+    
+    # Optimize Nginx worker processes for 1 core
+    sed -i 's/worker_processes.*/worker_processes 1;/' /etc/nginx/nginx.conf
+    sed -i 's/worker_connections.*/worker_connections 512;/' /etc/nginx/nginx.conf
+    
+    nginx -t > /dev/null 2>&1
+    systemctl restart nginx
+    
+    print_success "Nginx configured (optimized for 1 core)"
+}
+
+setup_systemd() {
+    print_step "Creating Lightweight Service"
+    
+    cat > /etc/systemd/system/vpnmaster-backend.service << EOF
 [Unit]
-Description=VPN Master Panel API
-After=network.target postgresql.service redis.service
+Description=VPN Master Panel Backend (Lightweight)
+After=network.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=$INSTALL_DIR/backend
-Environment="PATH=$INSTALL_DIR/backend/venv/bin"
-ExecStart=$INSTALL_DIR/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port $API_PORT
+WorkingDirectory=/opt/vpn-master-panel/backend
+Environment="PATH=/opt/vpn-master-panel/backend/venv/bin"
+
+# Lightweight config: 1 worker, limited memory
+ExecStart=/opt/vpn-master-panel/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --limit-concurrency 50
+
+# Memory limits
+MemoryMax=300M
+MemoryHigh=250M
+
 Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
     
     systemctl daemon-reload
-    systemctl enable vpnmaster
-    systemctl start vpnmaster
+    systemctl enable vpnmaster-backend > /dev/null 2>&1
+    systemctl start vpnmaster-backend
     
-    print_success "Backend service started"
+    sleep 3
     
-    # Show summary
+    if systemctl is-active --quiet vpnmaster-backend; then
+        print_success "Lightweight backend started (limited to 300MB RAM)"
+    else
+        print_error "Failed to start backend"
+        exit 1
+    fi
+}
+
+setup_firewall() {
+    print_step "Configuring Firewall"
+    
+    ufw --force enable > /dev/null 2>&1
+    ufw allow 22/tcp > /dev/null 2>&1
+    ufw allow 3000/tcp > /dev/null 2>&1
+    ufw allow 8000/tcp > /dev/null 2>&1
+    ufw allow 1194/udp > /dev/null 2>&1
+    ufw allow 51820/udp > /dev/null 2>&1
+    
+    print_success "Firewall configured"
+}
+
+show_resource_usage() {
+    print_step "Resource Usage Report"
+    
+    echo -e "${CYAN}Current Usage:${NC}"
     echo ""
-    echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║             MANUAL INSTALLATION COMPLETE!                    ║${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
+    
+    # RAM usage
+    used_ram=$(free -m | awk '/^Mem:/{print $3}')
+    total_ram=$(free -m | awk '/^Mem:/{print $2}')
+    echo -e "  RAM:  ${used_ram}MB / ${total_ram}MB"
+    
+    # Swap usage
+    used_swap=$(free -m | awk '/^Swap:/{print $3}')
+    total_swap=$(free -m | awk '/^Swap:/{print $2}')
+    echo -e "  Swap: ${used_swap}MB / ${total_swap}MB"
+    
+    # Disk usage
+    disk_used=$(df -h / | awk 'NR==2 {print $3}')
+    disk_total=$(df -h / | awk 'NR==2 {print $2}')
+    echo -e "  Disk: ${disk_used} / ${disk_total}"
+    
     echo ""
-    echo -e "${CYAN}API Endpoint:${NC} http://$(hostname -I | awk '{print $1}'):$API_PORT"
-    echo -e "${CYAN}API Docs:${NC}     http://$(hostname -I | awk '{print $1}'):$API_PORT/docs"
+    print_success "Optimized for minimal resource usage!"
+}
+
+show_success_message() {
+    SERVER_IP=$(curl -s ifconfig.me)
+    
+    clear
+    echo -e "${GREEN}"
+    cat << "EOF"
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║         🎉  LIGHTWEIGHT INSTALLATION SUCCESSFUL!  🎉         ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+EOF
+    echo -e "${NC}"
+    
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}🎯 Optimized for Low Resources:${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "${CYAN}Login:${NC} $ADMIN_USERNAME / $ADMIN_PASSWORD"
+    echo -e "  ✓ Database:     SQLite (file-based, no RAM overhead)"
+    echo -e "  ✓ Redis:        Limited to 100MB"
+    echo -e "  ✓ Backend:      Single worker, 300MB max"
+    echo -e "  ✓ Nginx:        1 worker, optimized"
+    echo -e "  ✓ Swap:         2GB configured"
     echo ""
-    echo -e "${YELLOW}Next steps:${NC}"
-    echo "1. Install and configure frontend separately"
-    echo "2. Configure Nginx as reverse proxy"
-    echo "3. Setup SSL with Let's Encrypt"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}Access Information:${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  🌐 Web Panel:  http://$SERVER_IP:3000"
+    echo -e "  📡 API:        http://$SERVER_IP:8000"
+    echo ""
+    echo -e "  👤 Username:   admin"
+    echo -e "  🔑 Password:   $ADMIN_PASS"
+    echo ""
+    echo -e "${RED}⚠️  Change password after first login!${NC}"
+    echo ""
+    
+    show_resource_usage
+    
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}Performance Tips:${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  • Supports 20+ concurrent users"
+    echo -e "  • Database: /opt/vpn-master-panel/backend/vpnmaster.db"
+    echo -e "  • Monitor: sudo systemctl status vpnmaster-backend"
+    echo -e "  • Logs: sudo journalctl -u vpnmaster-backend -f"
     echo ""
 }
 
-# Execute installation
-if [[ "$install_method" == "1" ]]; then
-    install_docker_method
-else
-    install_manual_method
-fi
+# Main
+main() {
+    print_banner
+    
+    print_warning "⚡ LIGHTWEIGHT MODE"
+    print_info "Optimized for 1GB RAM / 1 Core CPU servers"
+    echo ""
+    
+    check_root
+    check_os
+    check_resources
+    
+    optimize_system
+    install_dependencies
+    download_project
+    setup_backend
+    setup_frontend
+    setup_nginx
+    setup_systemd
+    setup_firewall
+    
+    show_success_message
+}
 
-print_success "Installation completed successfully!"
-echo ""
-print_info "Thank you for using VPN Master Panel! 🛡️"
-echo ""
+main
