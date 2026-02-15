@@ -40,20 +40,12 @@ class Settings(BaseSettings):
     CORS_ALLOW_HEADERS: List[str] = ["*"]
     
     # Database
-    DATABASE_URL: str = "postgresql://vpnmaster:vpnmaster@postgres:5432/vpnmaster"
+    DATABASE_URL: str = "sqlite:///./vpnmaster_lite.db"
     DATABASE_ECHO: bool = False
     
-    # SQLite fallback
-    SQLITE_URL: str = "sqlite:///./vpnmaster.db"
-    USE_SQLITE: bool = False
-    
-    # Redis
-    REDIS_URL: str = "redis://redis:6379/0"
-    REDIS_PASSWORD: Optional[str] = None
-    
-    # Celery
-    CELERY_BROKER_URL: str = "redis://redis:6379/1"
-    CELERY_RESULT_BACKEND: str = "redis://redis:6379/2"
+    # SQLite
+    SQLITE_URL: str = "sqlite:///./vpnmaster_lite.db"
+    USE_SQLITE: bool = True
     
     # Monitoring
     PROMETHEUS_ENABLED: bool = True
