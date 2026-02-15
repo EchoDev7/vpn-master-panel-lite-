@@ -121,6 +121,11 @@ optimize_system() {
     echo "vm.swappiness=10" >> /etc/sysctl.conf
     echo "vm.vfs_cache_pressure=50" >> /etc/sysctl.conf
     
+    # Enable IP Forwarding (Critical for VPN)
+    print_info "Enabling IP Forwarding..."
+    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    sysctl -p > /dev/null 2>&1
+    
     print_success "System optimized"
 }
 
@@ -131,6 +136,10 @@ install_dependencies() {
     
     print_info "Updating package lists..."
     apt update -qq > /dev/null 2>&1
+    
+    print_info "Installing VPN Core Services..."
+    apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent --no-install-recommends > /dev/null 2>&1
+    print_success "OpenVPN & WireGuard installed"
     
     print_info "Installing Python 3.11 (lightweight)..."
     add-apt-repository ppa:deadsnakes/ppa -y > /dev/null 2>&1
