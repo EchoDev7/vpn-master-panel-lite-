@@ -75,6 +75,8 @@ def get_db_context():
 def init_db():
     """Initialize database - create all tables"""
     try:
+        from .models.user import User
+        from .models.vpn_server import VPNServer, Tunnel
         Base.metadata.create_all(bind=engine)
         logger.info("Database initialized successfully")
     except Exception as e:
