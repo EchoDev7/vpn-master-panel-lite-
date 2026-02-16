@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Activity, Server, Shield, TrendingUp, Globe, RefreshCw } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { apiService } from '../services/api';
+import { Users, Activity, TrendingUp, Server, UserPlus, Settings as SettingsIcon, Globe, RefreshCw } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import apiService from '../services/api';
 import ActiveConnectionsModal from './ActiveConnectionsModal';
 import SystemMetricsModal from './SystemMetricsModal';
+import ServerResourcesWidget from './ServerResourcesWidget';
+import NetworkSpeedWidget from './NetworkSpeedWidget';
 
 export const Dashboard = () => {
   const navigate = useNavigate();
@@ -17,6 +19,7 @@ export const Dashboard = () => {
   const [showConnectionsModal, setShowConnectionsModal] = useState(false);
   const [showSystemModal, setShowSystemModal] = useState(false);
   const [activeConnections, setActiveConnections] = useState([]);
+  const [trafficByType, setTrafficByType] = useState(null);
 
 
   useEffect(() => {
@@ -27,15 +30,18 @@ export const Dashboard = () => {
 
   const loadDashboardData = async () => {
     try {
-      const [statsRes, trafficRes] = await Promise.all([
+      const [dashboardRes, trafficRes, trafficByTypeRes] = await Promise.all([
         apiService.get('/monitoring/dashboard'),
-        apiService.get(`/monitoring/traffic-stats?days=${trafficDays}`)
+        apiService.get(`/monitoring/traffic-stats?days=${trafficDays}`),
+        apiService.get(`/monitoring/traffic-by-type?days=${trafficDays}`)
       ]);
-      setStats(statsRes.data);
+
+      setStats(dashboardRes.data);
       setTrafficData(trafficRes.data);
+      setTrafficByType(trafficByTypeRes.data);
       setLoading(false);
     } catch (error) {
-      console.error('Failed to load dashboard:', error);
+      console.error('Failed to load dashboard data:', error);
       setLoading(false);
     }
   };
@@ -145,6 +151,28 @@ export const Dashboard = () => {
         />
       </div>
 
+      {/* Traffic Type Breakdown */}
+      {trafficByType && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <StatCard
+            title="Direct Traffic"
+            value={`${trafficByType?.summary?.direct?.gb || 0} GB`}
+            subtitle={`Last ${trafficDays} days`}
+            icon={Activity}
+            color="#3b82f6"
+            clickable={false}
+          />
+          <StatCard
+            title="Tunnel Traffic"
+            value={`${trafficByType?.summary?.tunnel?.gb || 0} GB`}
+            subtitle={`Last ${trafficDays} days`}
+            icon={Globe}
+            color="#10b981"
+            clickable={false}
+          />
+        </div>
+      )}
+
       {/* Traffic Chart */}
       <div ref={trafficChartRef} className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-8">
         <div className="flex items-center justify-between mb-4">
@@ -244,6 +272,14 @@ export const Dashboard = () => {
           color="#DA0000"
           onClick={() => navigate('/servers')}
         />
+      </div>
+
+      {/* Advanced Monitoring Widgets */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <ServerResourcesWidget />
+        <div>
+          <NetworkSpeedWidget />
+        </div>
       </div>
 
       {/* Modals */}
