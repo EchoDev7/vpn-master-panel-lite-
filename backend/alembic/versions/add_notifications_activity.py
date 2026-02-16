@@ -40,7 +40,7 @@ def upgrade():
         sa.Column('description', sa.String(length=500), nullable=False),
         sa.Column('ip_address', sa.String(length=50), nullable=True),
         sa.Column('user_agent', sa.String(length=255), nullable=True),
-        sa.Column('metadata', sa.String(length=1000), nullable=True),
+        sa.Column('meta_data', sa.String(length=1000), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
         sa.PrimaryKeyConstraint('id')
