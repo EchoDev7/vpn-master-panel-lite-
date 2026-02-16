@@ -1,14 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useRef, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, Activity, TrendingUp, Server, Shield, UserPlus, Settings as SettingsIcon, Globe, RefreshCw } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import apiService from '../services/api';
 import ActiveConnectionsModal from './ActiveConnectionsModal';
 import SystemMetricsModal from './SystemMetricsModal';
-import ServerResourcesWidget from './ServerResourcesWidget';
-import NetworkSpeedWidget from './NetworkSpeedWidget';
-import { SkeletonDashboard } from './Skeletons';
+import { SkeletonDashboard, SkeletonWidget } from './Skeletons';
 import { ApiErrorState } from './States';
+import RefreshIndicator from './RefreshIndicator';
+
+// Lazy load heavy components for better performance
+const ServerResourcesWidget = lazy(() => import('./ServerResourcesWidget'));
+const NetworkSpeedWidget = lazy(() => import('./NetworkSpeedWidget'));
 
 export const Dashboard = () => {
   const navigate = useNavigate();
@@ -23,6 +26,8 @@ export const Dashboard = () => {
   const [showSystemModal, setShowSystemModal] = useState(false);
   const [activeConnections, setActiveConnections] = useState([]);
   const [trafficByType, setTrafficByType] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
 
   useEffect(() => {
@@ -31,9 +36,11 @@ export const Dashboard = () => {
     return () => clearInterval(interval);
   }, [trafficDays]);
 
-  const loadDashboardData = async () => {
+  const loadDashboardData = async (isManualRefresh = false) => {
     try {
+      if (isManualRefresh) setIsRefreshing(true);
       setError(null);
+
       const [dashboardRes, trafficRes, trafficByTypeRes] = await Promise.all([
         apiService.get('/monitoring/dashboard'),
         apiService.get(`/monitoring/traffic-stats?days=${trafficDays}`),
@@ -43,12 +50,19 @@ export const Dashboard = () => {
       setStats(dashboardRes.data);
       setTrafficData(trafficRes.data);
       setTrafficByType(trafficByTypeRes.data);
+      setLastUpdated(new Date());
       setLoading(false);
+      setIsRefreshing(false);
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
       setError(error);
       setLoading(false);
+      setIsRefreshing(false);
     }
+  };
+
+  const handleManualRefresh = () => {
+    loadDashboardData(true);
   };
 
   const loadActiveConnections = async () => {
@@ -89,7 +103,8 @@ export const Dashboard = () => {
     );
   }
 
-  const StatCard = ({ title, value, icon: Icon, color, subtitle, onClick, clickable = true }) => (
+  // Memoized StatCard component for better performance
+  const StatCard = memo(({ title, value, icon: Icon, color, subtitle, onClick, clickable = true }) => (
     <div
       className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border-l-4 transition-all duration-300 ${clickable ? 'cursor-pointer hover:shadow-xl hover:scale-105 hover:-translate-y-1' : ''
         }`}
@@ -109,19 +124,26 @@ export const Dashboard = () => {
         </div>
       </div>
     </div>
-  );
+  ));
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-          <Shield className="text-primary-500" size={36} />
-          VPN Master Panel
-        </h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-2">
-          Advanced Multi-Protocol VPN Management with PersianShield™
-        </p>
+      {/* Header with Refresh Indicator */}
+      <div className="mb-8 flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+            <Shield className="text-primary-500" size={36} />
+            VPN Master Panel
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-2">
+            Advanced Multi-Protocol VPN Management with PersianShield™
+          </p>
+        </div>
+        <RefreshIndicator
+          lastUpdated={lastUpdated}
+          onRefresh={handleManualRefresh}
+          isRefreshing={isRefreshing}
+        />
       </div>
 
       {/* Stats Grid */}
@@ -218,11 +240,12 @@ export const Dashboard = () => {
               30 Days
             </button>
             <button
-              onClick={loadDashboardData}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all flex items-center gap-2"
+              onClick={handleManualRefresh}
+              disabled={isRefreshing}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all flex items-center gap-2 disabled:opacity-50"
               title="Refresh"
             >
-              <RefreshCw size={16} />
+              <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
             </button>
           </div>
         </div>
@@ -283,12 +306,14 @@ export const Dashboard = () => {
         />
       </div>
 
-      {/* Advanced Monitoring Widgets */}
+      {/* Advanced Monitoring Widgets with Lazy Loading */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <ServerResourcesWidget />
-        <div>
+        <Suspense fallback={<SkeletonWidget />}>
+          <ServerResourcesWidget />
+        </Suspense>
+        <Suspense fallback={<SkeletonWidget />}>
           <NetworkSpeedWidget />
-        </div>
+        </Suspense>
       </div>
 
       {/* Modals */}
@@ -311,7 +336,7 @@ export const Dashboard = () => {
   );
 };
 
-const QuickAction = ({ title, description, color, onClick }) => (
+const QuickAction = memo(({ title, description, color, onClick }) => (
   <button
     onClick={onClick}
     className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 text-left hover:shadow-lg transition-shadow border-l-4"
@@ -320,6 +345,6 @@ const QuickAction = ({ title, description, color, onClick }) => (
     <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
     <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">{description}</p>
   </button>
-);
+));
 
 export default Dashboard;
