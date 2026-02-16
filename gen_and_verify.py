@@ -25,9 +25,15 @@ try:
             
     print("✅ Security Check Passed: No Private Key in <ca> block.")
     
-    # Check for unwanted directives (Legacy)
+    # Check for unwanted directives (Legacy/Incompatible)
     if "sni-spoof" in config_content:
         print("❌ FAILURE: sni-spoof directive found (Should be removed).")
+        sys.exit(1)
+
+    if "block-outside-dns" in config_content:
+        print("❌ FAILURE: block-outside-dns found! This breaks mobile clients.")
+        sys.exit(1)
+
     
     # Check for clean directives
     if "scramble obfuscate" in config_content:
