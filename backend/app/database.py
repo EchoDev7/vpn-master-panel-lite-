@@ -78,10 +78,40 @@ def init_db():
         from .models.user import User
         from .models.vpn_server import VPNServer, Tunnel
         Base.metadata.create_all(bind=engine)
+        
+        # Auto-migrate: add new columns to existing tables
+        _run_migrations()
+        
         logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise
+
+
+def _run_migrations():
+    """Add new columns to existing tables (safe to run multiple times)"""
+    from sqlalchemy import text, inspect
+    
+    inspector = inspect(engine)
+    
+    # Check if 'users' table exists
+    if 'users' not in inspector.get_table_names():
+        return
+    
+    existing_columns = [col['name'] for col in inspector.get_columns('users')]
+    
+    migrations = [
+        ("wireguard_preshared_key", "VARCHAR(255)"),
+    ]
+    
+    with engine.begin() as conn:
+        for col_name, col_type in migrations:
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
+                    logger.info(f"✅ Migration: added column '{col_name}' to users table")
+                except Exception as e:
+                    logger.warning(f"Migration skip: {col_name} — {e}")
 
 
 def drop_db():
