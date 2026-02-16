@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
 import Dashboard from './components/Dashboard'
 import Users from './components/Users'
+import Settings from './components/Settings'
 // ... inside Routes
 <Route path="/users" element={<Users />} />
 
@@ -52,6 +53,9 @@ function MainLayout() {
                             <Link to="/users" className="text-gray-300 hover:text-white transition-colors">
                                 Users
                             </Link>
+                            <Link to="/settings" className="text-gray-300 hover:text-white transition-colors">
+                                Settings
+                            </Link>
                             <button onClick={() => {
                                 localStorage.clear();
                                 window.location.href = '/login';
@@ -69,6 +73,7 @@ function MainLayout() {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/servers" element={<ComingSoon title="Servers Management" />} />
                     <Route path="/users" element={<Users />} />
+                    <Route path="/settings" element={<Settings />} />
                 </Routes>
             </main>
 
