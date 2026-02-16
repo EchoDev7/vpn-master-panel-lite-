@@ -100,17 +100,30 @@ const Settings = () => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-gray-400 text-sm mb-1">Compression</label>
+                                <label className="block text-gray-400 text-sm mb-1">Auth Digest</label>
                                 <select
-                                    value={settings.ovpn_compression || 'none'}
-                                    onChange={(e) => handleChange('ovpn_compression', e.target.value)}
+                                    value={settings.ovpn_auth_digest || 'SHA256'}
+                                    onChange={(e) => handleChange('ovpn_auth_digest', e.target.value)}
                                     className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
                                 >
-                                    <option value="none">None (Recommended)</option>
-                                    <option value="lz4-v2">LZ4-v2</option>
-                                    <option value="comp-lzo">LZO (Legacy)</option>
+                                    <option value="SHA256">SHA256 (Standard)</option>
+                                    <option value="SHA512">SHA512 (Stronger)</option>
+                                    <option value="SHA1">SHA1 (Legacy/Insecure)</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-gray-400 text-sm mb-1">Compression</label>
+                            <select
+                                value={settings.ovpn_compression || 'none'}
+                                onChange={(e) => handleChange('ovpn_compression', e.target.value)}
+                                className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
+                            >
+                                <option value="none">None (Recommended)</option>
+                                <option value="lz4-v2">LZ4-v2</option>
+                                <option value="comp-lzo">LZO (Legacy)</option>
+                            </select>
                         </div>
 
                         <div>
