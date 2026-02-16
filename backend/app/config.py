@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     
     # App Info
     APP_NAME: str = "VPN Master Panel"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "1.0.1"
     DEBUG: bool = False
     
     # API Settings
