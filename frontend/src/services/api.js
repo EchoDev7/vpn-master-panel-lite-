@@ -159,6 +159,27 @@ class APIService {
     return this.client.post('/settings/server-config/apply');
   }
 
+  // WireGuard endpoints
+  async getWGServerConfigPreview() {
+    return this.client.get('/settings/wg-server-config/preview');
+  }
+
+  async applyWGServerConfig() {
+    return this.client.post('/settings/wg-server-config/apply');
+  }
+
+  async getWGStatus() {
+    return this.client.get('/settings/wg-status');
+  }
+
+  async regenerateWGKeys() {
+    return this.client.post('/settings/wg-keys/regenerate');
+  }
+
+  async getObfuscationScript() {
+    return this.client.get('/settings/wg-obfuscation/script');
+  }
+
   // Generic methods
   async get(url, config = {}) {
     return this.client.get(url, config);
