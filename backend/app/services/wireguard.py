@@ -139,11 +139,12 @@ class WireGuardService:
 PrivateKey = {client_private_key}
 Address = {client_ip}/24
 DNS = 1.1.1.1, 8.8.8.8
+MTU = 1420
 
 [Peer]
 PublicKey = {server_public_key}
 Endpoint = {server_endpoint}:{server_port}
-AllowedIPs = 0.0.0.0/0
+AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
 """
         return config

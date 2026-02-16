@@ -59,7 +59,7 @@ class OpenVPNService:
         ca_cert = self._read_file(self.CA_PATH)
         tls_auth = self._read_file(self.TA_PATH)
         
-        # Base Configuration Template
+        # Base Configuration Template with Best Practices
         config = f"""client
 dev tun
 proto {protocol}
@@ -71,7 +71,10 @@ persist-tun
 remote-cert-tls server
 auth SHA256
 cipher AES-256-GCM
+ignore-unknown-option block-outside-dns
+block-outside-dns
 verb 3
+key-direction 1
 
 # User Credentials
 auth-user-pass
@@ -87,7 +90,6 @@ auth-user-pass
 <tls-auth>
 {tls_auth}
 </tls-auth>
-key-direction 1
 """
         
         return config
