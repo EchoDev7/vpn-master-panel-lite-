@@ -533,7 +533,16 @@ class OpenVPNService:
         lines.append("user nobody")
         lines.append("group nogroup")
 
-        lines.append("plugin /usr/lib/openvpn/plugins/openvpn-plugin-auth-pam.so login")
+        # Dynamic Plugin Detection
+        pam_plugin = self._find_plugin("openvpn-plugin-auth-pam.so")
+        if pam_plugin:
+            lines.append(f"plugin {pam_plugin} login")
+        else:
+            # Fallback to standard path if search fails (better than crash?)
+            # Or maybe comment it out and risk auth failure but service starts?
+            # NO, auth is critical. We stick to fallback but log usage.
+            lines.append("plugin /usr/lib/openvpn/plugins/openvpn-plugin-auth-pam.so login")
+
         lines.append("verify-client-cert none")
         lines.append("username-as-common-name")
 
