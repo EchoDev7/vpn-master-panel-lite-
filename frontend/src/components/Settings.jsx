@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Settings as SettingsIcon, Shield, Globe, Server, Lock, Wifi, Route, Clock, Wrench, FileText, AlertTriangle, Info, Eye } from 'lucide-react';
+import { Save, Settings as SettingsIcon, Shield, Globe, Server, Lock, Wifi, Route, Clock, Wrench, FileText, AlertTriangle, Info, Eye, Activity, RefreshCw, Download, Terminal } from 'lucide-react';
 import { apiService } from '../services/api';
 
 const TABS = [
@@ -39,6 +39,11 @@ const Settings = () => {
     const [serverConfigPreview, setServerConfigPreview] = useState(null);
     const [showServerConfig, setShowServerConfig] = useState(false);
     const [pkiInfo, setPkiInfo] = useState(null);
+    const [wgServerConfigPreview, setWgServerConfigPreview] = useState(null);
+    const [showWgServerConfig, setShowWgServerConfig] = useState(false);
+    const [wgStatus, setWgStatus] = useState(null);
+    const [wgObfsScript, setWgObfsScript] = useState(null);
+    const [showWgObfsScript, setShowWgObfsScript] = useState(false);
 
     useEffect(() => {
         loadSettings();
@@ -643,32 +648,201 @@ const Settings = () => {
 
     const renderWireGuardTab = () => (
         <div className="space-y-6">
-            <SectionTitle>WireGuard Configuration</SectionTitle>
-            <div className="grid grid-cols-2 gap-4">
-                <InputField
-                    label="Port"
-                    settingKey="wg_port"
-                    placeholder="51820"
-                />
-                <InputField
-                    label="MTU"
-                    settingKey="wg_mtu"
-                    placeholder="1420"
-                    tip="Recommended: 1280-1420 for Iran mobile networks."
-                    iranBadge
-                />
+            {/* Warning Banner */}
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                        <p className="text-amber-300 font-semibold text-sm">WireGuard Anti-Censorship Notice</p>
+                        <p className="text-gray-400 text-xs mt-1">
+                            WireGuard uses UDP and has a distinct fingerprint that Iran's DPI can detect.
+                            Enable <strong>wstunnel</strong> or <strong>udp2raw</strong> obfuscation below to bypass filtering.
+                        </p>
+                    </div>
+                </div>
             </div>
-            <InputField
-                label="Endpoint IP (Public IP)"
-                settingKey="wg_endpoint_ip"
-                placeholder="Auto-detect"
-                tip="Set this if your server is behind NAT or you have a specific domain."
+
+            <SectionTitle>🌐 Network</SectionTitle>
+            <div className="grid grid-cols-2 gap-4">
+                <InputField label="Port" settingKey="wg_port" placeholder="51820" tip="WireGuard listen port (UDP)." />
+                <InputField label="MTU" settingKey="wg_mtu" placeholder="1380" type="number" iranBadge tip="Lower MTU (1280-1380) works better with Iran ISPs and obfuscation overhead." />
+                <InputField label="Interface" settingKey="wg_interface" placeholder="wg0" tip="WireGuard network interface name." />
+                <InputField label="Endpoint IP" settingKey="wg_endpoint_ip" placeholder="Auto-detect" tip="Set manually if behind NAT or using a domain." />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+                <InputField label="Subnet" settingKey="wg_subnet" placeholder="10.66.66.0" tip="VPN subnet IP range." />
+                <InputField label="Subnet Mask (CIDR)" settingKey="wg_subnet_mask" placeholder="24" tip="CIDR notation (24 = /24 = 256 IPs)." />
+            </div>
+
+            <SectionTitle>🔒 Security</SectionTitle>
+            <CheckboxField label="Enable PresharedKey (Post-Quantum Resistance)" settingKey="wg_preshared_key_enabled" iranBadge tip="Adds an extra layer of symmetric-key crypto on top of Curve25519. Recommended for maximum security." />
+            <InputField label="FwMark (Firewall Mark)" settingKey="wg_fwmark" placeholder="0 (disabled)" tip="32-bit fwmark for outgoing packets. Leave empty to disable." />
+
+            <SectionTitle>🛡️ Anti-Censorship / Obfuscation</SectionTitle>
+            <SelectField
+                label="Obfuscation Method"
+                settingKey="wg_obfuscation_type"
+                iranBadge
+                tip="Wrap WireGuard traffic to evade DPI. wstunnel tunnels over WebSocket/HTTPS. udp2raw uses fake TCP packets."
+                options={[
+                    { value: 'none', label: 'None (Direct UDP)' },
+                    { value: 'wstunnel', label: 'wstunnel (WebSocket/HTTPS — Recommended for Iran)' },
+                    { value: 'udp2raw', label: 'udp2raw (FakeTCP)' },
+                ]}
             />
-            <InputField
-                label="DNS Servers"
-                settingKey="wg_dns"
-                placeholder="1.1.1.1,8.8.8.8"
+            {settings.wg_obfuscation_type && settings.wg_obfuscation_type !== 'none' && (
+                <div className="grid grid-cols-2 gap-4">
+                    <InputField label="Obfuscation Port" settingKey="wg_obfuscation_port" placeholder="443" iranBadge tip="Port for the obfuscation layer (443 mimics HTTPS)." />
+                    <InputField label="Domain (wstunnel)" settingKey="wg_obfuscation_domain" placeholder="your-domain.com" tip="Domain with valid TLS cert for wstunnel. Makes traffic indistinguishable from HTTPS." />
+                </div>
+            )}
+            {settings.wg_obfuscation_type && settings.wg_obfuscation_type !== 'none' && (
+                <button
+                    onClick={async () => {
+                        try {
+                            const res = await apiService.getObfuscationScript();
+                            setWgObfsScript(res.data.content);
+                            setShowWgObfsScript(true);
+                        } catch (e) { alert('Failed to get script'); }
+                    }}
+                    className="w-full bg-gray-700 hover:bg-gray-600 text-white px-4 py-2.5 rounded-lg text-sm border border-gray-600 flex items-center justify-center gap-2 transition-colors"
+                >
+                    <Terminal className="w-4 h-4" /> View Server Setup Script
+                </button>
+            )}
+            {showWgObfsScript && wgObfsScript && (
+                <div className="bg-gray-900 rounded-lg border border-gray-600 overflow-hidden">
+                    <div className="flex justify-between items-center p-3 bg-gray-800 border-b border-gray-700">
+                        <span className="text-sm font-medium text-gray-300">Obfuscation Setup Script</span>
+                        <button onClick={() => setShowWgObfsScript(false)} className="text-gray-400 hover:text-white text-sm">✕</button>
+                    </div>
+                    <textarea readOnly value={wgObfsScript} className="w-full h-48 bg-transparent text-gray-300 p-4 font-mono text-xs resize-none focus:outline-none" />
+                </div>
+            )}
+
+            <SectionTitle>🔀 Routing & DNS</SectionTitle>
+            <InputField label="DNS Servers" settingKey="wg_dns" placeholder="1.1.1.1,8.8.8.8" tip="DNS servers pushed to clients." />
+            <InputField label="Allowed IPs" settingKey="wg_allowed_ips" placeholder="0.0.0.0/0,::/0" tip="0.0.0.0/0,::/0 routes ALL traffic. Use specific CIDRs for split tunneling." />
+            <SelectField
+                label="Routing Table"
+                settingKey="wg_table"
+                tip="'auto' creates routes automatically. 'off' disables route management."
+                options={[
+                    { value: 'auto', label: 'Auto (Recommended)' },
+                    { value: 'off', label: 'Off (Manual routing)' },
+                ]}
             />
+
+            <SectionTitle>⏱️ Connection</SectionTitle>
+            <div className="grid grid-cols-2 gap-4">
+                <InputField label="Persistent Keepalive (sec)" settingKey="wg_persistent_keepalive" placeholder="25" type="number" iranBadge tip="Sends keepalive every N seconds to keep NAT/firewall mappings alive. Essential for Iran networks." />
+                <CheckboxField label="Save Config on Changes" settingKey="wg_save_config" tip="Auto-save wg0.conf when peers are added/removed at runtime." />
+            </div>
+
+            <SectionTitle>🔧 Advanced</SectionTitle>
+            <TextareaField label="PostUp Script" settingKey="wg_post_up" placeholder="iptables -t nat -A POSTROUTING ..." tip="Shell commands run when interface comes up. Used for NAT/firewall rules. Leave empty for auto-generated iptables." rows={2} />
+            <TextareaField label="PostDown Script" settingKey="wg_post_down" placeholder="iptables -t nat -D POSTROUTING ..." tip="Shell commands run when interface goes down. Should reverse PostUp rules." rows={2} />
+            <TextareaField label="Custom Client Config" settingKey="wg_custom_client_config" placeholder="# Extra lines added to client .conf" tip="Additional directives appended to every generated client config." rows={3} />
+            <TextareaField label="Custom Server Config" settingKey="wg_custom_server_config" placeholder="# Extra lines added to wg0.conf" tip="Additional directives appended to server config." rows={3} />
+
+            {/* Server Config Actions */}
+            <div className="flex gap-3 mt-4">
+                <button
+                    onClick={async () => {
+                        try {
+                            const res = await apiService.getWGServerConfigPreview();
+                            setWgServerConfigPreview(res.data.content);
+                            setShowWgServerConfig(true);
+                        } catch (e) { alert('Failed to load WG server config preview'); }
+                    }}
+                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 border border-gray-600 transition-colors"
+                >
+                    <Eye className="w-4 h-4" /> Preview wg0.conf
+                </button>
+                <button
+                    onClick={async () => {
+                        if (window.confirm('Generate and write wg0.conf based on current settings?')) {
+                            try {
+                                const res = await apiService.applyWGServerConfig();
+                                const data = res.data;
+                                if (data.system_written) {
+                                    alert(`✅ Config written to: ${data.system_path}\n\n${data.hint}`);
+                                } else {
+                                    alert(`⚠️ Saved to: ${data.backup_path}\n\n${data.hint}`);
+                                }
+                            } catch (e) { alert('❌ Failed to apply WG server config'); }
+                        }
+                    }}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                >
+                    <Server className="w-4 h-4" /> Generate & Apply
+                </button>
+            </div>
+            {showWgServerConfig && wgServerConfigPreview && (
+                <div className="bg-gray-900 rounded-lg border border-gray-600 overflow-hidden">
+                    <div className="flex justify-between items-center p-3 bg-gray-800 border-b border-gray-700">
+                        <span className="text-sm font-medium text-gray-300">wg0.conf Preview</span>
+                        <button onClick={() => setShowWgServerConfig(false)} className="text-gray-400 hover:text-white text-sm">✕</button>
+                    </div>
+                    <textarea readOnly value={wgServerConfigPreview} className="w-full h-64 bg-transparent text-gray-300 p-4 font-mono text-xs resize-none focus:outline-none" />
+                </div>
+            )}
+
+            <SectionTitle>🔑 Server Keys</SectionTitle>
+            <button
+                onClick={async () => {
+                    if (window.confirm('⚠️ WARNING: Regenerating server keys will invalidate ALL existing client configs.\nUsers must download new .conf files.\n\nContinue?')) {
+                        try {
+                            const res = await apiService.regenerateWGKeys();
+                            alert(`✅ New public key: ${res.data.public_key}`);
+                        } catch (e) { alert('❌ Failed'); }
+                    }
+                }}
+                className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-400 px-4 py-3 rounded-lg text-sm font-medium border border-red-600/30 transition-colors"
+            >
+                🔄 Regenerate Server Keys
+            </button>
+
+            <SectionTitle>📊 Live Status</SectionTitle>
+            <button
+                onClick={async () => {
+                    try {
+                        const res = await apiService.getWGStatus();
+                        setWgStatus(res.data);
+                    } catch (e) { alert('Failed to load WG status'); }
+                }}
+                className="w-full bg-gray-700 hover:bg-gray-600 text-white px-4 py-2.5 rounded-lg text-sm border border-gray-600 flex items-center justify-center gap-2 transition-colors"
+            >
+                <Activity className="w-4 h-4" /> Refresh WireGuard Status
+            </button>
+            {wgStatus && (
+                <div className="bg-gray-900 rounded-lg p-4 border border-gray-700 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <span className={`w-2.5 h-2.5 rounded-full ${wgStatus.running ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                        <span className="text-sm text-gray-300 font-medium">{wgStatus.running ? `${wgStatus.interface} Running` : 'Not Running'}</span>
+                        {wgStatus.listen_port > 0 && <span className="text-xs text-gray-500">Port: {wgStatus.listen_port}</span>}
+                    </div>
+                    {wgStatus.total_transfer_rx_human && (
+                        <p className="text-xs text-gray-400">Total: ↓ {wgStatus.total_transfer_rx_human} / ↑ {wgStatus.total_transfer_tx_human}</p>
+                    )}
+                    {wgStatus.peers && wgStatus.peers.length > 0 && (
+                        <div className="space-y-2 mt-2">
+                            <p className="text-xs text-gray-500 font-semibold">Connected Peers ({wgStatus.peers.length})</p>
+                            {wgStatus.peers.map((peer, i) => (
+                                <div key={i} className="bg-gray-800 p-2.5 rounded border border-gray-700">
+                                    <div className="flex items-center gap-2">
+                                        <span className={`w-2 h-2 rounded-full ${peer.is_online ? 'bg-green-500' : 'bg-gray-600'}`}></span>
+                                        <span className="text-xs text-gray-300 font-mono">{peer.public_key.substring(0, 20)}...</span>
+                                        <span className="text-xs text-gray-500">{peer.handshake_ago}</span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-1">↓ {peer.transfer_rx_human} / ↑ {peer.transfer_tx_human} | {peer.allowed_ips}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {wgStatus.error && <p className="text-xs text-red-400">{wgStatus.error}</p>}
+                </div>
+            )}
         </div>
     );
 
@@ -712,8 +886,8 @@ const Settings = () => {
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`w-full text-left px-4 py-3 text-sm font-medium transition-colors border-l-2 ${activeTab === tab.id
-                                        ? 'bg-blue-600/20 text-blue-400 border-blue-500'
-                                        : 'text-gray-400 hover:text-white hover:bg-gray-700/50 border-transparent'
+                                    ? 'bg-blue-600/20 text-blue-400 border-blue-500'
+                                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50 border-transparent'
                                     }`}
                             >
                                 {tab.label}
