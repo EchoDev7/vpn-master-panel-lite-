@@ -7,6 +7,8 @@ import ActiveConnectionsModal from './ActiveConnectionsModal';
 import SystemMetricsModal from './SystemMetricsModal';
 import ServerResourcesWidget from './ServerResourcesWidget';
 import NetworkSpeedWidget from './NetworkSpeedWidget';
+import { SkeletonDashboard } from './Skeletons';
+import { ApiErrorState } from './States';
 
 export const Dashboard = () => {
   const navigate = useNavigate();
@@ -15,6 +17,7 @@ export const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [trafficData, setTrafficData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [trafficDays, setTrafficDays] = useState(7);
   const [showConnectionsModal, setShowConnectionsModal] = useState(false);
   const [showSystemModal, setShowSystemModal] = useState(false);
@@ -30,6 +33,7 @@ export const Dashboard = () => {
 
   const loadDashboardData = async () => {
     try {
+      setError(null);
       const [dashboardRes, trafficRes, trafficByTypeRes] = await Promise.all([
         apiService.get('/monitoring/dashboard'),
         apiService.get(`/monitoring/traffic-stats?days=${trafficDays}`),
@@ -42,6 +46,7 @@ export const Dashboard = () => {
       setLoading(false);
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
+      setError(error);
       setLoading(false);
     }
   };
@@ -73,9 +78,13 @@ export const Dashboard = () => {
   };
 
   if (loading) {
+    return <SkeletonDashboard />;
+  }
+
+  if (error) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary-500"></div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+        <ApiErrorState error={error} onRetry={loadDashboardData} />
       </div>
     );
   }
