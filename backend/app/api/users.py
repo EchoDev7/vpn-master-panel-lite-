@@ -480,58 +480,38 @@ async def get_wireguard_config(
     if not user.wireguard_enabled:
         raise HTTPException(status_code=400, detail="WireGuard is not enabled for this user")
 
+    from ..services.wireguard import wireguard_service, generate_wireguard_keys
+
     # Auto-generate keys if missing
     if not user.wireguard_private_key:
-        from ..services.wireguard import generate_wireguard_keys
         try:
             keys = generate_wireguard_keys()
             user.wireguard_private_key = keys['private_key']
             user.wireguard_public_key = keys['public_key']
             user.wireguard_ip = keys['ip']
+            # Store PresharedKey if enabled
+            if 'preshared_key' in keys and hasattr(user, 'wireguard_preshared_key'):
+                user.wireguard_preshared_key = keys['preshared_key']
             db.commit()
             db.refresh(user)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate WireGuard keys: {str(e)}")
-        
-    from ..services.wireguard import WireGuardService
-    wg_service = WireGuardService()
     
-    # Get server public key
-    try:
-        import subprocess
-        # Try default location first
-        key_path = f"{wg_service.CONFIG_DIR}/public.key"
-        if not os.path.exists(key_path):
-             # Fallback: derive from private key
-             key_path = f"{wg_service.CONFIG_DIR}/private.key"
-             if os.path.exists(key_path):
-                 server_pub_key = subprocess.check_output(
-                     f"wg pubkey < {key_path}", shell=True, text=True
-                 ).strip()
-             else:
-                 server_pub_key = "SERVER_PUBLIC_KEY_NOT_FOUND"
-        else:
-             with open(key_path, 'r') as f:
-                 server_pub_key = f.read().strip()
-    except:
-        server_pub_key = "SERVER_PUBLIC_KEY_ERROR"
+    # Get PresharedKey
+    psk = getattr(user, 'wireguard_preshared_key', None)
 
-    # Get server IP
-    try:
-        import requests
-        server_ip = requests.get('https://api.ipify.org', timeout=2).text
-    except:
-        server_ip = "YOUR_SERVER_IP"
-        
-    config_content = wg_service.generate_client_config(
+    # Generate config using new service (reads all settings from DB)
+    config_content = wireguard_service.generate_client_config(
         client_private_key=user.wireguard_private_key,
         client_ip=user.wireguard_ip,
-        server_public_key=server_pub_key,
-        server_endpoint=server_ip,
-        server_port=51820 
+        preshared_key=psk,
     )
+
+    # Generate QR code
+    qr_code = wireguard_service.generate_qr_code(config_content)
     
     return {
         "filename": f"{user.username}.conf",
-        "content": config_content
+        "content": config_content,
+        "qr_code": qr_code,
     }
