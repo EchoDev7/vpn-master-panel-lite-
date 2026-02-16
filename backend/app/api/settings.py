@@ -43,7 +43,6 @@ async def update_settings(
             setting.value = value
         else:
             # Create if not exists (auto-register)
-            # Determine category based on key prefix
             category = "general"
             if key.startswith("ovpn_"): category = "openvpn"
             elif key.startswith("wg_"): category = "wireguard"
@@ -57,27 +56,93 @@ async def update_settings(
 # Initialize default settings
 def init_default_settings(db: Session):
     defaults = {
-        # OpenVPN
-        "ovpn_port": "1194",
-        "ovpn_protocol": "udp", # udp, tcp, both
+        # =============================================
+        # OpenVPN — Iran Anti-Censorship Defaults
+        # =============================================
+
+        # Network
+        "ovpn_protocol": "tcp",
+        "ovpn_port": "443",
+        "ovpn_mtu": "1400",
+        "ovpn_topology": "subnet",
+        "ovpn_float": "1",
+        "ovpn_server_subnet": "10.8.0.0",
+        "ovpn_server_netmask": "255.255.255.0",
+        "ovpn_max_clients": "100",
+        "ovpn_duplicate_cn": "1",
+
+        # Security & Encryption
+        "ovpn_data_ciphers": "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
+        "ovpn_data_ciphers_fallback": "AES-256-GCM",
+        "ovpn_auth_digest": "SHA256",
+        "ovpn_tls_version_min": "1.2",
+        "ovpn_tls_ciphers": "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
+        "ovpn_tls_cipher_suites": "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
+        "ovpn_reneg_sec": "3600",
+
+        # TLS Control Channel
+        "ovpn_tls_control_channel": "tls-crypt",
+
+        # Anti-Censorship
+        "ovpn_scramble": "1",
+        "ovpn_scramble_password": "vpnmaster",
+        "ovpn_fragment": "0",
+        "ovpn_port_share": "",
+
+        # Routing & DNS
+        "ovpn_redirect_gateway": "1",
         "ovpn_dns": "1.1.1.1,8.8.8.8",
-        "ovpn_scramble": "0", # 0=disabled, 1=enabled (xor)
-        "ovpn_mtu": "1500",
-        
+        "ovpn_block_outside_dns": "1",
+        "ovpn_inter_client": "0",
+
+        # Connection
+        "ovpn_keepalive_interval": "10",
+        "ovpn_keepalive_timeout": "60",
+        "ovpn_connect_retry": "5",
+        "ovpn_connect_retry_max": "0",
+        "ovpn_server_poll_timeout": "10",
+        "ovpn_verb": "3",
+        "ovpn_compression": "none",
+
+        # Proxy
+        "ovpn_proxy_type": "none",
+        "ovpn_proxy_address": "",
+        "ovpn_proxy_port": "",
+
+        # Multi-Remote
+        "ovpn_remote_servers": "",
+
+        # Advanced
+        "ovpn_custom_client_config": "",
+        "ovpn_custom_server_config": "",
+        "ovpn_server_ip": "",
+
+        # =============================================
         # WireGuard
+        # =============================================
         "wg_port": "51820",
         "wg_dns": "1.1.1.1,8.8.8.8",
-        "wg_mtu": "1420", # Optimized for Iran
-        "wg_endpoint_ip": "", # Empty = auto-detect
-        
+        "wg_mtu": "1420",
+        "wg_endpoint_ip": "",
+
+        # =============================================
         # General
-        "admin_contact": ""
+        # =============================================
+        "admin_contact": "",
     }
     
     for key, value in defaults.items():
         if not db.query(Setting).filter(Setting.key == key).first():
-            db.add(Setting(key=key, value=value, category="general"))
+            category = "general"
+            if key.startswith("ovpn_"): category = "openvpn"
+            elif key.startswith("wg_"): category = "wireguard"
+            db.add(Setting(key=key, value=value, category=category))
     db.commit()
+
+
+# =============================================
+# PKI Management
+# =============================================
 
 @router.post("/pki/regenerate", status_code=status.HTTP_200_OK)
 async def regenerate_pki(
@@ -88,5 +153,72 @@ async def regenerate_pki(
     try:
         openvpn_service.regenerate_pki()
         return {"message": "PKI regenerated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/pki/info")
+async def get_pki_info(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Get CA certificate information"""
+    from ..services.openvpn import openvpn_service
+    return openvpn_service.get_ca_info()
+
+
+# =============================================
+# Server Config Preview & Apply
+# =============================================
+
+@router.get("/server-config/preview")
+async def preview_server_config(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Preview the generated OpenVPN server.conf"""
+    from ..services.openvpn import openvpn_service
+    try:
+        config = openvpn_service.generate_server_config()
+        return {"content": config, "filename": "server.conf"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/server-config/apply")
+async def apply_server_config(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Generate and write server.conf to /etc/openvpn/server.conf"""
+    from ..services.openvpn import openvpn_service
+    import os
+    
+    try:
+        config = openvpn_service.generate_server_config()
+        
+        # Write to standard OpenVPN location
+        config_path = "/etc/openvpn/server.conf"
+        
+        # Also save a copy in our data dir
+        backup_path = os.path.join(openvpn_service.DATA_DIR, "server.conf")
+        os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+        
+        with open(backup_path, "w") as f:
+            f.write(config)
+        
+        # Try to write to system path (may need root)
+        try:
+            with open(config_path, "w") as f:
+                f.write(config)
+            system_written = True
+        except PermissionError:
+            system_written = False
+        
+        return {
+            "message": "Server config generated",
+            "system_path": config_path if system_written else None,
+            "backup_path": backup_path,
+            "system_written": system_written,
+            "hint": "Run 'sudo systemctl restart openvpn@server' to apply" if system_written else 
+                    f"Copy manually: sudo cp {backup_path} {config_path} && sudo systemctl restart openvpn@server"
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
