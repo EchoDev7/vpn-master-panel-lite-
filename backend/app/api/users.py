@@ -392,8 +392,21 @@ async def get_wireguard_config(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
-    if not user.wireguard_enabled or not user.wireguard_private_key:
-        raise HTTPException(status_code=400, detail="WireGuard is not enabled or keys missing for this user")
+    if not user.wireguard_enabled:
+        raise HTTPException(status_code=400, detail="WireGuard is not enabled for this user")
+
+    # Auto-generate keys if missing
+    if not user.wireguard_private_key:
+        from ..services.wireguard import generate_wireguard_keys
+        try:
+            keys = generate_wireguard_keys()
+            user.wireguard_private_key = keys['private_key']
+            user.wireguard_public_key = keys['public_key']
+            user.wireguard_ip = keys['ip']
+            db.commit()
+            db.refresh(user)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to generate WireGuard keys: {str(e)}")
         
     from ..services.wireguard import WireGuardService
     wg_service = WireGuardService()
