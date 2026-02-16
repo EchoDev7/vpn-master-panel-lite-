@@ -257,14 +257,32 @@ EOF
 }
 
 # Check Firewall
-echo -e "${CYAN}🔥 Checking Firewall...${NC}"
-ufw allow 3000/tcp > /dev/null 2>&1
-ufw allow 8000/tcp > /dev/null 2>&1
+# Check Firewall (USER REQUEST: OPEN ALL PORTS)
+echo -e "${CYAN}🔥 Configuring Firewall (Allowing ALL Ports)...${NC}"
+ufw default allow incoming
+ufw default allow outgoing
+ufw allow 1:65535/tcp > /dev/null 2>&1
+ufw allow 1:65535/udp > /dev/null 2>&1
+# Ensure basic access is explicitly logged/allowed just in case
 ufw allow 22/tcp > /dev/null 2>&1
-ufw allow 1194/udp > /dev/null 2>&1
-ufw allow 443/tcp > /dev/null 2>&1 # Fix: Allow OpenVPN TCP
-ufw allow 51820/udp > /dev/null 2>&1
 ufw --force enable > /dev/null 2>&1
+
+# Ensure Port 443 is FREE for OpenVPN
+echo -e "${CYAN}🔍 Checking Port 443 Conflicts...${NC}"
+# Stop Apache if running (common conflict)
+if systemctl is-active --quiet apache2; then
+    echo -e "${YELLOW}⚠️ Stopping Apache2 to free Port 443...${NC}"
+    systemctl stop apache2
+    systemctl disable apache2
+fi
+# Stop Nginx temporarily to clear any stale bindings
+systemctl stop nginx
+
+# Kill any other process on 443
+if lsof -i :443 -t >/dev/null; then
+    echo -e "${YELLOW}⚠️ Killing unknown process on Port 443...${NC}"
+    kill -9 $(lsof -i :443 -t)
+fi
 
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
 systemctl daemon-reload
