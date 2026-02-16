@@ -1,12 +1,14 @@
 """
 VPN Master Panel - FastAPI Main Application
 """
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
+import asyncio
+import json
 from typing import Dict, Any
 
 from .config import settings
@@ -43,6 +45,11 @@ async def lifespan(app: FastAPI):
         shield_manager = PersianShieldManager()
         shield_manager.start_monitoring()
         app.state.shield_manager = shield_manager
+        
+        # Start WebSocket heartbeat
+        from .websocket.manager import start_heartbeat
+        asyncio.create_task(start_heartbeat())
+        logger.info("✅ WebSocket heartbeat started")
         
         logger.info("✅ VPN Master Panel started successfully")
         
@@ -154,6 +161,50 @@ async def general_exception_handler(request, exc):
             "detail": str(exc) if settings.DEBUG else "An error occurred"
         }
     )
+
+
+# WebSocket endpoint
+@app.websocket("/ws/{token}")
+async def websocket_endpoint(websocket: WebSocket, token: str):
+    """WebSocket endpoint for real-time updates"""
+    from .websocket.manager import manager
+    from .websocket.handlers import WebSocketHandler
+    from .utils.security import decode_access_token
+    
+    try:
+        # Verify token
+        payload = decode_access_token(token)
+        if not payload:
+            await websocket.close(code=1008, reason="Invalid token")
+            return
+            
+        user_id = payload.get("sub")
+        is_admin = payload.get("is_admin", False)
+        
+        # Connect
+        await manager.connect(websocket, user_id, is_admin)
+        
+        try:
+            while True:
+                # Receive messages from client
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                # Handle message
+                await WebSocketHandler.handle_message(websocket, message)
+                
+        except WebSocketDisconnect:
+            manager.disconnect(websocket)
+        except Exception as e:
+            logger.error(f"WebSocket error: {e}")
+            manager.disconnect(websocket)
+            
+    except Exception as e:
+        logger.error(f"WebSocket connection error: {e}")
+        try:
+            await websocket.close(code=1011, reason="Internal error")
+        except:
+            pass
 
 
 # Import and include routers
