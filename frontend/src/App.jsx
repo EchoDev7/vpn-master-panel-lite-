@@ -4,6 +4,8 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
 import Dashboard from './components/Dashboard'
 import Users from './components/Users'
 import Settings from './components/Settings'
+import Tunnels from './components/Tunnels'
+import Servers from './components/Servers'
 // ... inside Routes
 <Route path="/users" element={<Users />} />
 
@@ -71,7 +73,8 @@ function MainLayout() {
             <main className="container mx-auto px-4 py-8">
                 <Routes>
                     <Route path="/" element={<Dashboard />} />
-                    <Route path="/servers" element={<ComingSoon title="Servers Management" />} />
+                    <Route path="/servers" element={<Servers />} />
+                    <Route path="/tunnels" element={<Tunnels />} />
                     <Route path="/users" element={<Users />} />
                     <Route path="/settings" element={<Settings />} />
                 </Routes>
