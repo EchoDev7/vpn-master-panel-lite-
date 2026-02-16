@@ -1,0 +1,46 @@
+[Unit]
+Description=VPN Master Panel Backend API
+Documentation=https://github.com/EchoDev7/vpn-master-panel-lite
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/vpn-master-panel/backend
+Environment="PATH=/opt/vpn-master-panel/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# Main command
+ExecStart=/opt/vpn-master-panel/backend/venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8001 \
+    --workers 1 \
+    --limit-concurrency 100 \
+    --timeout-keep-alive 30
+
+# Health check
+ExecStartPost=/bin/sleep 3
+
+# Restart policy - CRITICAL for auto-recovery
+Restart=always
+RestartSec=10
+StartLimitInterval=200
+StartLimitBurst=5
+
+# Resource limits (optimized for 1GB RAM server)
+MemoryMax=400M
+MemoryHigh=350M
+CPUQuota=80%
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vpnmaster-backend
+
+[Install]
+WantedBy=multi-user.target
