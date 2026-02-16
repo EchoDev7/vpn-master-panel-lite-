@@ -89,29 +89,76 @@ def init_db():
 
 
 def _run_migrations():
-    """Add new columns to existing tables (safe to run multiple times)"""
-    from sqlalchemy import text, inspect
-    
-    inspector = inspect(engine)
-    
-    # Check if 'users' table exists
-    if 'users' not in inspector.get_table_names():
-        return
-    
-    existing_columns = [col['name'] for col in inspector.get_columns('users')]
-    
-    migrations = [
-        ("wireguard_preshared_key", "VARCHAR(255)"),
-    ]
-    
+    """
+    Auto-migrate: compare SQLAlchemy model columns with actual DB columns
+    and safely ADD any missing columns. This ensures updates NEVER require
+    deleting the database, preserving admin credentials and user data.
+    """
+    from sqlalchemy import text, inspect as sa_inspect
+
+    inspector = sa_inspect(engine)
+    existing_tables = inspector.get_table_names()
+
+    if not existing_tables:
+        return  # Fresh database, create_all handled it
+
+    # SQLAlchemy type -> SQLite type mapping
+    type_map = {
+        'INTEGER': 'INTEGER',
+        'VARCHAR': 'VARCHAR(255)',
+        'STRING': 'VARCHAR(255)',
+        'TEXT': 'TEXT',
+        'BOOLEAN': 'BOOLEAN',
+        'FLOAT': 'FLOAT',
+        'DATETIME': 'DATETIME',
+        'JSON': 'JSON',
+        'ENUM': 'VARCHAR(50)',
+    }
+
+    def get_sqlite_type(col):
+        type_name = type(col.type).__name__.upper()
+        if type_name in type_map:
+            return type_map[type_name]
+        if hasattr(col.type, 'length') and col.type.length:
+            return f"VARCHAR({col.type.length})"
+        return 'TEXT'
+
     with engine.begin() as conn:
-        for col_name, col_type in migrations:
-            if col_name not in existing_columns:
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                # New table — create_all should have handled it, but try anyway
                 try:
-                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
-                    logger.info(f"✅ Migration: added column '{col_name}' to users table")
+                    table.create(bind=engine, checkfirst=True)
+                    logger.info(f"✅ Migration: created table '{table.name}'")
                 except Exception as e:
-                    logger.warning(f"Migration skip: {col_name} — {e}")
+                    logger.warning(f"Migration skip table '{table.name}': {e}")
+                continue
+
+            # Compare columns
+            existing_cols = {col['name'] for col in inspector.get_columns(table.name)}
+
+            for col in table.columns:
+                if col.name not in existing_cols:
+                    col_type = get_sqlite_type(col)
+                    default = ""
+                    if col.default is not None:
+                        try:
+                            val = col.default.arg
+                            if isinstance(val, bool):
+                                default = f" DEFAULT {1 if val else 0}"
+                            elif isinstance(val, (int, float)):
+                                default = f" DEFAULT {val}"
+                            elif isinstance(val, str):
+                                default = f" DEFAULT '{val}'"
+                        except Exception:
+                            pass
+
+                    try:
+                        sql = f"ALTER TABLE {table.name} ADD COLUMN {col.name} {col_type}{default}"
+                        conn.execute(text(sql))
+                        logger.info(f"✅ Migration: added column '{col.name}' to '{table.name}'")
+                    except Exception as e:
+                        logger.warning(f"Migration skip {table.name}.{col.name}: {e}")
 
 
 def drop_db():
