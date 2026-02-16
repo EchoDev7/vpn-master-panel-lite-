@@ -117,6 +117,16 @@ def init_default_settings(db: Session):
         "ovpn_custom_server_config": "",
         "ovpn_server_ip": "",
 
+        # OpenVPN Anti-Censorship Extras
+        "ovpn_sni_spoof_enabled": "0",
+        "ovpn_sni_spoof_domain": "www.google.com",
+        "ovpn_ssh_tunnel_enabled": "0",
+        "ovpn_ssh_tunnel_host": "",
+        "ovpn_ssh_tunnel_port": "22",
+        "ovpn_cdn_routing_enabled": "0",
+        "ovpn_cdn_domain": "",
+        "ovpn_block_iran_ips": "0",
+
         # =============================================
         # WireGuard — Iran Anti-Censorship Defaults
         # =============================================
@@ -150,6 +160,11 @@ def init_default_settings(db: Session):
         "wg_obfuscation_port": "443",
         "wg_obfuscation_domain": "",
 
+        # WARP Integration
+        "wg_warp_enabled": "0",
+        "wg_warp_mode": "proxy",
+        "wg_block_iran_ips": "0",
+
         # Server
         "wg_endpoint_ip": "",
 
@@ -158,9 +173,40 @@ def init_default_settings(db: Session):
         "wg_custom_server_config": "",
 
         # =============================================
-        # General
+        # General — Panel Features
         # =============================================
         "admin_contact": "",
+
+        # Subscription Links (3x-ui/Marzban/Hiddify-style)
+        "subscription_enabled": "0",
+        "subscription_base_url": "",
+        "subscription_format": "v2ray",
+        "subscription_update_interval": "24",
+        "config_export_qr": "1",
+        "config_export_uri": "1",
+
+        # Telegram Bot Integration
+        "telegram_enabled": "0",
+        "telegram_bot_token": "",
+        "telegram_admin_chat_id": "",
+        "telegram_notify_user_created": "1",
+        "telegram_notify_user_expired": "1",
+        "telegram_notify_traffic_warning": "1",
+        "telegram_notify_server_down": "1",
+        "telegram_auto_backup": "0",
+
+        # Smart Proxy (Hiddify-style)
+        "smart_proxy_enabled": "0",
+        "smart_proxy_mode": "bypass_iran",
+        "smart_proxy_bypass_domains": "",
+        "smart_proxy_bypass_ips": "",
+
+        # Periodic Traffic Limits (Marzban-style)
+        "periodic_traffic_enabled": "0",
+        "periodic_traffic_type": "monthly",
+        "periodic_traffic_reset_day": "1",
+        "traffic_exceed_action": "suspend",
+        "traffic_warning_percent": "80",
     }
     
     for key, value in defaults.items():
