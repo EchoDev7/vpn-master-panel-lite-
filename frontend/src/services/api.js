@@ -91,6 +91,14 @@ class APIService {
     return this.client.delete(`/users/${userId}`);
   }
 
+  async getUserConfigOpenVPN(userId) {
+    return this.client.get(`/users/${userId}/config/openvpn`);
+  }
+
+  async getUserConfigWireGuard(userId) {
+    return this.client.get(`/users/${userId}/config/wireguard`);
+  }
+
   // Servers
   async getServers() {
     return this.client.get('/servers/');

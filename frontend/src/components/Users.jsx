@@ -95,6 +95,43 @@ const Users = () => {
         }
     };
 
+    const [showConfigModal, setShowConfigModal] = useState(false);
+    const [selectedConfigUser, setSelectedConfigUser] = useState(null);
+    const [configType, setConfigType] = useState('openvpn');
+    const [configContent, setConfigContent] = useState(null);
+    const [configLoading, setConfigLoading] = useState(false);
+
+    const handleOpenConfig = (user) => {
+        setSelectedConfigUser(user);
+        setShowConfigModal(true);
+        setConfigContent(null);
+        setConfigType('openvpn');
+        loadConfig(user.id, 'openvpn');
+    };
+
+    const loadConfig = async (userId, type) => {
+        try {
+            setConfigLoading(true);
+            setConfigType(type);
+            setConfigContent(null);
+
+            let response;
+            if (type === 'openvpn') {
+                response = await apiService.getUserConfigOpenVPN(userId);
+            } else {
+                response = await apiService.getUserConfigWireGuard(userId);
+            }
+
+            setConfigContent(response.data);
+        } catch (error) {
+            console.error('Failed to load config:', error);
+            // Don't alert immediately, user sees empty state or we can show small error text
+            setConfigContent({ content: `Error loading config: ${error.response?.data?.detail || error.message}`, filename: 'error.txt' });
+        } finally {
+            setConfigLoading(false);
+        }
+    };
+
     const handleDelete = async (userId) => {
         if (window.confirm('Are you sure you want to delete this user?')) {
             try {
@@ -155,10 +192,13 @@ const Users = () => {
                                     {user.expiry_date ? new Date(user.expiry_date).toLocaleDateString() : 'Never'}
                                 </td>
                                 <td className="p-4 text-right space-x-2">
-                                    <button onClick={() => handleOpenEdit(user)} className="text-blue-400 hover:text-blue-300 p-1">
+                                    <button onClick={() => handleOpenEdit(user)} className="text-blue-400 hover:text-blue-300 p-1" title="Edit">
                                         Edit
                                     </button>
-                                    <button onClick={() => handleDelete(user.id)} className="text-red-400 hover:text-red-300 p-1">
+                                    <button onClick={() => handleOpenConfig(user)} className="text-yellow-400 hover:text-yellow-300 p-1" title="Configuration">
+                                        <Key size={18} />
+                                    </button>
+                                    <button onClick={() => handleDelete(user.id)} className="text-red-400 hover:text-red-300 p-1" title="Delete">
                                         <Trash2 size={18} />
                                     </button>
                                 </td>
@@ -276,6 +316,79 @@ const Users = () => {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+            {/* Config Modal */}
+            {showConfigModal && selectedConfigUser && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+                    <div className="bg-gray-800 rounded-xl p-6 w-full max-w-2xl border border-gray-700 shadow-2xl h-[80vh] flex flex-col">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                <Key className="text-yellow-500" /> Configuration: {selectedConfigUser.username}
+                            </h3>
+                            <button onClick={() => setShowConfigModal(false)} className="text-gray-400 hover:text-white">
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2 mb-4">
+                            <button
+                                onClick={() => loadConfig(selectedConfigUser.id, 'openvpn')}
+                                className={`px-4 py-2 rounded-lg flex-1 font-medium ${configType === 'openvpn' ? 'bg-primary-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                            >
+                                OpenVPN
+                            </button>
+                            <button
+                                onClick={() => loadConfig(selectedConfigUser.id, 'wireguard')}
+                                className={`px-4 py-2 rounded-lg flex-1 font-medium ${configType === 'wireguard' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                            >
+                                WireGuard
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-hidden bg-gray-900 rounded-lg border border-gray-700 relative">
+                            {configLoading ? (
+                                <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+                                    Loading configuration...
+                                </div>
+                            ) : configContent ? (
+                                <textarea
+                                    readOnly
+                                    value={configContent.content}
+                                    className="w-full h-full bg-transparent text-gray-300 p-4 font-mono text-xs resize-none focus:outline-none"
+                                />
+                            ) : (
+                                <div className="absolute inset-0 flex items-center justify-center text-gray-500 flex-col gap-2">
+                                    <p>Select a protocol to view config</p>
+                                    <p className="text-xs">Ensure the protocol is enabled for this user</p>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="mt-4 flex justify-end gap-3">
+                            <button
+                                onClick={() => {
+                                    if (!configContent) return;
+                                    const blob = new Blob([configContent.content], { type: 'text/plain' });
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = configContent.filename;
+                                    a.click();
+                                }}
+                                disabled={!configContent}
+                                className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 ${configContent ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
+                            >
+                                Download File
+                            </button>
+                            <button
+                                onClick={() => setShowConfigModal(false)}
+                                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg"
+                            >
+                                Close
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
