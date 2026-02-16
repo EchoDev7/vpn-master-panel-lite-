@@ -36,6 +36,29 @@ async def lifespan(app: FastAPI):
         init_db()
         logger.info("✅ Database initialized")
 
+        # Auto-Heal: Ensure OpenVPN Config & PKI (Added by Fix)
+        try:
+            from .services.openvpn import OpenVPNService
+            service = OpenVPNService()
+            
+            logger.info("🔐 Checking/Generating OpenVPN PKI...")
+            service._ensure_pki()
+            
+            logger.info("🔧 Checking/Generating OpenVPN Server Config...")
+            config_content = service.generate_server_config()
+            
+            # Write config to default location
+            config_path = "/etc/openvpn/server.conf"
+            try:
+                with open(config_path, "w") as f:
+                    f.write(config_content)
+                logger.info(f"✅ Server config written to {config_path}")
+            except (FileNotFoundError, PermissionError) as e:
+                 logger.warning(f"⚠️ Could not write to {config_path}: {e}")
+
+        except Exception as e:
+            logger.error(f"❌ OpenVPN Initialization Failed: {e}")
+
         # Create initial admin user if not exists
         from .utils.security import create_initial_admin
         create_initial_admin()
