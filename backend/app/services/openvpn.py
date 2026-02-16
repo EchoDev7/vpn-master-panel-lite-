@@ -23,10 +23,28 @@ class OpenVPNService:
         self.server_ip = self._get_public_ip()
         
     def _get_public_ip(self) -> str:
-        """Get server public IP"""
+        """Get server public IP with multiple fallbacks"""
+        import socket
         try:
             import requests
-            return requests.get('https://api.ipify.org', timeout=2).text
+            # Try primary provider
+            try:
+                return requests.get('https://api.ipify.org', timeout=3).text.strip()
+            except:
+                pass
+            
+            # Try secondary provider
+            try:
+                return requests.get('https://checkip.amazonaws.com', timeout=3).text.strip()
+            except:
+                pass
+
+            # Fallback to local socket (best guess for private IP/NAT)
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            return local_ip
         except:
             return "YOUR_SERVER_IP" 
 
@@ -66,10 +84,6 @@ class OpenVPNService:
         """
         self._ensure_pki()
         
-        # Determine Server IP
-        if not server_ip:
-            server_ip = self.server_ip
-        
         # Read Certs (Only CA Cert, NOT Key)
         ca_cert = self._read_file(self.CA_PATH)
         tls_auth = self._read_file(self.TA_PATH)
@@ -84,6 +98,7 @@ class OpenVPNService:
             "scramble": "0",
             "mtu": "1500",
             "data_ciphers": "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
+            "data_ciphers_fallback": "AES-256-GCM",
             "tls_ciphers": "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
             "auth_digest": "SHA256",
             "tls_version_min": "1.2",
@@ -99,7 +114,6 @@ class OpenVPNService:
             "custom_config": ""
         }
         
-        
         with get_db_context() as db:
             all_settings = db.query(Setting).all()
             for s in all_settings:
@@ -108,9 +122,15 @@ class OpenVPNService:
                     if key in settings_map:
                         settings_map[key] = s.value
 
-            # Override server_ip if set in Global Settings
+            # Determine Server IP
+            # 1. Check override setting 'wg_endpoint_ip' (or a specific ovpn ip if we had one)
             s_ip = db.query(Setting).filter(Setting.key == "wg_endpoint_ip").first()
-            if s_ip and s_ip.value: server_ip = s_ip.value
+            if s_ip and s_ip.value and s_ip.value.strip():
+                server_ip = s_ip.value.strip()
+            
+        # 2. If no setting or passed arg, use detected IP
+        if not server_ip:
+            server_ip = self.server_ip
 
         # Logic for Final Variables
         final_protocol = protocol if protocol else settings_map["protocol"]
@@ -145,17 +165,18 @@ topology {settings_map['topology']}
 # Security
 auth {settings_map["auth_digest"]}
 data-ciphers {settings_map["data_ciphers"]}
-data-ciphers-fallback AES-256-GCM
+data-ciphers-fallback {settings_map.get('data_ciphers_fallback', 'AES-256-GCM')}
 tls-version-min {settings_map["tls_version_min"]}
 tls-client
 """
         if settings_map["compression"] != "none":
              config += f"compress {settings_map['compression']}\n"
 
-        # DNS Settings (Only if valid)
-        if settings_map.get("dns") and "," in settings_map["dns"]:
-             # Split by comma
-             for dns in settings_map["dns"].split(','):
+        # DNS Settings (Flexible parsing)
+        if settings_map.get("dns"):
+             # Replace commas with spaces, then split
+             dns_entries = settings_map["dns"].replace(',', ' ').split()
+             for dns in dns_entries:
                  if dns.strip():
                      config += f"dhcp-option DNS {dns.strip()}\n"
         
@@ -220,13 +241,18 @@ auth-user-pass
             
             # Ensure parent data directory exists
             os.makedirs(self.DATA_DIR, exist_ok=True)
-
-            # Backup existing
-            if os.path.exists(self.CA_PATH):
-                shutil.copy(self.CA_PATH, f"{self.CA_PATH}.bak")
             
+            # FORCE REMOVE existing files to ensure no pollution
+            for f in [self.CA_PATH, self.CA_KEY_PATH, self.TA_PATH]:
+                if os.path.exists(f):
+                    try:
+                        os.remove(f)
+                    except Exception as rm_err:
+                        logger.warning(f"Could not remove old file {f}: {rm_err}")
+
             # 1. Generate CA and Key
-            # CHANGED: Separate -out (cert) and -keyout (private key)
+            # We use openssl req ... -keyout ... -out ...
+            # -nodes ensures the key is not encrypted with a password
             subprocess.run(
                 f"openssl req -new -x509 -days 3650 -nodes -text -out {self.CA_PATH} -keyout {self.CA_KEY_PATH} -subj '/CN=VPN-Master-Root-CA'",
                 shell=True, check=True
