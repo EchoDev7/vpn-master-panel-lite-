@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Activity, TrendingUp, Server, UserPlus, Settings as SettingsIcon, Globe, RefreshCw } from 'lucide-react';
+import { Users, Activity, TrendingUp, Server, Shield, UserPlus, Settings as SettingsIcon, Globe, RefreshCw } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import apiService from '../services/api';
 import ActiveConnectionsModal from './ActiveConnectionsModal';
