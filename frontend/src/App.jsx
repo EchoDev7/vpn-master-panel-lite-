@@ -1,6 +1,7 @@
 
 import { useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
+import './i18n/config'; // Import i18n configuration
 import Dashboard from './components/Dashboard'
 import Users from './components/Users'
 import Settings from './components/Settings'
