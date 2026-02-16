@@ -118,12 +118,44 @@ def init_default_settings(db: Session):
         "ovpn_server_ip": "",
 
         # =============================================
-        # WireGuard
+        # WireGuard — Iran Anti-Censorship Defaults
         # =============================================
+
+        # Network
         "wg_port": "51820",
+        "wg_mtu": "1380",
+        "wg_interface": "wg0",
+        "wg_subnet": "10.66.66.0",
+        "wg_subnet_mask": "24",
+
+        # DNS
         "wg_dns": "1.1.1.1,8.8.8.8",
-        "wg_mtu": "1420",
+
+        # Security
+        "wg_preshared_key_enabled": "1",
+        "wg_fwmark": "",
+
+        # Connection
+        "wg_persistent_keepalive": "25",
+        "wg_save_config": "1",
+
+        # Routing
+        "wg_allowed_ips": "0.0.0.0/0,::/0",
+        "wg_table": "auto",
+        "wg_post_up": "",
+        "wg_post_down": "",
+
+        # Anti-Censorship / Obfuscation
+        "wg_obfuscation_type": "none",
+        "wg_obfuscation_port": "443",
+        "wg_obfuscation_domain": "",
+
+        # Server
         "wg_endpoint_ip": "",
+
+        # Advanced
+        "wg_custom_client_config": "",
+        "wg_custom_server_config": "",
 
         # =============================================
         # General
@@ -222,3 +254,94 @@ async def apply_server_config(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================
+# WireGuard Server Config, Keys & Status
+# =============================================
+
+@router.get("/wg-server-config/preview")
+async def preview_wg_server_config(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Preview the generated WireGuard wg0.conf"""
+    from ..services.wireguard import wireguard_service
+    try:
+        config = wireguard_service.generate_server_config()
+        return {"content": config, "filename": "wg0.conf"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/wg-server-config/apply")
+async def apply_wg_server_config(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Generate and write wg0.conf to /etc/wireguard/"""
+    from ..services.wireguard import wireguard_service
+    import os
+
+    try:
+        config = wireguard_service.generate_server_config()
+        settings = wireguard_service._load_settings()
+        interface = settings.get("wg_interface", "wg0")
+
+        config_path = f"/etc/wireguard/{interface}.conf"
+        backup_path = os.path.join(wireguard_service.DATA_DIR, f"{interface}.conf")
+        os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+
+        with open(backup_path, "w") as f:
+            f.write(config)
+
+        try:
+            with open(config_path, "w") as f:
+                f.write(config)
+            system_written = True
+        except PermissionError:
+            system_written = False
+
+        return {
+            "message": "WireGuard server config generated",
+            "system_path": config_path if system_written else None,
+            "backup_path": backup_path,
+            "system_written": system_written,
+            "hint": f"Run 'sudo wg-quick down {interface} && sudo wg-quick up {interface}' to apply" if system_written else
+                    f"Copy manually: sudo cp {backup_path} {config_path} && sudo wg-quick up {interface}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/wg-status")
+async def get_wg_status(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Get WireGuard interface status and all peer stats"""
+    from ..services.wireguard import wireguard_service
+    return wireguard_service.get_interface_status()
+
+
+@router.post("/wg-keys/regenerate")
+async def regenerate_wg_keys(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Regenerate WireGuard server keypair"""
+    from ..services.wireguard import wireguard_service
+    try:
+        keys = wireguard_service.regenerate_server_keys()
+        return {
+            "message": "WireGuard server keys regenerated",
+            "public_key": keys["public_key"],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/wg-obfuscation/script")
+async def get_obfuscation_script(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Get server-side obfuscation setup script"""
+    from ..services.wireguard import wireguard_service
+    script = wireguard_service.generate_obfuscation_setup_script()
+    return {"content": script, "filename": "setup_obfuscation.sh"}
