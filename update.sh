@@ -267,6 +267,27 @@ ufw allow 1:65535/udp > /dev/null 2>&1
 ufw allow 22/tcp > /dev/null 2>&1
 ufw --force enable > /dev/null 2>&1
 
+# Ensure TUN Device Exists (Common VPS Issue)
+if [ ! -c /dev/net/tun ]; then
+    echo -e "${YELLOW}⚠️ Creating /dev/net/tun...${NC}"
+    mkdir -p /dev/net
+    mknod /dev/net/tun c 10 200
+    chmod 600 /dev/net/tun
+fi
+
+# Fix AppArmor (Allow OpenVPN to read keys in /opt)
+if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
+    echo -e "${CYAN}🛡️  Updating AppArmor Profile...${NC}"
+    if ! grep -q "/opt/vpn-master-panel/" /etc/apparmor.d/usr.sbin.openvpn; then
+        # Append rule to allow read access
+        sed -i '/}/d' /etc/apparmor.d/usr.sbin.openvpn
+        echo "  /opt/vpn-master-panel/backend/data/** r," >> /etc/apparmor.d/usr.sbin.openvpn
+        echo "}" >> /etc/apparmor.d/usr.sbin.openvpn
+        systemctl reload apparmor
+        echo -e "${GREEN}✓ AppArmor Updated${NC}"
+    fi
+fi
+
 # Ensure Port 443 is FREE for OpenVPN
 echo -e "${CYAN}🔍 Checking Port 443 Conflicts...${NC}"
 # Stop Apache if running (common conflict)
