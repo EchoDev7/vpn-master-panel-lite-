@@ -9,6 +9,7 @@ import { SkeletonDashboard, SkeletonWidget } from './Skeletons';
 import { ApiErrorState } from './States';
 import RefreshIndicator from './RefreshIndicator';
 import NotificationCenter, { NotificationBell } from './NotificationCenter';
+import useWebSocket from '../hooks/useWebSocket'; // Import WebSocket hook
 
 // Lazy load heavy components for better performance
 const ServerResourcesWidget = lazy(() => import('./ServerResourcesWidget'));
@@ -33,10 +34,28 @@ export const Dashboard = () => {
     const [lastUpdated, setLastUpdated] = useState(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
 
+    // WebSocket Integration
+    const { lastMessage, isConnected } = useWebSocket();
+
+    useEffect(() => {
+        if (lastMessage) {
+            handleWebSocketMessage(lastMessage);
+        }
+    }, [lastMessage]);
+
+    const handleWebSocketMessage = (message) => {
+        if (message.type === 'dashboard_update') {
+            setStats(prevStats => ({ ...prevStats, ...message.data }));
+            setLastUpdated(new Date());
+        } else if (message.type === 'system_stats') {
+            // Handle system stats update if needed
+        }
+    };
 
     useEffect(() => {
         loadDashboardData();
-        const interval = setInterval(loadDashboardData, 30000); // Refresh every 30s
+        // Fallback polling if WebSocket is disconnected (optional, or keep existing interval)
+        const interval = setInterval(loadDashboardData, 30000);
         return () => clearInterval(interval);
     }, [trafficDays]);
 
