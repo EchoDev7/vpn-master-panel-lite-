@@ -115,55 +115,108 @@ class User(Base):
         if limit == 0:  # Unlimited
             return True
         return self.data_usage_gb < limit
+    
+    @property
+    def total_traffic_gb(self) -> float:
+        """Get total traffic in GB"""
+        total_bytes = self.total_upload_bytes + self.total_download_bytes
+        return round(total_bytes / (1024**3), 2)
 
 
 class TrafficLog(Base):
-    """Log VPN traffic for users"""
+    """Traffic log for detailed usage tracking"""
     __tablename__ = "traffic_logs"
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
-    # Traffic data
+    # Traffic details
     upload_bytes = Column(Integer, default=0)
     download_bytes = Column(Integer, default=0)
+    traffic_type = Column(Enum(TrafficType), default=TrafficType.DIRECT)
+    tunnel_id = Column(Integer, ForeignKey("tunnels.id"), nullable=True)
     
-    # Session info
-    protocol = Column(String(20))  # openvpn, wireguard, l2tp, cisco
-    server_id = Column(Integer, ForeignKey("vpn_servers.id"))
-    traffic_type = Column(Enum(TrafficType), default=TrafficType.DIRECT, nullable=False)
-    tunnel_id = Column(Integer, nullable=True)  # Reference to tunnel if traffic_type is TUNNEL
-    
-    # Timestamps
+    # Timestamp
     recorded_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships
     user = relationship("User", back_populates="traffic_logs")
     
     def __repr__(self):
-        return f"<TrafficLog(user_id={self.user_id}, up={self.upload_bytes}, down={self.download_bytes})>"
+        return f"<TrafficLog(user_id={self.user_id}, type='{self.traffic_type}')>"
 
 
 class ConnectionLog(Base):
-    """Log VPN connections"""
+    """Connection log for tracking user sessions"""
     __tablename__ = "connection_logs"
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    protocol = Column(String(20))  # openvpn, wireguard, l2tp, cisco
+    server_id = Column(Integer, ForeignKey("servers.id"))
     
     # Connection details
-    protocol = Column(String(20))
-    server_id = Column(Integer, ForeignKey("vpn_servers.id"))
     client_ip = Column(String(50))
-    virtual_ip = Column(String(50))
+    server_ip = Column(String(50))
+    port = Column(Integer)
     
-    # Status
+    # Session tracking
     connected_at = Column(DateTime(timezone=True), server_default=func.now())
     disconnected_at = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)
+    
+    # Traffic
+    upload_bytes = Column(Integer, default=0)
+    download_bytes = Column(Integer, default=0)
     
     # Relationships
     user = relationship("User", back_populates="connection_logs")
     
     def __repr__(self):
-        return f"<ConnectionLog(user_id={self.user_id}, protocol={self.protocol}, active={self.is_active})>"
+        return f"<ConnectionLog(user_id={self.user_id}, protocol='{self.protocol}')>"
+
+
+class Notification(Base):
+    """Notification model for system alerts"""
+    __tablename__ = "notifications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # None = system-wide
+    
+    # Notification details
+    type = Column(String(20), nullable=False)  # success, info, warning, error
+    title = Column(String(255), nullable=False)
+    message = Column(String(1000), nullable=False)
+    
+    # Status
+    read = Column(Boolean, default=False)
+    
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    read_at = Column(DateTime(timezone=True))
+    
+    def __repr__(self):
+        return f"<Notification(title='{self.title}', type='{self.type}')>"
+
+
+class ActivityLog(Base):
+    """Activity log for audit trail"""
+    __tablename__ = "activity_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Activity details
+    type = Column(String(50), nullable=False)  # user_created, user_deleted, login, etc.
+    description = Column(String(500), nullable=False)
+    
+    # Context
+    ip_address = Column(String(50))
+    user_agent = Column(String(255))
+    metadata = Column(String(1000))  # JSON string for additional data
+    
+    # Timestamp
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    def __repr__(self):
+        return f"<ActivityLog(type='{self.type}', user_id={self.user_id})>"
