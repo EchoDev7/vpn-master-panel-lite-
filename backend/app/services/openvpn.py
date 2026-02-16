@@ -36,10 +36,38 @@ class OpenVPNService:
             logger.error(f"Failed to read {path}: {e}")
             return f"# ERROR READING: {path}"
 
+    def _ensure_pki(self):
+        """Ensure PKI (CA/Cert/Key) exists, generate if missing"""
+        if os.path.exists(self.CA_PATH) and os.path.exists(self.TA_PATH):
+            return
+
+        logger.info("Generating OpenVPN PKI (Self-Signed)...")
+        try:
+            import subprocess
+            
+            # Create directory
+            os.makedirs(os.path.dirname(self.CA_PATH), exist_ok=True)
+            
+            # 1. Generate CA
+            subprocess.run(
+                f"openssl req -new -x509 -days 3650 -nodes -text -out {self.CA_PATH} -keyout {self.CA_PATH} -subj '/CN=VPN-Master-CA'",
+                shell=True, check=True
+            )
+            
+            # 2. Generate TA key
+            subprocess.run(
+                f"openvpn --genkey secret {self.TA_PATH}",
+                shell=True, check=True
+            )
+            
+            logger.info("✅ OpenVPN PKI generated successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to generate PKI: {e}")
+
     def generate_client_config(
         self, 
         username: str, 
-        password: str = None, # Not used in cert-auth (or used for inline logic if implemented)
+        password: str = None, 
         server_ip: str = None, 
         port: int = 1194, 
         protocol: str = "udp"
@@ -47,6 +75,9 @@ class OpenVPNService:
         """
         Generate .ovpn content
         """
+        # Ensure certificates exist
+        self._ensure_pki()
+        
         if not server_ip:
             # Fallback to determining IP, or use a placeholder
             try:
