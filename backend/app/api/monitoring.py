@@ -20,45 +20,76 @@ async def get_dashboard_stats(
     current_admin: User = Depends(get_current_admin)
 ):
     """Get dashboard statistics"""
-    # Total users
-    total_users = db.query(User).count()
-    active_users = db.query(User).filter(User.status == "active").count()
-    
-    # Active connections
-    active_connections = db.query(ConnectionLog).filter(
-        ConnectionLog.is_active == True
-    ).count()
-    
-    # Total traffic (last 24h)
-    day_ago = datetime.utcnow() - timedelta(days=1)
-    traffic_24h = db.query(
-        func.sum(TrafficLog.upload_bytes + TrafficLog.download_bytes)
-    ).filter(
-        TrafficLog.recorded_at >= day_ago
-    ).scalar() or 0
-    
-    # System stats
-    import psutil
-    
-    return {
-        "users": {
-            "total": total_users,
-            "active": active_users
-        },
-        "connections": {
-            "active": active_connections
-        },
-        "traffic": {
-            "bytes_24h": traffic_24h,
-            "gb_24h": round(traffic_24h / (1024**3), 2)
-        },
-        "system": {
-            "cpu_percent": psutil.cpu_percent(interval=1),
-            "memory_percent": psutil.virtual_memory().percent,
-            "disk_percent": psutil.disk_usage('/').percent
-        },
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    try:
+        # Total users
+        total_users = db.query(User).count()
+        active_users = db.query(User).filter(User.status == "active").count()
+        
+        # Active connections
+        try:
+            active_connections = db.query(ConnectionLog).filter(
+                ConnectionLog.is_active == True
+            ).count()
+        except:
+            active_connections = 0
+        
+        # Total traffic (last 24h)
+        try:
+            day_ago = datetime.utcnow() - timedelta(days=1)
+            traffic_24h = db.query(
+                func.sum(TrafficLog.upload_bytes + TrafficLog.download_bytes)
+            ).filter(
+                TrafficLog.recorded_at >= day_ago
+            ).scalar() or 0
+        except:
+            traffic_24h = 0
+        
+        # System stats
+        try:
+            import psutil
+            cpu_percent = psutil.cpu_percent(interval=0.1)  # Reduced interval
+            memory_percent = psutil.virtual_memory().percent
+            disk_percent = psutil.disk_usage('/').percent
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to get system stats: {e}")
+            cpu_percent = 0
+            memory_percent = 0
+            disk_percent = 0
+        
+        return {
+            "users": {
+                "total": total_users,
+                "active": active_users
+            },
+            "connections": {
+                "active": active_connections
+            },
+            "traffic": {
+                "bytes_24h": traffic_24h,
+                "gb_24h": round(traffic_24h / (1024**3), 2)
+            },
+            "system": {
+                "cpu_percent": cpu_percent,
+                "memory_percent": memory_percent,
+                "disk_percent": disk_percent
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Dashboard endpoint error: {e}", exc_info=True)
+        
+        # Return minimal valid data
+        return {
+            "users": {"total": 0, "active": 0},
+            "connections": {"active": 0},
+            "traffic": {"bytes_24h": 0, "gb_24h": 0},
+            "system": {"cpu_percent": 0, "memory_percent": 0, "disk_percent": 0},
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 @router.get("/active-connections")
