@@ -12,6 +12,9 @@ import Login from './components/Login'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 
+import LanguageSwitcher from './components/LanguageSwitcher';
+import SubscriptionPlans from './components/SubscriptionPlans';
+
 function App() {
     return (
         <Router>
@@ -43,9 +46,9 @@ function MainLayout() {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                                 </svg>
                             </div>
-                            <h1 className="text-2xl font-bold text-white">VPN Master Panel</h1>
+                            <h1 className="text-2xl font-bold text-white">VPN Master</h1>
                         </div>
-                        <nav className="flex space-x-6">
+                        <nav className="flex items-center space-x-6">
                             <Link to="/" className="text-gray-300 hover:text-white transition-colors">
                                 Dashboard
                             </Link>
@@ -58,15 +61,21 @@ function MainLayout() {
                             <Link to="/users" className="text-gray-300 hover:text-white transition-colors">
                                 Users
                             </Link>
+                            <Link to="/subscription" className="text-gray-300 hover:text-white transition-colors">
+                                Subscription
+                            </Link>
                             <Link to="/settings" className="text-gray-300 hover:text-white transition-colors">
                                 Settings
                             </Link>
-                            <button onClick={() => {
-                                localStorage.clear();
-                                window.location.href = '/login';
-                            }} className="text-red-400 hover:text-red-300 transition-colors">
-                                Logout
-                            </button>
+                            <div className="border-l border-gray-600 pl-4 flex items-center space-x-4">
+                                <LanguageSwitcher />
+                                <button onClick={() => {
+                                    localStorage.clear();
+                                    window.location.href = '/login';
+                                }} className="text-red-400 hover:text-red-300 transition-colors">
+                                    Logout
+                                </button>
+                            </div>
                         </nav>
                     </div>
                 </div>
@@ -81,6 +90,7 @@ function MainLayout() {
                         <Route path="/servers" element={<Servers />} />
                         <Route path="/tunnels" element={<Tunnels />} />
                         <Route path="/users" element={<Users />} />
+                        <Route path="/subscription" element={<SubscriptionPlans />} />
                         <Route path="/settings" element={<Settings />} />
                     </Routes>
                 </ErrorBoundary>
