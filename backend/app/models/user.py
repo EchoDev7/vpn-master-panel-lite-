@@ -26,6 +26,12 @@ class UserStatus(str, enum.Enum):
     DISABLED = "disabled"
 
 
+class TrafficType(str, enum.Enum):
+    """Traffic type for monitoring"""
+    DIRECT = "direct"      # Direct VPN connection
+    TUNNEL = "tunnel"      # Through Iran-Foreign tunnel
+
+
 class User(Base):
     """User model for authentication and VPN access"""
     __tablename__ = "users"
@@ -125,6 +131,8 @@ class TrafficLog(Base):
     # Session info
     protocol = Column(String(20))  # openvpn, wireguard, l2tp, cisco
     server_id = Column(Integer, ForeignKey("vpn_servers.id"))
+    traffic_type = Column(Enum(TrafficType), default=TrafficType.DIRECT, nullable=False)
+    tunnel_id = Column(Integer, nullable=True)  # Reference to tunnel if traffic_type is TUNNEL
     
     # Timestamps
     recorded_at = Column(DateTime(timezone=True), server_default=func.now())
