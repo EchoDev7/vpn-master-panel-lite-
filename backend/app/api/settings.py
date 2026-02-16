@@ -78,3 +78,15 @@ def init_default_settings(db: Session):
         if not db.query(Setting).filter(Setting.key == key).first():
             db.add(Setting(key=key, value=value, category="general"))
     db.commit()
+
+@router.post("/pki/regenerate", status_code=status.HTTP_200_OK)
+async def regenerate_pki(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Regenerate OpenVPN CA and Server Certificates"""
+    from ..services.openvpn import openvpn_service
+    try:
+        openvpn_service.regenerate_pki()
+        return {"message": "PKI regenerated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

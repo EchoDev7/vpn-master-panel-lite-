@@ -143,6 +143,10 @@ class APIService {
     return this.client.post('/settings/', settings);
   }
 
+  async regeneratePKI() {
+    return this.client.post('/settings/pki/regenerate');
+  }
+
   // Generic methods
   async get(url, config = {}) {
     return this.client.get(url, config);

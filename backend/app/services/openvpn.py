@@ -94,36 +94,38 @@ class OpenVPNService:
         from ..database import get_db_context
         from ..models.setting import Setting
         
-        protocol_setting = "udp"
-        scramble = "0"
-        mtu = "1500"
+        # Default Settings (Modern OpenVPN 2.4+)
+        settings_map = {
+            "protocol": "udp",
+            "port": "1194",
+            "scramble": "0",
+            "mtu": "1500",
+            "data_ciphers": "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
+            "tls_ciphers": "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
+            "auth_digest": "SHA256",
+            "tls_version_min": "1.2",
+            "compression": "none" # lz4-v2, comp-lzo
+        }
         
         with get_db_context() as db:
-            s_proto = db.query(Setting).filter(Setting.key == "ovpn_protocol").first()
-            if s_proto: protocol_setting = s_proto.value
-            
-            s_scramble = db.query(Setting).filter(Setting.key == "ovpn_scramble").first()
-            if s_scramble: scramble = s_scramble.value
-            
-            s_mtu = db.query(Setting).filter(Setting.key == "ovpn_mtu").first()
-            if s_mtu: mtu = s_mtu.value
+            all_settings = db.query(Setting).all()
+            for s in all_settings:
+                if s.key.startswith("ovpn_"):
+                    key = s.key.replace("ovpn_", "")
+                    if key in settings_map:
+                        settings_map[key] = s.value
 
             # Override server_ip if set in settings
             s_ip = db.query(Setting).filter(Setting.key == "wg_endpoint_ip").first() # Reuse endpoint ip setting
             if s_ip and s_ip.value: server_ip = s_ip.value
 
         # Determine protocol
-        # If 'both' is selected, we default to the requested one, or UDP if not specified
-        final_protocol = protocol if protocol else ("udp" if protocol_setting == "both" else protocol_setting)
+        final_protocol = protocol if protocol else ("udp" if settings_map["protocol"] == "both" else settings_map["protocol"])
         
-        # Adjust port based on protocol (standard logic: 1194 UDP, 443 TCP commonly used)
-        final_port = port
-        if final_protocol == "tcp" and port == 1194:
-            # If default UDP port was passed but we want TCP, maybe use 443 or user setting?
-            # For now keep 1194 or let settings dictate. ideally we need ovpn_tcp_port and ovpn_udp_port
-            pass 
+        # Adjust port logic if needed (e.g. separate ports for tcp/udp)
+        final_port = settings_map["port"] # simplified for now
 
-        # Base Configuration Template with Best Practices
+        # Base Configuration Template (OpenVPN 2.4/2.5/2.6 Compatible)
         config = f"""client
 dev tun
 proto {final_protocol}
@@ -133,23 +135,36 @@ nobind
 persist-key
 persist-tun
 remote-cert-tls server
-auth SHA256
-cipher AES-256-GCM
+
+# Modern Security Settings
+auth {settings_map["auth_digest"]}
+data-ciphers {settings_map["data_ciphers"]}
+data-ciphers-fallback AES-256-GCM
+tls-version-min {settings_map["tls_version_min"]}
+tls-client
+
+# Compression
+"""
+        if settings_map["compression"] != "none":
+             config += f"compress {settings_map['compression']}\n"
+        
+        config += f"""
+# Anti-Censorship & Optimization
 ignore-unknown-option block-outside-dns
 block-outside-dns
 verb 3
 key-direction 1
-tun-mtu {mtu}
-mssfix {int(mtu) - 40}
+tun-mtu {settings_map['mtu']}
+mssfix {int(settings_map['mtu']) - 40}
 """
 
         # Add Scramble/Obfuscation
-        if scramble == "1":
+        if settings_map["scramble"] == "1":
             config += """
 scramble obfuscate "vpnmaster"
 """
 
-        # User Credentials
+        # User Credentials (User/Pass Auth Only - No Client Certs)
         config += """
 # User Credentials
 auth-user-pass
@@ -168,6 +183,41 @@ auth-user-pass
 """
         
         return config
+
+    def regenerate_pki(self):
+        """Regenerate CA and Server Certificates"""
+        logger.info("Regenerating OpenVPN PKI...")
+        try:
+            import subprocess
+            import shutil
+            
+            # Backup existing
+            if os.path.exists(self.CA_PATH):
+                shutil.copy(self.CA_PATH, f"{self.CA_PATH}.bak")
+            
+            # Ensure dir
+            os.makedirs(os.path.dirname(self.CA_PATH), exist_ok=True)
+            
+            # 1. Generate CA
+            # In a real env, we might want to separate CA and Server Cert, but for 'Lite' single-server
+            # we often use the CA cert as the "root" to verify the server (which is self-signed or issued by this CA).
+            # Here we follow a simple self-signed CA approach valid for 10 years.
+            
+            subprocess.run(
+                f"openssl req -new -x509 -days 3650 -nodes -text -out {self.CA_PATH} -keyout {self.CA_PATH} -subj '/CN=VPN-Master-Root-CA'",
+                shell=True, check=True
+            )
+            
+            # 2. Generate TLS Auth Key (ta.key)
+            subprocess.run(
+                f"openvpn --genkey secret {self.TA_PATH}",
+                shell=True, check=True
+            )
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to regenerate PKI: {e}")
+            raise e
 
 # Singleton instance
 openvpn_service = OpenVPNService()
