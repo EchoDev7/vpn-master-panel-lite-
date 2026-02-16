@@ -274,10 +274,14 @@ setup_frontend() {
     npm install --production -q > /dev/null 2>&1
     
     print_info "Building optimized frontend..."
-    NODE_OPTIONS="--max-old-space-size=512" npm run build -q > /dev/null 2>&1
+    # Verify Build Success
+    if [ ! -f "dist/index.html" ]; then
+        print_error "Frontend Build Failed! 'dist/index.html' not found."
+        exit 1
+    fi
     
-    # Clean up node_modules after build (save space)
-    rm -rf node_modules
+    # Fix Permissions (Critical for Nginx)
+    chmod -R 755 dist
     
     print_success "Frontend built and optimized"
 }
@@ -285,13 +289,12 @@ setup_frontend() {
 setup_nginx() {
     print_step "Configuring Nginx (lightweight)"
     
-    SERVER_IP=$(curl -s ifconfig.me)
-    
+    # Create safe config
     cat > /etc/nginx/sites-available/vpnmaster << EOF
 # Backend API
 server {
     listen 8000;
-    server_name $SERVER_IP;
+    server_name _;
 
     location / {
         proxy_pass http://127.0.0.1:8001;
@@ -311,7 +314,7 @@ server {
 # Frontend (with caching)
 server {
     listen 3000;
-    server_name $SERVER_IP;
+    server_name _;
 
     root /opt/vpn-master-panel/frontend/dist;
     index index.html;

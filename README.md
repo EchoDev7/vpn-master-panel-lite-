@@ -38,21 +38,30 @@ sudo ./install.sh
 
 ---
 
-## 🛠️ After Installation
+## 🛠️ Access Information
 
-Once the installation finishes, you will see the access details in the terminal:
+Once the installation finishes, open your browser:
 
-1.  **Open your browser** and go to: `http://YOUR_SERVER_IP:3000`
-2.  **Login** with the default credentials:
-    - **Username**: `admin`
-    - **Password**: *(The installer will generate a random password and show it to you at the end)*
+- **Panel URL**: `http://YOUR_SERVER_IP:3000`
+- **Default Username**: `admin`
+- **Default Password**: `admin`
 
-> **⚠️ IMPORTANT**: If you missed the password, run this command on your server to reset it:
-> ```bash
-> cd /opt/vpn-master-panel/backend
-> source venv/bin/activate
-> python reset_admin.py
-> ```
+> **⚠️ SECURITY WARNING**: Please change your password immediately after the first login!
+
+---
+
+## 🔄 Updating the Panel
+
+To update your panel to the latest version without losing data:
+
+```bash
+cd vpn-master-panel-lite-
+git pull
+chmod +x update.sh
+sudo ./update.sh
+```
+
+*(This script automatically backs up your config, updates the code, rebuilds the frontend, and restarts services)*
 
 ---
 
