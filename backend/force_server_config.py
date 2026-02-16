@@ -32,6 +32,10 @@ def main():
         init_db()
 
         service = OpenVPNService()
+        
+        print("🔐 Ensuring PKI (Certs/Keys) exist...")
+        service._ensure_pki()
+        
         config_content = service.generate_server_config()
         
         config_path = "/etc/openvpn/server.conf"
