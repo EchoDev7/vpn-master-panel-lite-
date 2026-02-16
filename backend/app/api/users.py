@@ -1,7 +1,7 @@
 """
 Users API Endpoints - CRUD operations for VPN users
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from pydantic import BaseModel, EmailStr, field_validator
@@ -15,6 +15,8 @@ from ..utils.security import (
     get_current_user,
     get_password_hash
 )
+from .activity import log_activity
+from .notifications import create_notification
 
 router = APIRouter()
 
@@ -128,6 +130,7 @@ class UserListResponse(BaseModel):
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     user_data: UserCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
@@ -190,6 +193,25 @@ async def create_user(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    
+    # Log activity
+    log_activity(
+        db=db,
+        type="user_created",
+        description=f"New user '{new_user.username}' created",
+        user_id=current_admin.id,
+        ip_address=request.client.host if request.client else None,
+        metadata={"new_user_id": new_user.id, "username": new_user.username}
+    )
+    
+    # Create notification
+    create_notification(
+        db=db,
+        type="success",
+        title="New User Created",
+        message=f"User '{new_user.username}' was successfully created",
+        user_id=None  # System-wide notification
+    )
     
     return new_user
 
@@ -263,6 +285,7 @@ async def get_user(
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
@@ -297,12 +320,23 @@ async def update_user(
     db.commit()
     db.refresh(user)
     
+    # Log activity
+    log_activity(
+        db=db,
+        type="user_updated",
+        description=f"User '{user.username}' was updated",
+        user_id=current_admin.id,
+        ip_address=request.client.host if request.client else None,
+        metadata={"updated_user_id": user.id, "username": user.username}
+    )
+    
     return user
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
@@ -323,8 +357,29 @@ async def delete_user(
             detail="Cannot delete super admin"
         )
     
+    username = user.username  # Store before deletion
+    
     db.delete(user)
     db.commit()
+    
+    # Log activity
+    log_activity(
+        db=db,
+        type="user_deleted",
+        description=f"User '{username}' was deleted",
+        user_id=current_admin.id,
+        ip_address=request.client.host if request.client else None,
+        metadata={"deleted_user_id": user_id, "username": username}
+    )
+    
+    # Create notification
+    create_notification(
+        db=db,
+        type="warning",
+        title="User Deleted",
+        message=f"User '{username}' has been removed from the system",
+        user_id=None
+    )
     
     return None
 
