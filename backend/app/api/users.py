@@ -476,39 +476,76 @@ async def get_wireguard_config(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+    
+    # Auto-enable WireGuard for the user if not enabled
     if not user.wireguard_enabled:
-        raise HTTPException(status_code=400, detail="WireGuard is not enabled for this user")
+        user.wireguard_enabled = True
+        db.commit()
+        db.refresh(user)
 
-    from ..services.wireguard import wireguard_service, generate_wireguard_keys
+    from ..services.wireguard import wireguard_service
 
     # Auto-generate keys if missing
     if not user.wireguard_private_key:
         try:
-            keys = generate_wireguard_keys()
+            keys = wireguard_service.generate_keypair()
             user.wireguard_private_key = keys['private_key']
             user.wireguard_public_key = keys['public_key']
-            user.wireguard_ip = keys['ip']
-            # Store PresharedKey if enabled
-            if 'preshared_key' in keys and hasattr(user, 'wireguard_preshared_key'):
-                user.wireguard_preshared_key = keys['preshared_key']
+
+            # Allocate IP
+            try:
+                user.wireguard_ip = wireguard_service.allocate_ip()
+            except Exception:
+                # Fallback: simple IP allocation based on user ID
+                user.wireguard_ip = f"10.66.66.{(user.id % 253) + 2}"
+
+            # Generate PresharedKey if enabled
+            try:
+                settings = wireguard_service._load_settings()
+                if settings.get("wg_preshared_key_enabled", "1") == "1":
+                    user.wireguard_preshared_key = wireguard_service.generate_preshared_key()
+            except Exception:
+                pass
+
             db.commit()
             db.refresh(user)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate WireGuard keys: {str(e)}")
     
-    # Get PresharedKey
+    # Get PresharedKey (safe access)
     psk = getattr(user, 'wireguard_preshared_key', None)
 
-    # Generate config using new service (reads all settings from DB)
-    config_content = wireguard_service.generate_client_config(
-        client_private_key=user.wireguard_private_key,
-        client_ip=user.wireguard_ip,
-        preshared_key=psk,
-    )
+    # Generate config using service (reads all settings from DB)
+    try:
+        config_content = wireguard_service.generate_client_config(
+            client_private_key=user.wireguard_private_key,
+            client_ip=user.wireguard_ip,
+            preshared_key=psk,
+        )
+    except Exception as e:
+        # Fallback: generate a basic default config
+        server_keys = wireguard_service.get_server_keys()
+        endpoint_ip = wireguard_service.server_ip
+        client_ip = user.wireguard_ip or f"10.66.66.{(user.id % 253) + 2}"
+        config_content = f"""[Interface]
+PrivateKey = {user.wireguard_private_key}
+Address = {client_ip}/24
+DNS = 1.1.1.1, 8.8.8.8
+MTU = 1380
 
-    # Generate QR code
-    qr_code = wireguard_service.generate_qr_code(config_content)
+[Peer]
+PublicKey = {server_keys['public_key']}
+Endpoint = {endpoint_ip}:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+"""
+
+    # Generate QR code (non-critical)
+    qr_code = None
+    try:
+        qr_code = wireguard_service.generate_qr_code(config_content)
+    except Exception:
+        pass
     
     return {
         "filename": f"{user.username}.conf",
