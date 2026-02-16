@@ -93,6 +93,11 @@ You can manage the panel services using simpler commands:
 
 ---
 
+## ❓ Troubleshooting
+Having issues? check out the [Troubleshooting Guide](TROUBLESHOOTING.md) for common fixes.
+
+---
+
 ## 🤝 Contributing
 Feel free to fork this repository and submit Pull Requests. For major changes, please open an issue first.
 
