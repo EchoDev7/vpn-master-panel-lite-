@@ -51,7 +51,18 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(start_heartbeat())
         logger.info("✅ WebSocket heartbeat started")
         
-        logger.info("✅ VPN Master Panel started successfully")
+        # Initialize Telegram bot (if configured)
+        try:
+            from .services.telegram import telegram_service
+            if telegram_service.bot_token:
+                await telegram_service.initialize()
+                logger.info("✅ Telegram bot initialized")
+            else:
+                logger.info("ℹ️  Telegram bot not configured (skipped)")
+        except Exception as e:
+            logger.warning(f"⚠️  Telegram bot initialization failed: {e}")
+        
+        logger.info("✅ VPN Master Panel started successfully!")
         
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
@@ -60,7 +71,15 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    logger.info("🛑 Shutting down VPN Master Panel...")
+    logger.info("Shutting down VPN Master Panel...")
+    
+    # Shutdown telegram bot
+    try:
+        from .services.telegram import telegram_service
+        await telegram_service.shutdown()
+        logger.info("✅ Telegram bot shutdown")
+    except Exception as e:
+        logger.warning(f"⚠️  Telegram bot shutdown failed: {e}")
     logger.info("✅ Shutdown complete")
 
 
@@ -208,7 +227,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
 
 
 # Import and include routers
-from .api import auth, users, servers, tunnels, monitoring, notifications, activity
+from .api import auth, users, servers, tunnels, monitoring, notifications, activity, subscriptions
 
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["Authentication"])
 app.include_router(users.router, prefix=f"{settings.API_V1_PREFIX}/users", tags=["Users"])
@@ -217,6 +236,8 @@ app.include_router(tunnels.router, prefix=f"{settings.API_V1_PREFIX}/tunnels", t
 app.include_router(monitoring.router, prefix=f"{settings.API_V1_PREFIX}/monitoring", tags=["Monitoring"])
 app.include_router(notifications.router, prefix=f"{settings.API_V1_PREFIX}", tags=["Notifications"])
 app.include_router(activity.router, prefix=f"{settings.API_V1_PREFIX}", tags=["Activity"])
+app.include_router(subscriptions.router, prefix=f"{settings.API_V1_PREFIX}", tags=["Subscriptions"])
+
 
 # Settings Router
 from .api import settings as api_settings
