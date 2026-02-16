@@ -114,10 +114,12 @@ class OpenVPNService:
         """Get server public IP with multiple fallbacks"""
         import socket
         try:
-            import requests
+            # Use urllib to avoid external dependency (requests) issues
+            import urllib.request
             for url in ['https://api.ipify.org', 'https://checkip.amazonaws.com']:
                 try:
-                    return requests.get(url, timeout=3).text.strip()
+                    with urllib.request.urlopen(url, timeout=3) as response:
+                        return response.read().decode('utf-8').strip()
                 except Exception:
                     continue
             # Fallback: local socket
