@@ -81,12 +81,40 @@ cd ..
 # 5. Rebuild Frontend (Critical for UI updates)
 echo -e "${CYAN}⚛️  Rebuilding Frontend...${NC}"
 cd frontend
-npm install --production
+# Install ALL dependencies (including devDependencies like vite)
+npm install
 npm run build
 cd ..
 
-# 6. Restart Services
+# 6. Repair & Restart Services
+echo -e "${CYAN}🔧 Verifying Services...${NC}"
+
+SERVICE_FILE="/etc/systemd/system/vpnmaster-backend.service"
+if [ ! -f "$SERVICE_FILE" ]; then
+    echo -e "${YELLOW}⚠️ Service file missing. Recreating...${NC}"
+    cat > "$SERVICE_FILE" << EOF
+[Unit]
+Description=VPN Master Panel Backend (Lightweight)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/vpn-master-panel/backend
+Environment="PATH=/opt/vpn-master-panel/backend/venv/bin"
+ExecStart=/opt/vpn-master-panel/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --limit-concurrency 50
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable vpnmaster-backend
+fi
+
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
+systemctl daemon-reload
 systemctl restart vpnmaster-backend
 systemctl restart nginx
 
