@@ -11,18 +11,23 @@ logger = logging.getLogger(__name__)
 class OpenVPNService:
     """OpenVPN Configuration Generator"""
     
-    # Standard paths for OpenVPN (Debian/Ubuntu)
-    CA_PATH = "/etc/openvpn/server/ca.crt"
-    TA_PATH = "/etc/openvpn/server/ta.key"
+    # Paths for OpenVPN PKI (Local storage to avoid permission issues)
+    # Using specific directory within the project
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    DATA_DIR = os.path.join(BASE_DIR, "data", "openvpn")
+    CA_PATH = os.path.join(DATA_DIR, "ca.crt")
+    TA_PATH = os.path.join(DATA_DIR, "ta.key")
     
     def __init__(self):
         self.server_ip = self._get_public_ip()
         
     def _get_public_ip(self) -> str:
-        """Get server public IP (naive implementation, should use config)"""
-        # In a real scenario, this should come from settings or external check
-        # For now, we rely on the caller to provide it or fallback to a placeholder
-        return "YOUR_SERVER_IP" 
+        """Get server public IP"""
+        try:
+            import requests
+            return requests.get('https://api.ipify.org', timeout=2).text
+        except:
+            return "YOUR_SERVER_IP" 
 
     def _read_file(self, path: str) -> str:
         """Read file content safely"""
@@ -37,32 +42,15 @@ class OpenVPNService:
             return f"# ERROR READING: {path}"
 
     def _ensure_pki(self):
-        """Ensure PKI (CA/Cert/Key) exists, generate if missing"""
+        """Ensure PKI (CA/Cert/Key) exists"""
         if os.path.exists(self.CA_PATH) and os.path.exists(self.TA_PATH):
             return
 
-        logger.info("Generating OpenVPN PKI (Self-Signed)...")
+        # If missing, try to generate
         try:
-            import subprocess
-            
-            # Create directory
-            os.makedirs(os.path.dirname(self.CA_PATH), exist_ok=True)
-            
-            # 1. Generate CA
-            subprocess.run(
-                f"openssl req -new -x509 -days 3650 -nodes -text -out {self.CA_PATH} -keyout {self.CA_PATH} -subj '/CN=VPN-Master-CA'",
-                shell=True, check=True
-            )
-            
-            # 2. Generate TA key
-            subprocess.run(
-                f"openvpn --genkey secret {self.TA_PATH}",
-                shell=True, check=True
-            )
-            
-            logger.info("✅ OpenVPN PKI generated successfully")
+            self.regenerate_pki()
         except Exception as e:
-            logger.error(f"❌ Failed to generate PKI: {e}")
+            logger.error(f"Auto-generation of PKI failed: {e}")
 
     def generate_client_config(
         self, 
@@ -75,18 +63,13 @@ class OpenVPNService:
         """
         Generate .ovpn content
         """
-        # Ensure certificates exist
         self._ensure_pki()
         
+        # Determine Server IP
         if not server_ip:
-            # Fallback to determining IP, or use a placeholder
-            try:
-                import requests
-                server_ip = requests.get('https://api.ipify.org', timeout=2).text
-            except:
-                server_ip = "YOUR_SERVER_IP"
-
-        # Read Core Certificates
+            server_ip = self.server_ip
+        
+        # Read Certs
         ca_cert = self._read_file(self.CA_PATH)
         tls_auth = self._read_file(self.TA_PATH)
         
@@ -94,7 +77,6 @@ class OpenVPNService:
         from ..database import get_db_context
         from ..models.setting import Setting
         
-        # Default Settings (Modern OpenVPN 2.4+)
         settings_map = {
             "protocol": "udp",
             "port": "1194",
@@ -104,7 +86,15 @@ class OpenVPNService:
             "tls_ciphers": "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
             "auth_digest": "SHA256",
             "tls_version_min": "1.2",
-            "compression": "none" # lz4-v2, comp-lzo
+            "compression": "none",
+            # New Advanced Settings
+            "topology": "subnet",
+            "redirect_gateway": "1", # 1=enable, 0=disable
+            "verb": "3",
+            "float": "1",
+            "keepalive_interval": "10",
+            "keepalive_timeout": "60",
+            "custom_config": ""
         }
         
         with get_db_context() as db:
@@ -115,17 +105,17 @@ class OpenVPNService:
                     if key in settings_map:
                         settings_map[key] = s.value
 
-            # Override server_ip if set in settings
-            s_ip = db.query(Setting).filter(Setting.key == "wg_endpoint_ip").first() # Reuse endpoint ip setting
+            # Override server_ip if set in Global Settings
+            s_ip = db.query(Setting).filter(Setting.key == "wg_endpoint_ip").first()
             if s_ip and s_ip.value: server_ip = s_ip.value
 
-        # Determine protocol
-        final_protocol = protocol if protocol else ("udp" if settings_map["protocol"] == "both" else settings_map["protocol"])
+        # Logic for Final Variables
+        final_protocol = protocol if protocol else settings_map["protocol"]
+        if final_protocol == "both": final_protocol = "udp"
         
-        # Adjust port logic if needed (e.g. separate ports for tcp/udp)
-        final_port = settings_map["port"] # simplified for now
+        final_port = settings_map["port"] 
 
-        # Base Configuration Template (OpenVPN 2.4/2.5/2.6 Compatible)
+        # Build Config
         config = f"""client
 dev tun
 proto {final_protocol}
@@ -136,23 +126,33 @@ persist-key
 persist-tun
 remote-cert-tls server
 
-# Modern Security Settings
+# Topology & routing
+topology {settings_map['topology']}
+"""
+        if settings_map['redirect_gateway'] == '1':
+            config += "redirect-gateway def1 bypass-dhcp\n"
+            
+        if settings_map['float'] == '1':
+            config += "float\n"
+
+        config += f"keepalive {settings_map['keepalive_interval']} {settings_map['keepalive_timeout']}\n"
+        config += f"verb {settings_map['verb']}\n"
+
+        config += f"""
+# Security
 auth {settings_map["auth_digest"]}
 data-ciphers {settings_map["data_ciphers"]}
 data-ciphers-fallback AES-256-GCM
 tls-version-min {settings_map["tls_version_min"]}
 tls-client
-
-# Compression
 """
         if settings_map["compression"] != "none":
              config += f"compress {settings_map['compression']}\n"
         
         config += f"""
-# Anti-Censorship & Optimization
+# Optimization
 ignore-unknown-option block-outside-dns
 block-outside-dns
-verb 3
 key-direction 1
 tun-mtu {settings_map['mtu']}
 mssfix {int(settings_map['mtu']) - 40}
@@ -161,29 +161,21 @@ mssfix {int(settings_map['mtu']) - 40}
 {settings_map['custom_config']}
 """
 
-        # Add Scramble/Obfuscation
+        # Scramble
         if settings_map["scramble"] == "1":
-            config += """
-scramble obfuscate "vpnmaster"
-"""
+            config += 'scramble obfuscate "vpnmaster"\n'
 
-        # User Credentials (User/Pass Auth Only - No Client Certs)
+        # Credentials & Certs
         config += """
 # User Credentials
 auth-user-pass
 
 <ca>
-{ca_cert}
-</ca>
 """
+        config += f"{ca_cert}\n</ca>\n"
 
-        # Add TLS Auth if available
         if "BEGIN OpenVPN Static key" in tls_auth:
-            config += f"""
-<tls-auth>
-{tls_auth}
-</tls-auth>
-"""
+            config += f"<tls-auth>\n{tls_auth}\n</tls-auth>\n"
         
         return config
 
