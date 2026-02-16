@@ -147,6 +147,18 @@ class APIService {
     return this.client.post('/settings/pki/regenerate');
   }
 
+  async getPKIInfo() {
+    return this.client.get('/settings/pki/info');
+  }
+
+  async getServerConfigPreview() {
+    return this.client.get('/settings/server-config/preview');
+  }
+
+  async applyServerConfig() {
+    return this.client.post('/settings/server-config/apply');
+  }
+
   // Generic methods
   async get(url, config = {}) {
     return this.client.get(url, config);
