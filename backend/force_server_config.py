@@ -14,12 +14,23 @@ def run_command(command: str):
         print(f"❌ Error: {e}")
 
 def main():
+    # Ensure we run in 'backend' directory for correct DB path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.getcwd() != script_dir:
+        print(f"🔄 Switching working directory to {script_dir}")
+        os.chdir(script_dir)
+
     if os.geteuid() != 0:
         print("❌ This script must be run as root!")
         sys.exit(1)
 
     print("🔧 Generating OpenVPN Server Config...")
     try:
+        # Check and Init DB
+        from app.database import init_db
+        print("🗄️  Initializing Database (if needed)...")
+        init_db()
+
         service = OpenVPNService()
         config_content = service.generate_server_config()
         
