@@ -1,0 +1,95 @@
+-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCrBrEiwqgdq1/k
+mJ7CXBSXWl6D2x7Harte9qLPMgqDC6APAnxtQvqFhHa0SUsDjyCt9d0LMxsMi397
+ZB6QsVeEn1mxYFBZ2Pfc27Kl3hZMRM8vyc+SVA+1F3Dh3tzukazeclKl7+EgBCFc
+r992HIbbgTIGpfz3sjZMqp9w9pxurvzclK4h5lE8syWHL8h8twJL7zocuZnNSsHC
+UWNiq/76MvhoXAH+eczvR1r9KJdrfGF2SrlgOPHJhugV8seGTV+MyYKnDaxsaVJz
+wX4EUyk3QSR5RgU56FQFG0b52GcvTuGoytNRoE43zerG4iZ6zE614J0yjzEX6C2m
+TTR1gv3vAgMBAAECggEBAInoVYHAESwLesGsR6hV88yv9DLCyCjpabmDi3kj0tIk
+16YCzS6VqclsLQPnbfOqwCFGdj2HsjIFcoCfFP574iRxEjQzg9dPW17eUUnqsXRC
+sAbK5vQJkLjn9ABOYzyEfy7IZNile5UDf5trvfdRvXTW0u4FftyE+cAMfZDrauzc
+IFRFAg2BdF6dsVa6otAoQ9Ccul/JlJ20T8X0H1gLHTA5fo0UBZ62yUzAePb8EfzS
+vULbXFjv/Pp+7hHYD1wvnWf63cmJ4SQjl1HEWcizww0iobFV/aBeb3MhU93+NoGq
+F4uOBKBV4IsVIHaXn9qrlme/WWW/G5kidZ8W6XvgS0ECgYEA06yA/fkOjzY9mryJ
+VXIYBKgkkwXJ3nTFM2vYV7MzfgwoBAYJK39X9Y2+UvJBYdJiO+35kIEIxjjVfGGS
+ldGbrjuojVLgD1QzAsLx5/6dwN37SwHFJADh8gdjXgsmzO+/e0wRxTsEAV8comA0
+msx8paUHn4hb5Ll0Pk8plnW9/lECgYEAztchNjUhV8fNmfY4OacJgbCxsLUy5AgI
+24PsFzRMWNeIdMEai0zlK/RTyN3HVs5WSucxm6QEyQzGRIe2BN264RzFRuKIiYYO
+oTQQH50akRWq9vL8Or42fLlNzlS7oy6D39Q5KmMFg2rTgUE2Qh/JMqLutP7dsZL7
+2gSjgz7I6D8CgYAHp5tak+Ek6K89o0fMIT4hHPuFnZX5R3vCKko+kapxCnt/+b/n
+JMnHhYK2eTBIG1WWGTsHMMNid7ewsc6dQGFC4cFsquyTYVYe6XHaE+kcimqGAeBh
+Nu7007OSOREEJD9mdA/IdCPm8MuWS6hbWL3BN8CY0lOQZ+x+PFqiqEtgoQKBgBL0
+mDCVkeavguIXNHPkIPTnsoEVOgK30cf8QQinXE/QAMtiXwJhG6d5jqwb1wbXhgT7
+RwqSb3XVW94v6bhscZHrxxCF9ilURcb0NH4RMbwWFkLnZcIkaG3ptX2xOjjsLF24
+3zxJMtomUhfIWCabLx8a23Fu4fZCGB6Uyj9e456VAoGBAII0aq9zVPQ+C6ZUHhbI
+EXCFlOKS34PrcNeAEgktk7l687JCQMKXkYXnjWc4Goe59nFacqMifdcWAepKoYvR
+ZTiNith8SHm7ArXVx6odyT4YuuklgpXDa6zw1/x8ApC/nUNU0yXzSAIbpki9H4u6
+JIcrmFWJgeah+/T2qs/RKWsh
+-----END PRIVATE KEY-----
+Certificate:
+    Data:
+        Version: 1 (0x0)
+        Serial Number:
+            d6:9d:ba:4b:a4:33:4e:51
+    Signature Algorithm: sha256WithRSAEncryption
+        Issuer: CN=VPN-Master-Root-CA
+        Validity
+            Not Before: Feb 16 02:39:44 2026 GMT
+            Not After : Feb 14 02:39:44 2036 GMT
+        Subject: CN=VPN-Master-Root-CA
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                RSA Public-Key: (2048 bit)
+                Modulus:
+                    00:ab:06:b1:22:c2:a8:1d:ab:5f:e4:98:9e:c2:5c:
+                    14:97:5a:5e:83:db:1e:c7:6a:bb:5e:f6:a2:cf:32:
+                    0a:83:0b:a0:0f:02:7c:6d:42:fa:85:84:76:b4:49:
+                    4b:03:8f:20:ad:f5:dd:0b:33:1b:0c:8b:7f:7b:64:
+                    1e:90:b1:57:84:9f:59:b1:60:50:59:d8:f7:dc:db:
+                    b2:a5:de:16:4c:44:cf:2f:c9:cf:92:54:0f:b5:17:
+                    70:e1:de:dc:ee:91:ac:de:72:52:a5:ef:e1:20:04:
+                    21:5c:af:df:76:1c:86:db:81:32:06:a5:fc:f7:b2:
+                    36:4c:aa:9f:70:f6:9c:6e:ae:fc:dc:94:ae:21:e6:
+                    51:3c:b3:25:87:2f:c8:7c:b7:02:4b:ef:3a:1c:b9:
+                    99:cd:4a:c1:c2:51:63:62:ab:fe:fa:32:f8:68:5c:
+                    01:fe:79:cc:ef:47:5a:fd:28:97:6b:7c:61:76:4a:
+                    b9:60:38:f1:c9:86:e8:15:f2:c7:86:4d:5f:8c:c9:
+                    82:a7:0d:ac:6c:69:52:73:c1:7e:04:53:29:37:41:
+                    24:79:46:05:39:e8:54:05:1b:46:f9:d8:67:2f:4e:
+                    e1:a8:ca:d3:51:a0:4e:37:cd:ea:c6:e2:26:7a:cc:
+                    4e:b5:e0:9d:32:8f:31:17:e8:2d:a6:4d:34:75:82:
+                    fd:ef
+                Exponent: 65537 (0x10001)
+    Signature Algorithm: sha256WithRSAEncryption
+         3e:e0:b1:78:8e:4f:e0:6a:d1:61:a5:68:d9:02:af:b8:0a:a5:
+         8e:b3:bc:d7:65:ed:89:da:9c:c2:46:aa:f9:49:73:ab:f6:b9:
+         76:a1:dc:52:8c:8a:25:45:e5:af:4e:1f:5d:ac:f2:00:7c:7c:
+         fe:02:f4:5e:ec:63:6b:42:7d:34:cf:63:98:b3:c9:bb:3d:67:
+         dc:38:81:db:e1:90:05:90:ab:e3:f7:2e:fd:84:a9:f3:68:43:
+         2e:84:52:5f:0d:94:fb:51:7f:8d:0b:ce:40:94:44:af:d0:e0:
+         8d:2f:1e:ef:e5:24:6f:ee:c2:ab:f0:1e:a2:2d:24:26:03:f4:
+         82:50:76:7d:62:ea:6f:59:44:4c:4b:f6:aa:42:db:73:1d:d0:
+         ab:98:32:39:54:49:7c:1b:25:5f:56:cc:20:fa:13:d9:d4:c7:
+         a5:a9:fd:44:f8:2a:f3:54:a7:bf:f6:06:47:2a:1c:34:f5:35:
+         17:04:18:c1:4d:46:89:b3:aa:f1:3f:ad:1d:31:ef:f1:6b:f7:
+         51:27:b6:cf:e8:29:a7:ea:b4:46:19:dc:cb:67:a6:88:17:1e:
+         e5:0f:40:7a:96:e2:bf:f6:08:cd:75:93:90:ba:3b:30:cb:18:
+         84:53:c6:8d:52:7c:2b:b9:7a:59:ac:e5:f4:0d:57:74:c6:d9:
+         3e:c6:f6:ee
+-----BEGIN CERTIFICATE-----
+MIICtjCCAZ4CCQDWnbpLpDNOUTANBgkqhkiG9w0BAQsFADAdMRswGQYDVQQDDBJW
+UE4tTWFzdGVyLVJvb3QtQ0EwHhcNMjYwMjE2MDIzOTQ0WhcNMzYwMjE0MDIzOTQ0
+WjAdMRswGQYDVQQDDBJWUE4tTWFzdGVyLVJvb3QtQ0EwggEiMA0GCSqGSIb3DQEB
+AQUAA4IBDwAwggEKAoIBAQCrBrEiwqgdq1/kmJ7CXBSXWl6D2x7Harte9qLPMgqD
+C6APAnxtQvqFhHa0SUsDjyCt9d0LMxsMi397ZB6QsVeEn1mxYFBZ2Pfc27Kl3hZM
+RM8vyc+SVA+1F3Dh3tzukazeclKl7+EgBCFcr992HIbbgTIGpfz3sjZMqp9w9pxu
+rvzclK4h5lE8syWHL8h8twJL7zocuZnNSsHCUWNiq/76MvhoXAH+eczvR1r9KJdr
+fGF2SrlgOPHJhugV8seGTV+MyYKnDaxsaVJzwX4EUyk3QSR5RgU56FQFG0b52Gcv
+TuGoytNRoE43zerG4iZ6zE614J0yjzEX6C2mTTR1gv3vAgMBAAEwDQYJKoZIhvcN
+AQELBQADggEBAD7gsXiOT+Bq0WGlaNkCr7gKpY6zvNdl7YnanMJGqvlJc6v2uXah
+3FKMiiVF5a9OH12s8gB8fP4C9F7sY2tCfTTPY5izybs9Z9w4gdvhkAWQq+P3Lv2E
+qfNoQy6EUl8NlPtRf40LzkCURK/Q4I0vHu/lJG/uwqvwHqItJCYD9IJQdn1i6m9Z
+RExL9qpC23Md0KuYMjlUSXwbJV9WzCD6E9nUx6Wp/UT4KvNUp7/2BkcqHDT1NRcE
+GMFNRomzqvE/rR0x7/Fr91Ents/oKafqtEYZ3MtnpogXHuUPQHqW4r/2CM11k5C6
+OzDLGIRTxo1SfCu5elms5fQNV3TG2T7G9u4=
+-----END CERTIFICATE-----
