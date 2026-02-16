@@ -6,9 +6,7 @@ import Users from './components/Users'
 import Settings from './components/Settings'
 import Tunnels from './components/Tunnels'
 import Servers from './components/Servers'
-// ... inside Routes
-<Route path="/users" element={<Users />} />
-
+import Analytics from './components/Analytics'
 import Login from './components/Login'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -50,6 +48,9 @@ function MainLayout() {
                             <Link to="/" className="text-gray-300 hover:text-white transition-colors">
                                 Dashboard
                             </Link>
+                            <Link to="/analytics" className="text-gray-300 hover:text-white transition-colors">
+                                Analytics
+                            </Link>
                             <Link to="/servers" className="text-gray-300 hover:text-white transition-colors">
                                 Servers
                             </Link>
@@ -75,6 +76,7 @@ function MainLayout() {
                 <ErrorBoundary>
                     <Routes>
                         <Route path="/" element={<Dashboard />} />
+                        <Route path="/analytics" element={<Analytics />} />
                         <Route path="/servers" element={<Servers />} />
                         <Route path="/tunnels" element={<Tunnels />} />
                         <Route path="/users" element={<Users />} />
