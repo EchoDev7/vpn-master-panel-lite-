@@ -405,6 +405,7 @@ setup_firewall() {
     ufw allow 3000/tcp > /dev/null 2>&1
     ufw allow 8000/tcp > /dev/null 2>&1
     ufw allow 1194/udp > /dev/null 2>&1
+    ufw allow 443/tcp > /dev/null 2>&1 # Fix: Allow OpenVPN TCP
     ufw allow 51820/udp > /dev/null 2>&1
     
     print_success "Firewall configured"
