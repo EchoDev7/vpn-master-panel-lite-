@@ -65,7 +65,7 @@ OPENVPN_DEFAULTS: Dict[str, str] = {
     # --- Routing & DNS ---
     "redirect_gateway": "1",        # 1=route all traffic through VPN
     "dns": "1.1.1.1,8.8.8.8",      # DNS servers pushed to clients
-    "block_outside_dns": "1",       # Prevent DNS leaks on Windows
+    "block_outside_dns": "0",       # Prevent DNS leaks on Windows (Default 0 for Mobile Compat)
     "inter_client": "0",            # Allow client-to-client communication
 
     # --- Connection & Keepalive ---
@@ -392,16 +392,13 @@ class OpenVPNService:
             lines.append(f"remote {final_ip} {final_port}")
 
         # Essentials
-        lines.append("resolv-retry infinite")
-        lines.append("nobind")
-        lines.append("persist-key")
-        lines.append("persist-tun")
+        # Essentials - Minimal
         lines.append("remote-cert-tls server")
         lines.append(f"auth {settings['auth_digest']}")
         
         # Crypto (Strict matches with server)
         lines.append(f"data-ciphers {settings['data_ciphers']}")
-        lines.append(f"data-ciphers-fallback {settings['data_ciphers_fallback']}")
+        # lines.append(f"data-ciphers-fallback {settings['data_ciphers_fallback']}") # Deprecated/Ignored by modern clients
         lines.append(f"tls-version-min {settings['tls_version_min']}")
         lines.append("tls-client")
 
@@ -436,7 +433,7 @@ class OpenVPNService:
                 if dns.strip():
                     lines.append(f"dhcp-option DNS {dns.strip()}")
         
-        if settings.get("block_outside_dns", "1") == "1":
+        if settings.get("block_outside_dns", "0") == "1":
             lines.append("block-outside-dns")
 
         # Proxy check
