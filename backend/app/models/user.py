@@ -79,15 +79,22 @@ class User(Base):
     wireguard_ip = Column(String(50))
     
     # Metadata
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # These columns are moved to a new # Timestamps section below
+    # created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     created_by = Column(Integer, ForeignKey("users.id"))
     
     # Relationships
     reseller = relationship("User", remote_side=[id], foreign_keys=[reseller_id])
     sub_users = relationship("User", back_populates="reseller", foreign_keys=[reseller_id])
-    traffic_logs = relationship("TrafficLog", back_populates="user")
-    connection_logs = relationship("ConnectionLog", back_populates="user")
+    traffic_logs = relationship("TrafficLog", back_populates="user", cascade="all, delete-orphan")
+    connection_logs = relationship("ConnectionLog", back_populates="user", cascade="all, delete-orphan")
+    subscriptions = relationship("UserSubscription", back_populates="user", cascade="all, delete-orphan")
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    last_login = Column(DateTime)
     
     def __repr__(self):
         return f"<User(username='{self.username}', role='{self.role}')>"
