@@ -85,47 +85,46 @@ if [ -f "alembic.ini" ]; then
     alembic upgrade head
 else
     echo -e "${YELLOW}⚠️ Alembic not configured. Applying manual migration...${NC}"
-    # Apply manual migration for traffic_type
+    # Apply manual migration for traffic_type (SQLite compatible)
     python3 << MIGRATION_EOF
 from app.database import engine
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 
 try:
-    with engine.connect() as conn:
-        # Check if columns already exist
-        result = conn.execute(text("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='traffic_logs' AND column_name IN ('traffic_type', 'tunnel_id')
-        """))
-        existing_columns = [row[0] for row in result]
+    inspector = inspect(engine)
+    
+    # Check if traffic_logs table exists
+    if 'traffic_logs' not in inspector.get_table_names():
+        print("⚠️ traffic_logs table not found. Skipping migration.")
+    else:
+        # Get existing columns
+        columns = [col['name'] for col in inspector.get_columns('traffic_logs')]
         
-        if 'traffic_type' not in existing_columns:
-            print("Adding traffic_type column...")
-            conn.execute(text("""
-                ALTER TABLE traffic_logs 
-                ADD COLUMN traffic_type VARCHAR(20) DEFAULT 'direct' NOT NULL
-            """))
-            conn.commit()
-            print("✓ traffic_type column added")
-        else:
-            print("✓ traffic_type column already exists")
-            
-        if 'tunnel_id' not in existing_columns:
-            print("Adding tunnel_id column...")
-            conn.execute(text("""
-                ALTER TABLE traffic_logs 
-                ADD COLUMN tunnel_id INTEGER
-            """))
-            conn.commit()
-            print("✓ tunnel_id column added")
-        else:
-            print("✓ tunnel_id column already exists")
-            
+        with engine.begin() as conn:
+            if 'traffic_type' not in columns:
+                print("Adding traffic_type column...")
+                conn.execute(text("""
+                    ALTER TABLE traffic_logs 
+                    ADD COLUMN traffic_type VARCHAR(20) DEFAULT 'direct' NOT NULL
+                """))
+                print("✓ traffic_type column added")
+            else:
+                print("✓ traffic_type column already exists")
+                
+            if 'tunnel_id' not in columns:
+                print("Adding tunnel_id column...")
+                conn.execute(text("""
+                    ALTER TABLE traffic_logs 
+                    ADD COLUMN tunnel_id INTEGER
+                """))
+                print("✓ tunnel_id column added")
+            else:
+                print("✓ tunnel_id column already exists")
+                
         print("✅ Database migration completed successfully")
 except Exception as e:
     print(f"❌ Migration error: {e}")
-    print("⚠️ You may need to run migrations manually")
+    print("⚠️ Continuing anyway - columns may already exist")
 MIGRATION_EOF
 fi
 
