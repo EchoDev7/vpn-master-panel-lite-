@@ -185,3 +185,60 @@ class RatholeTunnel:
         await self.stop()
         await asyncio.sleep(1)
         return await self.start(mode)
+
+
+class RatholeManager:
+    """Manager for multiple Rathole tunnels"""
+    
+    def __init__(self):
+        self.tunnels: Dict[str, RatholeTunnel] = {}
+    
+    async def create_tunnel(self, name: str, config: Dict[str, Any], mode: str = "client") -> bool:
+        """Create and start new Rathole tunnel"""
+        if name in self.tunnels:
+            logger.warning(f"Tunnel {name} already exists")
+            return False
+        
+        tunnel = RatholeTunnel(name, config)
+        success = await tunnel.start(mode)
+        
+        if success:
+            self.tunnels[name] = tunnel
+            return True
+        return False
+    
+    async def remove_tunnel(self, name: str) -> bool:
+        """Remove tunnel"""
+        if name not in self.tunnels:
+            return False
+        
+        await self.tunnels[name].stop()
+        del self.tunnels[name]
+        
+        config_file = f"{RatholeTunnel.CONFIG_DIR}/{name}.toml"
+        if os.path.exists(config_file):
+            os.remove(config_file)
+        return True
+    
+    async def restart_tunnel(self, name: str, mode: str = "client") -> bool:
+        if name not in self.tunnels:
+            return False
+        return await self.tunnels[name].restart(mode)
+    
+    def get_tunnel(self, name: str) -> Optional[RatholeTunnel]:
+        return self.tunnels.get(name)
+    
+    async def get_all_status(self) -> Dict[str, Dict[str, Any]]:
+        statuses = {}
+        for name, tunnel in self.tunnels.items():
+            statuses[name] = await tunnel.get_status()
+        return statuses
+    
+    async def stop_all(self):
+        for tunnel in self.tunnels.values():
+            await tunnel.stop()
+    
+    @staticmethod
+    def is_installed() -> bool:
+        return os.path.exists(RatholeTunnel.RATHOLE_BINARY)
+
