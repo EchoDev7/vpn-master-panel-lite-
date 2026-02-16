@@ -76,6 +76,59 @@ fi
 source venv/bin/activate
 pip install -r requirements.txt
 python -m py_compile app/main.py # Syntax check
+
+# 4.5 Run Database Migrations
+echo -e "${CYAN}🗄️  Running Database Migrations...${NC}"
+# Check if alembic is configured
+if [ -f "alembic.ini" ]; then
+    echo -e "${GREEN}✓ Alembic found. Running migrations...${NC}"
+    alembic upgrade head
+else
+    echo -e "${YELLOW}⚠️ Alembic not configured. Applying manual migration...${NC}"
+    # Apply manual migration for traffic_type
+    python3 << MIGRATION_EOF
+from app.database import engine
+from sqlalchemy import text
+
+try:
+    with engine.connect() as conn:
+        # Check if columns already exist
+        result = conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='traffic_logs' AND column_name IN ('traffic_type', 'tunnel_id')
+        """))
+        existing_columns = [row[0] for row in result]
+        
+        if 'traffic_type' not in existing_columns:
+            print("Adding traffic_type column...")
+            conn.execute(text("""
+                ALTER TABLE traffic_logs 
+                ADD COLUMN traffic_type VARCHAR(20) DEFAULT 'direct' NOT NULL
+            """))
+            conn.commit()
+            print("✓ traffic_type column added")
+        else:
+            print("✓ traffic_type column already exists")
+            
+        if 'tunnel_id' not in existing_columns:
+            print("Adding tunnel_id column...")
+            conn.execute(text("""
+                ALTER TABLE traffic_logs 
+                ADD COLUMN tunnel_id INTEGER
+            """))
+            conn.commit()
+            print("✓ tunnel_id column added")
+        else:
+            print("✓ tunnel_id column already exists")
+            
+        print("✅ Database migration completed successfully")
+except Exception as e:
+    print(f"❌ Migration error: {e}")
+    print("⚠️ You may need to run migrations manually")
+MIGRATION_EOF
+fi
+
 cd ..
 
 # 5. Rebuild Frontend (Critical for UI updates)
