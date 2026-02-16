@@ -268,6 +268,13 @@ ufw --force enable > /dev/null 2>&1
 
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
 systemctl daemon-reload
+
+# Fix permissions so OpenVPN can read keys (Added by Fix)
+if [ -d "/opt/vpn-master-panel/backend/data" ]; then
+    chmod -R 755 /opt/vpn-master-panel/backend/data
+    echo -e "${GREEN}✓ Fixed Data Permissions${NC}"
+fi
+
 systemctl restart vpnmaster-backend
 # Restart OpenVPN to apply changes
 if systemctl list-units --full -all | grep -q "openvpn@server.service"; then
