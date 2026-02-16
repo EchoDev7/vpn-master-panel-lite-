@@ -213,10 +213,11 @@ class ActivityLog(Base):
     # Context
     ip_address = Column(String(50))
     user_agent = Column(String(255))
-    metadata = Column(String(1000))  # JSON string for additional data
+    meta_data = Column(String(1000))  # JSON string for additional data (renamed from metadata)
     
     # Timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     def __repr__(self):
         return f"<ActivityLog(type='{self.type}', user_id={self.user_id})>"
+
