@@ -262,12 +262,22 @@ ufw allow 3000/tcp > /dev/null 2>&1
 ufw allow 8000/tcp > /dev/null 2>&1
 ufw allow 22/tcp > /dev/null 2>&1
 ufw allow 1194/udp > /dev/null 2>&1
+ufw allow 443/tcp > /dev/null 2>&1 # Fix: Allow OpenVPN TCP
 ufw allow 51820/udp > /dev/null 2>&1
 ufw --force enable > /dev/null 2>&1
 
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
 systemctl daemon-reload
 systemctl restart vpnmaster-backend
+# Restart OpenVPN to apply changes
+if systemctl list-units --full -all | grep -q "openvpn@server.service"; then
+    systemctl restart openvpn@server
+    echo -e "${GREEN}✓ OpenVPN Restarted${NC}"
+else
+    systemctl restart openvpn
+    echo -e "${GREEN}✓ OpenVPN Service Restarted${NC}"
+fi
+
 
 # Check Nginx Config
 if ! nginx -t > /dev/null 2>&1; then
