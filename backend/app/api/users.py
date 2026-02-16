@@ -64,6 +64,7 @@ class UserUpdate(BaseModel):
     data_limit_gb: Optional[float] = None
     connection_limit: Optional[int] = None
     expiry_date: Optional[datetime] = None
+    expiry_days: Optional[int] = None
     
     # Status
     status: Optional[UserStatus] = None
@@ -281,6 +282,14 @@ async def update_user(
     # Hash password if provided
     if "password" in update_data:
         update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
+        
+    # Handle expiry_days
+    if "expiry_days" in update_data:
+        days = update_data.pop("expiry_days")
+        if days is not None and days > 0:
+            update_data["expiry_date"] = datetime.utcnow() + timedelta(days=days)
+        elif days == 0:
+            update_data["expiry_date"] = None # Unlimited
     
     for field, value in update_data.items():
         setattr(user, field, value)
