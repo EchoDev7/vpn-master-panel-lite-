@@ -53,27 +53,66 @@ const Settings = () => {
                         <Shield /> OpenVPN Configuration
                     </h2>
                     <div className="space-y-4">
-                        <div>
-                            <label className="block text-gray-400 text-sm mb-1">Protocol</label>
-                            <select
-                                value={settings.ovpn_protocol || 'udp'}
-                                onChange={(e) => handleChange('ovpn_protocol', e.target.value)}
-                                className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
-                            >
-                                <option value="udp">UDP Only</option>
-                                <option value="tcp">TCP Only</option>
-                                <option value="both">Both (UDP & TCP)</option>
-                            </select>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">Protocol</label>
+                                <select
+                                    value={settings.ovpn_protocol || 'udp'}
+                                    onChange={(e) => handleChange('ovpn_protocol', e.target.value)}
+                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
+                                >
+                                    <option value="udp">UDP Only</option>
+                                    <option value="tcp">TCP Only</option>
+                                    <option value="both">Both (UDP & TCP)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">Port</label>
+                                <input
+                                    type="text"
+                                    value={settings.ovpn_port || '1194'}
+                                    onChange={(e) => handleChange('ovpn_port', e.target.value)}
+                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
+                                />
+                            </div>
                         </div>
+
                         <div>
-                            <label className="block text-gray-400 text-sm mb-1">Port (default: 1194)</label>
+                            <label className="block text-gray-400 text-sm mb-1">Data Ciphers (Modern 2.4+)</label>
                             <input
                                 type="text"
-                                value={settings.ovpn_port || ''}
-                                onChange={(e) => handleChange('ovpn_port', e.target.value)}
-                                className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
+                                value={settings.ovpn_data_ciphers || 'AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305'}
+                                onChange={(e) => handleChange('ovpn_data_ciphers', e.target.value)}
+                                className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white font-mono text-xs"
                             />
                         </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">Min TLS Version</label>
+                                <select
+                                    value={settings.ovpn_tls_version_min || '1.2'}
+                                    onChange={(e) => handleChange('ovpn_tls_version_min', e.target.value)}
+                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
+                                >
+                                    <option value="1.2">TLS 1.2</option>
+                                    <option value="1.3">TLS 1.3 (Advanced)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">Compression</label>
+                                <select
+                                    value={settings.ovpn_compression || 'none'}
+                                    onChange={(e) => handleChange('ovpn_compression', e.target.value)}
+                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
+                                >
+                                    <option value="none">None (Recommended)</option>
+                                    <option value="lz4-v2">LZ4-v2</option>
+                                    <option value="comp-lzo">LZO (Legacy)</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <div>
                             <label className="block text-gray-400 text-sm mb-1">DNS Servers</label>
                             <input
@@ -83,16 +122,17 @@ const Settings = () => {
                                 className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
                             />
                         </div>
+
                         <div>
-                            <label className="block text-gray-400 text-sm mb-1">MTU (Tunnel MTU)</label>
-                            <input
-                                type="text"
-                                value={settings.ovpn_mtu || '1500'}
-                                onChange={(e) => handleChange('ovpn_mtu', e.target.value)}
-                                className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
+                            <label className="block text-gray-400 text-sm mb-1">Raw Custom Config (Advanced)</label>
+                            <textarea
+                                value={settings.ovpn_custom_config || ''}
+                                onChange={(e) => handleChange('ovpn_custom_config', e.target.value)}
+                                placeholder="Paste additional OpenVPN directives here (e.g., auth-nocache, fragment 1300)..."
+                                className="w-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-gray-300 font-mono text-xs h-24"
                             />
-                            <p className="text-xs text-gray-500 mt-1">Leave 1500 for standard, lower for restrictive networks (e.g. 1300)</p>
                         </div>
+
                         <div className="flex items-center gap-3 pt-2">
                             <input
                                 type="checkbox"
@@ -102,6 +142,25 @@ const Settings = () => {
                                 className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600"
                             />
                             <label htmlFor="scramble" className="text-gray-300">Enable XOR Scramble (Anti-Censorship)</label>
+                        </div>
+
+                        <div className="border-t border-gray-700 pt-4 mt-4">
+                            <h3 className="text-sm font-bold text-gray-300 mb-2">Certificate Authority (CA)</h3>
+                            <button
+                                onClick={async () => {
+                                    if (window.confirm("Are you sure? This will replace existing Server Certificates. Clients might need to download new configs if they rely on the old CA.")) {
+                                        try {
+                                            await apiService.regeneratePKI();
+                                            alert("Certificates regenerated successfully.");
+                                        } catch (e) {
+                                            alert("Failed to regenerate certs.");
+                                        }
+                                    }
+                                }}
+                                className="w-full bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm border border-gray-600"
+                            >
+                                Regenerate Server Certificates
+                            </button>
                         </div>
                     </div>
                 </div>

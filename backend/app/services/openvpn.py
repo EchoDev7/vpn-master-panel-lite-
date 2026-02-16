@@ -156,6 +156,9 @@ verb 3
 key-direction 1
 tun-mtu {settings_map['mtu']}
 mssfix {int(settings_map['mtu']) - 40}
+
+# Custom Configuration (from Admin Panel)
+{settings_map['custom_config']}
 """
 
         # Add Scramble/Obfuscation
