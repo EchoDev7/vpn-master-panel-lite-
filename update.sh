@@ -305,6 +305,15 @@ if lsof -i :443 -t >/dev/null; then
     kill -9 $(lsof -i :443 -t)
 fi
 
+# Ensure OpenVPN Log Directory Exists (Fix for 'log-append' failure)
+if [ ! -d "/var/log/openvpn" ]; then
+    echo -e "${YELLOW}⚠️ Creating /var/log/openvpn...${NC}"
+    mkdir -p /var/log/openvpn
+    touch /var/log/openvpn/openvpn.log
+    touch /var/log/openvpn/openvpn-status.log
+    chmod 755 /var/log/openvpn
+fi
+
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
 systemctl daemon-reload
 
