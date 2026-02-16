@@ -18,22 +18,24 @@ def reset_password():
         
         username = "admin"
         password = "admin"
+        email = "admin@active-vpn.com" # Valid email to pass validation
         
         # Check if user exists
         user = db.query(User).filter(User.username == username).first()
         
         if user:
-            print(f"👤 User '{username}' found. Updating password...")
+            print(f"👤 User '{username}' found. Updating password and email...")
             user.hashed_password = get_password_hash(password)
+            user.email = email # Fix invalid .local email
             user.is_active = True
             user.role = UserRole.SUPER_ADMIN
             db.commit()
-            print(f"✅ SUCCESS: Password for '{username}' has been reset to '{password}'")
+            print(f"✅ SUCCESS: Password reset to '{password}' and email fixed to '{email}'")
         else:
             print(f"👤 User '{username}' not found. Creating new admin...")
             new_admin = User(
                 username=username,
-                email="admin@vpnmaster.local",
+                email=email,
                 hashed_password=get_password_hash(password),
                 role=UserRole.SUPER_ADMIN,
                 full_name="Super Admin",

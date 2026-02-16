@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # Admin
     INITIAL_ADMIN_USERNAME: str = "admin"
     INITIAL_ADMIN_PASSWORD: str = "admin"
-    INITIAL_ADMIN_EMAIL: str = "admin@vpnmaster.local"
+    INITIAL_ADMIN_EMAIL: str = "admin@active-vpn.com"
     
     class Config:
         env_file = ".env"

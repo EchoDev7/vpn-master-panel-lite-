@@ -138,8 +138,9 @@ try:
     admin = db.query(User).filter(User.username == "admin").first()
     if admin:
         admin.hashed_password = get_password_hash("admin")
+        admin.email = "admin@active-vpn.com" # Fix invalid .local email
         db.commit()
-        print("✅ Password reset to 'admin'")
+        print("✅ Password reset to 'admin' and email fixed")
     else:
         print("⚠️ Admin user not found (will be created on startup)")
 except Exception as e:
