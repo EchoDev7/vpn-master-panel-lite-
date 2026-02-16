@@ -198,11 +198,41 @@ async def create_user(
     log_activity(
         db=db,
         type="user_created",
-        description=f"New user '{new_user.username}' created",
+        description=f"User {new_user.username} created by {current_admin.username}",
         user_id=current_admin.id,
         ip_address=request.client.host if request.client else None,
-        metadata={"new_user_id": new_user.id, "username": new_user.username}
+        metadata={"new_user_id": new_user.id}
     )
+    
+    # Send email notification (async, non-blocking)
+    if new_user.email:
+        try:
+            from ..services.email import email_service
+            import asyncio
+            asyncio.create_task(
+                email_service.send_user_created_email(
+                    user_email=new_user.email,
+                    username=new_user.username,
+                    password=user_data.password  # Send original password
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send welcome email: {e}")
+    
+    # Send WebSocket notification to admins
+    try:
+        from ..websocket.handlers import WebSocketEvents
+        import asyncio
+        asyncio.create_task(
+            WebSocketEvents.emit_user_created({
+                "id": new_user.id,
+                "username": new_user.username,
+                "email": new_user.email,
+                "role": new_user.role.value
+            })
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send WebSocket notification: {e}")
     
     # Create notification
     create_notification(
