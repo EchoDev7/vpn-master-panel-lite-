@@ -34,6 +34,16 @@ try:
         print("❌ FAILURE: block-outside-dns found! This breaks mobile clients.")
         sys.exit(1)
 
+    # Check for Correct Server IP
+    if "remote 89.167.0.72" not in config_content:
+        print("❌ FAILURE: Config points to WRONG IP (Expected 89.167.0.72).")
+        # Extract what it points to
+        import re
+        match = re.search(r"remote\s+([\d\.]+)", config_content)
+        if match:
+            print(f"   Found: remote {match.group(1)}")
+        sys.exit(1)
+
     
     # Check for clean directives
     if "scramble obfuscate" in config_content:
