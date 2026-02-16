@@ -16,6 +16,7 @@ class OpenVPNService:
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     DATA_DIR = os.path.join(BASE_DIR, "data", "openvpn")
     CA_PATH = os.path.join(DATA_DIR, "ca.crt")
+    CA_KEY_PATH = os.path.join(DATA_DIR, "ca.key")
     TA_PATH = os.path.join(DATA_DIR, "ta.key")
     
     def __init__(self):
@@ -69,7 +70,7 @@ class OpenVPNService:
         if not server_ip:
             server_ip = self.server_ip
         
-        # Read Certs
+        # Read Certs (Only CA Cert, NOT Key)
         ca_cert = self._read_file(self.CA_PATH)
         tls_auth = self._read_file(self.TA_PATH)
         
@@ -87,6 +88,7 @@ class OpenVPNService:
             "auth_digest": "SHA256",
             "tls_version_min": "1.2",
             "compression": "none",
+            "dns": "8.8.8.8,1.1.1.1",
             # New Advanced Settings
             "topology": "subnet",
             "redirect_gateway": "1", # 1=enable, 0=disable
@@ -94,8 +96,7 @@ class OpenVPNService:
             "float": "1",
             "keepalive_interval": "10",
             "keepalive_timeout": "60",
-            "custom_config": "",
-            "dns": "8.8.8.8,1.1.1.1" # Default DNS
+            "custom_config": ""
         }
         
         
@@ -224,14 +225,14 @@ auth-user-pass
             if os.path.exists(self.CA_PATH):
                 shutil.copy(self.CA_PATH, f"{self.CA_PATH}.bak")
             
-            # 1. Generate CA (using openssl which is usually available)
-            # If openssl is missing, we are in trouble, but it's more standard than openvpn cli
+            # 1. Generate CA and Key
+            # CHANGED: Separate -out (cert) and -keyout (private key)
             subprocess.run(
-                f"openssl req -new -x509 -days 3650 -nodes -text -out {self.CA_PATH} -keyout {self.CA_PATH} -subj '/CN=VPN-Master-Root-CA'",
+                f"openssl req -new -x509 -days 3650 -nodes -text -out {self.CA_PATH} -keyout {self.CA_KEY_PATH} -subj '/CN=VPN-Master-Root-CA'",
                 shell=True, check=True
             )
             
-            # 2. Generate TLS Auth Key (ta.key) using Python (No dependency on openvpn cli)
+            # 2. Generate TLS Auth Key (ta.key) using Python
             self._write_static_key(self.TA_PATH)
             
             return True

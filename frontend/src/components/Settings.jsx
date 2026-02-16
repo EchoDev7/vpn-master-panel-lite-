@@ -79,6 +79,15 @@ const Settings = () => {
                                     />
                                 </div>
                                 <div>
+                                    <label className="block text-gray-400 text-sm mb-1">MTU (Default 1500)</label>
+                                    <input
+                                        type="text"
+                                        value={settings.ovpn_mtu || '1500'}
+                                        onChange={(e) => handleChange('ovpn_mtu', e.target.value)}
+                                        className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white"
+                                    />
+                                </div>
+                                <div>
                                     <label className="block text-gray-400 text-sm mb-1">Topology</label>
                                     <select
                                         value={settings.ovpn_topology || 'subnet'}
@@ -135,14 +144,25 @@ const Settings = () => {
                         <div className="border-b border-gray-700 pb-4">
                             <h3 className="text-gray-300 font-bold mb-3 text-sm uppercase">Security & Encryption</h3>
                             <div className="space-y-3">
-                                <div>
-                                    <label className="block text-gray-400 text-sm mb-1">Data Ciphers</label>
-                                    <input
-                                        type="text"
-                                        value={settings.ovpn_data_ciphers || 'AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305'}
-                                        onChange={(e) => handleChange('ovpn_data_ciphers', e.target.value)}
-                                        className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white font-mono text-xs"
-                                    />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-gray-400 text-sm mb-1">Data Ciphers</label>
+                                        <input
+                                            type="text"
+                                            value={settings.ovpn_data_ciphers || 'AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305'}
+                                            onChange={(e) => handleChange('ovpn_data_ciphers', e.target.value)}
+                                            className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white font-mono text-xs"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-gray-400 text-sm mb-1">Data Ciphers Fallback</label>
+                                        <input
+                                            type="text"
+                                            value={settings.ovpn_data_ciphers_fallback || 'AES-256-GCM'}
+                                            onChange={(e) => handleChange('ovpn_data_ciphers_fallback', e.target.value)}
+                                            className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white font-mono text-xs"
+                                        />
+                                    </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
