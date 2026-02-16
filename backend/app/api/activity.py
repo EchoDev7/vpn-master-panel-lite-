@@ -33,7 +33,7 @@ async def get_recent_activity(
             "description": a.description,
             "user": db.query(User).filter(User.id == a.user_id).first().username if a.user_id else "system",
             "timestamp": a.created_at.isoformat() if a.created_at else datetime.utcnow().isoformat(),
-            "metadata": json.loads(a.metadata) if a.metadata else {}
+            "metadata": json.loads(a.meta_data) if a.meta_data else {}
         }
         for a in activities
     ]
@@ -62,7 +62,7 @@ async def get_all_activity(
                 "user": db.query(User).filter(User.id == a.user_id).first().username if a.user_id else "system",
                 "timestamp": a.created_at.isoformat() if a.created_at else datetime.utcnow().isoformat(),
                 "ip_address": a.ip_address,
-                "metadata": json.loads(a.metadata) if a.metadata else {}
+                "metadata": json.loads(a.meta_data) if a.meta_data else {}
             }
             for a in activities
         ]
@@ -84,7 +84,7 @@ def log_activity(
         type=type,
         description=description,
         ip_address=ip_address,
-        metadata=json.dumps(metadata) if metadata else None
+        meta_data=json.dumps(metadata) if metadata else None
     )
     db.add(activity)
     db.commit()
