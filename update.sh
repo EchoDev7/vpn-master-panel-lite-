@@ -84,6 +84,16 @@ cd frontend
 # Install ALL dependencies (including devDependencies like vite)
 npm install
 npm run build
+
+# Verify Build Success
+if [ ! -f "dist/index.html" ]; then
+    echo -e "${RED}❌ Frontend Build Failed! 'dist/index.html' not found.${NC}"
+    echo -e "${YELLOW}Check npm logs above.${NC}"
+    exit 1
+fi
+
+# Fix Permissions (Critical for Nginx)
+chmod -R 755 dist
 cd ..
 
 # 6. Repair & Restart Services
