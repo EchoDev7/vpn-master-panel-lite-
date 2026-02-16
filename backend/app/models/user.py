@@ -161,7 +161,7 @@ class ConnectionLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     protocol = Column(String(20))  # openvpn, wireguard, l2tp, cisco
-    server_id = Column(Integer, ForeignKey("servers.id"))
+    server_id = Column(Integer, ForeignKey("vpn_servers.id"))
     
     # Connection details
     client_ip = Column(String(50))
