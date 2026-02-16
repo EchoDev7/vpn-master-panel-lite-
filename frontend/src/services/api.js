@@ -121,6 +121,34 @@ class APIService {
     return this.client.get(`/tunnels/${tunnelId}/status`);
   }
 
+  async deleteTunnel(tunnelId) {
+    return this.client.delete(`/tunnels/${tunnelId}`);
+  }
+
+  async getAvailableTunnels() {
+    return this.client.get('/tunnels/available');
+  }
+
+  async installTunnel(tunnelType) {
+    return this.client.post(`/tunnels/install/${tunnelType}`);
+  }
+
+  async uninstallTunnel(tunnelType) {
+    return this.client.post(`/tunnels/uninstall/${tunnelType}`);
+  }
+
+  async startTunnel(tunnelId) {
+    return this.client.post(`/tunnels/${tunnelId}/start`);
+  }
+
+  async stopTunnel(tunnelId) {
+    return this.client.post(`/tunnels/${tunnelId}/stop`);
+  }
+
+  async restartTunnel(tunnelId) {
+    return this.client.post(`/tunnels/${tunnelId}/restart`);
+  }
+
   // Monitoring
   async getDashboardStats() {
     return this.client.get('/monitoring/dashboard');
