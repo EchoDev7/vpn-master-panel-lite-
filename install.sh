@@ -225,7 +225,7 @@ EOF
     
     # Generate config
     SECRET_KEY=$(openssl rand -hex 32)
-    ADMIN_PASS=$(openssl rand -base64 12)
+    ADMIN_PASS="admin" # Default password as requested
     
     cat > .env << EOF
 # Lightweight Configuration

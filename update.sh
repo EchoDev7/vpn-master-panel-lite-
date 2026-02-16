@@ -124,6 +124,31 @@ EOF
     systemctl enable vpnmaster-backend
 fi
 
+# Password Reset (Force 'admin' as requested)
+echo -e "${CYAN}🔑 Resetting Admin Password to 'admin'...${NC}"
+cd /opt/vpn-master-panel/backend
+source venv/bin/activate
+python3 << PYEOF
+from app.database import SessionLocal
+from app.models.user import User
+from app.utils.security import get_password_hash
+
+db = SessionLocal()
+try:
+    admin = db.query(User).filter(User.username == "admin").first()
+    if admin:
+        admin.hashed_password = get_password_hash("admin")
+        db.commit()
+        print("✅ Password reset to 'admin'")
+    else:
+        print("⚠️ Admin user not found (will be created on startup)")
+except Exception as e:
+    print(f"❌ Error resetting password: {e}")
+finally:
+    db.close()
+PYEOF
+
+
 # Nginx Repair Function
 repair_nginx() {
     echo -e "${YELLOW}⚠️ Detected Nginx issue. Reconfiguring...${NC}"
