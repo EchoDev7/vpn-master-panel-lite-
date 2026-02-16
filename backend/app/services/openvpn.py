@@ -165,10 +165,6 @@ class OpenVPNService:
                     if key in settings:
                         settings[key] = s.value
 
-                # Also check for server IP override
-                if s.key == "wg_endpoint_ip" and s.value and s.value.strip():
-                    settings["server_ip"] = s.value.strip()
-
         return settings
 
     def _resolve_server_ip(self, settings: Dict[str, str], override: str = None) -> str:
