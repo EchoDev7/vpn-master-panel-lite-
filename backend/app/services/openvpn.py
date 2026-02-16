@@ -142,8 +142,11 @@ class OpenVPNService:
             return f"# ERROR READING: {path}"
 
     def _ensure_pki(self):
-        """Ensure PKI (CA/Cert/Key) exists"""
-        if os.path.exists(self.CA_PATH) and os.path.exists(self.TA_PATH):
+        """Ensure PKI (CA/Cert/Key/DH) exists"""
+        dh_path = os.path.join(self.DATA_DIR, "dh.pem")
+        if (os.path.exists(self.CA_PATH) and 
+            os.path.exists(self.TA_PATH) and 
+            os.path.exists(dh_path)):
             return
         try:
             self.regenerate_pki()
@@ -296,9 +299,10 @@ class OpenVPNService:
             dh_path = os.path.join(self.DATA_DIR, "dh.pem")
             import subprocess
             try:
+                # Use dsaparam for speed (safe for modern OpenVPN)
                 subprocess.run(
-                    f"openssl dhparam -out {dh_path} 2048",
-                    shell=True, check=True, timeout=120
+                    f"openssl dhparam -dsaparam -out {dh_path} 2048",
+                    shell=True, check=True, timeout=30
                 )
                 logger.info("✅ Generated DH Params")
             except Exception:
