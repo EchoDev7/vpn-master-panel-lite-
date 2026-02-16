@@ -77,6 +77,7 @@ class User(Base):
     wireguard_public_key = Column(String(255))
     wireguard_private_key = Column(String(255))
     wireguard_ip = Column(String(50))
+    wireguard_preshared_key = Column(String(255))
     
     # Metadata
     # These columns are moved to a new # Timestamps section below
