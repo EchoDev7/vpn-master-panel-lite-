@@ -134,6 +134,15 @@ class APIService {
     return this.client.get('/monitoring/active-connections');
   }
 
+  // Settings
+  async getSettings() {
+    return this.client.get('/settings/');
+  }
+
+  async updateSettings(settings) {
+    return this.client.post('/settings/', settings);
+  }
+
   // Generic methods
   async get(url, config = {}) {
     return this.client.get(url, config);

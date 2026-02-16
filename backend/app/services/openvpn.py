@@ -59,11 +59,44 @@ class OpenVPNService:
         ca_cert = self._read_file(self.CA_PATH)
         tls_auth = self._read_file(self.TA_PATH)
         
+        # Fetch settings from DB
+        from ..database import get_db_context
+        from ..models.setting import Setting
+        
+        protocol_setting = "udp"
+        scramble = "0"
+        mtu = "1500"
+        
+        with get_db_context() as db:
+            s_proto = db.query(Setting).filter(Setting.key == "ovpn_protocol").first()
+            if s_proto: protocol_setting = s_proto.value
+            
+            s_scramble = db.query(Setting).filter(Setting.key == "ovpn_scramble").first()
+            if s_scramble: scramble = s_scramble.value
+            
+            s_mtu = db.query(Setting).filter(Setting.key == "ovpn_mtu").first()
+            if s_mtu: mtu = s_mtu.value
+
+            # Override server_ip if set in settings
+            s_ip = db.query(Setting).filter(Setting.key == "wg_endpoint_ip").first() # Reuse endpoint ip setting
+            if s_ip and s_ip.value: server_ip = s_ip.value
+
+        # Determine protocol
+        # If 'both' is selected, we default to the requested one, or UDP if not specified
+        final_protocol = protocol if protocol else ("udp" if protocol_setting == "both" else protocol_setting)
+        
+        # Adjust port based on protocol (standard logic: 1194 UDP, 443 TCP commonly used)
+        final_port = port
+        if final_protocol == "tcp" and port == 1194:
+            # If default UDP port was passed but we want TCP, maybe use 443 or user setting?
+            # For now keep 1194 or let settings dictate. ideally we need ovpn_tcp_port and ovpn_udp_port
+            pass 
+
         # Base Configuration Template with Best Practices
         config = f"""client
 dev tun
-proto {protocol}
-remote {server_ip} {port}
+proto {final_protocol}
+remote {server_ip} {final_port}
 resolv-retry infinite
 nobind
 persist-key
@@ -75,7 +108,18 @@ ignore-unknown-option block-outside-dns
 block-outside-dns
 verb 3
 key-direction 1
+tun-mtu {mtu}
+mssfix {int(mtu) - 40}
+"""
 
+        # Add Scramble/Obfuscation
+        if scramble == "1":
+            config += """
+scramble obfuscate "vpnmaster"
+"""
+
+        # User Credentials
+        config += """
 # User Credentials
 auth-user-pass
 

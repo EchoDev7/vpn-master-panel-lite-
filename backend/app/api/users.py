@@ -352,3 +352,88 @@ async def reset_user_traffic(
     db.refresh(user)
     
     return user
+
+
+# --- Config Download Endpoints ---
+
+@router.get("/{user_id}/config/openvpn", response_model=dict)
+async def get_openvpn_config(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """Get OpenVPN configuration for user"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    if not user.openvpn_enabled:
+        raise HTTPException(status_code=400, detail="OpenVPN is not enabled for this user")
+        
+    from ..services.openvpn import openvpn_service
+    config_content = openvpn_service.generate_client_config(
+        username=user.username
+    )
+    
+    return {
+        "filename": f"{user.username}.ovpn",
+        "content": config_content
+    }
+
+
+@router.get("/{user_id}/config/wireguard", response_model=dict)
+async def get_wireguard_config(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """Get WireGuard configuration for user"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    if not user.wireguard_enabled or not user.wireguard_private_key:
+        raise HTTPException(status_code=400, detail="WireGuard is not enabled or keys missing for this user")
+        
+    from ..services.wireguard import WireGuardService
+    wg_service = WireGuardService()
+    
+    # Get server public key
+    try:
+        import subprocess
+        # Try default location first
+        key_path = f"{wg_service.CONFIG_DIR}/public.key"
+        if not os.path.exists(key_path):
+             # Fallback: derive from private key
+             key_path = f"{wg_service.CONFIG_DIR}/private.key"
+             if os.path.exists(key_path):
+                 server_pub_key = subprocess.check_output(
+                     f"wg pubkey < {key_path}", shell=True, text=True
+                 ).strip()
+             else:
+                 server_pub_key = "SERVER_PUBLIC_KEY_NOT_FOUND"
+        else:
+             with open(key_path, 'r') as f:
+                 server_pub_key = f.read().strip()
+    except:
+        server_pub_key = "SERVER_PUBLIC_KEY_ERROR"
+
+    # Get server IP
+    try:
+        import requests
+        server_ip = requests.get('https://api.ipify.org', timeout=2).text
+    except:
+        server_ip = "YOUR_SERVER_IP"
+        
+    config_content = wg_service.generate_client_config(
+        client_private_key=user.wireguard_private_key,
+        client_ip=user.wireguard_ip,
+        server_public_key=server_pub_key,
+        server_endpoint=server_ip,
+        server_port=51820 
+    )
+    
+    return {
+        "filename": f"{user.username}.conf",
+        "content": config_content
+    }

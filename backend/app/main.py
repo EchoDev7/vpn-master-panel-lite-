@@ -163,7 +163,20 @@ app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["
 app.include_router(users.router, prefix=f"{settings.API_V1_PREFIX}/users", tags=["Users"])
 app.include_router(servers.router, prefix=f"{settings.API_V1_PREFIX}/servers", tags=["Servers"])
 app.include_router(tunnels.router, prefix=f"{settings.API_V1_PREFIX}/tunnels", tags=["Tunnels"])
+app.include_router(tunnels.router, prefix=f"{settings.API_V1_PREFIX}/tunnels", tags=["Tunnels"])
 app.include_router(monitoring.router, prefix=f"{settings.API_V1_PREFIX}/monitoring", tags=["Monitoring"])
+
+# Settings Router
+from .api import settings as api_settings
+app.include_router(api_settings.router, prefix=f"{settings.API_V1_PREFIX}/settings", tags=["Settings"])
+
+# Init default settings on startup
+@app.on_event("startup")
+async def startup_event():
+    from .database import get_db_context
+    from .api.settings import init_default_settings
+    with get_db_context() as db:
+        init_default_settings(db)
 
 
 if __name__ == "__main__":
