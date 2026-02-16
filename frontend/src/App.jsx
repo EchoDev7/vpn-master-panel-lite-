@@ -11,6 +11,7 @@ import Servers from './components/Servers'
 
 import Login from './components/Login'
 import ProtectedRoute from './components/ProtectedRoute'
+import ErrorBoundary from './components/ErrorBoundary'
 
 function App() {
     return (
@@ -71,13 +72,15 @@ function MainLayout() {
 
             {/* Main Content */}
             <main className="container mx-auto px-4 py-8">
-                <Routes>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="/servers" element={<Servers />} />
-                    <Route path="/tunnels" element={<Tunnels />} />
-                    <Route path="/users" element={<Users />} />
-                    <Route path="/settings" element={<Settings />} />
-                </Routes>
+                <ErrorBoundary>
+                    <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/servers" element={<Servers />} />
+                        <Route path="/tunnels" element={<Tunnels />} />
+                        <Route path="/users" element={<Users />} />
+                        <Route path="/settings" element={<Settings />} />
+                    </Routes>
+                </ErrorBoundary>
             </main>
 
             {/* Footer */}
