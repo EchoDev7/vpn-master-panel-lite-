@@ -89,6 +89,7 @@ cd ..
 # 6. Repair & Restart Services
 echo -e "${CYAN}🔧 Verifying Services...${NC}"
 
+# Backend Service Repair
 SERVICE_FILE="/etc/systemd/system/vpnmaster-backend.service"
 if [ ! -f "$SERVICE_FILE" ]; then
     echo -e "${YELLOW}⚠️ Service file missing. Recreating...${NC}"
@@ -113,10 +114,86 @@ EOF
     systemctl enable vpnmaster-backend
 fi
 
+# Nginx Repair Function
+repair_nginx() {
+    echo -e "${YELLOW}⚠️ Detected Nginx issue. Reconfiguring...${NC}"
+    
+    # Create safe config
+    cat > /etc/nginx/sites-available/vpnmaster << EOF
+# Backend API
+server {
+    listen 8000;
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+    }
+}
+
+# Frontend
+server {
+    listen 3000;
+    server_name _;
+
+    root /opt/vpn-master-panel/frontend/dist;
+    index index.html;
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript;
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    location /api {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+    }
+}
+EOF
+    rm -f /etc/nginx/sites-enabled/default
+    ln -sf /etc/nginx/sites-available/vpnmaster /etc/nginx/sites-enabled/
+    nginx -t && systemctl restart nginx
+    echo -e "${GREEN}✓ Nginx repaired${NC}"
+}
+
+# Check Firewall
+echo -e "${CYAN}🔥 Checking Firewall...${NC}"
+ufw allow 3000/tcp > /dev/null 2>&1
+ufw allow 8000/tcp > /dev/null 2>&1
+ufw allow 22/tcp > /dev/null 2>&1
+ufw allow 1194/udp > /dev/null 2>&1
+ufw allow 51820/udp > /dev/null 2>&1
+ufw --force enable > /dev/null 2>&1
+
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
 systemctl daemon-reload
 systemctl restart vpnmaster-backend
-systemctl restart nginx
+
+# Check Nginx Config
+if ! nginx -t > /dev/null 2>&1; then
+    repair_nginx
+else
+    systemctl restart nginx
+fi
+
+# Final Port Check
+if ! netstat -tuln | grep -q ":3000"; then
+    echo -e "${RED}⚠️ Warning: Port 3000 still not listening. Trying force repair...${NC}"
+    repair_nginx
+fi
 
 echo -e "${GREEN}✅ Update Successfully Completed!${NC}"
+echo -e "${GREEN}   Version: $(git rev-parse --short HEAD)${NC}"
 echo -e "${GREEN}   Version: $(git rev-parse --short HEAD)${NC}"
