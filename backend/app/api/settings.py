@@ -92,7 +92,7 @@ def init_default_settings(db: Session):
         # Routing & DNS
         "ovpn_redirect_gateway": "1",
         "ovpn_dns": "1.1.1.1,8.8.8.8",
-        "ovpn_block_outside_dns": "1",
+        "ovpn_block_outside_dns": "0",
         "ovpn_inter_client": "0",
 
         # Connection
