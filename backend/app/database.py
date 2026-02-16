@@ -77,6 +77,7 @@ def init_db():
     try:
         from .models.user import User
         from .models.vpn_server import VPNServer, Tunnel
+        from .models.subscription import UserSubscription, SubscriptionPlan, SubscriptionHistory # Fix Mapper Error
         Base.metadata.create_all(bind=engine)
         
         # Auto-migrate: add new columns to existing tables
