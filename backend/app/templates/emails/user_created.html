@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            border-radius: 10px 10px 0 0;
+        }
+
+        .content {
+            background: #f9f9f9;
+            padding: 30px;
+            border-radius: 0 0 10px 10px;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 30px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+
+        .credentials {
+            background: white;
+            padding: 20px;
+            border-left: 4px solid #667eea;
+            margin: 20px 0;
+        }
+
+        .footer {
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>🛡️ Welcome to VPN Master Panel</h1>
+    </div>
+    <div class="content">
+        <p>Hello <strong>{{ username }}</strong>,</p>
+
+        <p>Your VPN account has been created successfully! You can now access the panel and start using our VPN
+            services.</p>
+
+        <div class="credentials">
+            <h3>Your Login Credentials:</h3>
+            <p><strong>Username:</strong> {{ username }}</p>
+            <p><strong>Password:</strong> {{ password }}</p>
+            <p><strong>Panel URL:</strong> <a href="{{ panel_url }}">{{ panel_url }}</a></p>
+        </div>
+
+        <p><strong>⚠️ Important:</strong> Please change your password after your first login for security reasons.</p>
+
+        <center>
+            <a href="{{ panel_url }}" class="button">Access Panel</a>
+        </center>
+
+        <p>If you have any questions, please don't hesitate to contact our support team.</p>
+
+        <p>Best regards,<br>VPN Master Panel Team</p>
+    </div>
+    <div class="footer">
+        <p>This is an automated email. Please do not reply to this message.</p>
+    </div>
+</body>
+
+</html>
