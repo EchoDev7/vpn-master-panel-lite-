@@ -334,87 +334,103 @@ async def get_traffic_by_type(
     current_admin: User = Depends(get_current_admin)
 ):
     """Get traffic statistics separated by type (direct vs tunnel)"""
-    from ..models.user import TrafficType
-    from sqlalchemy import cast, Date
-    
-    start_date = datetime.utcnow() - timedelta(days=days)
-    
-    # Direct traffic
-    direct_traffic = db.query(
-        func.sum(TrafficLog.upload_bytes + TrafficLog.download_bytes)
-    ).filter(
-        TrafficLog.traffic_type == TrafficType.DIRECT,
-        TrafficLog.recorded_at >= start_date
-    ).scalar() or 0
-    
-    # Tunnel traffic
-    tunnel_traffic = db.query(
-        func.sum(TrafficLog.upload_bytes + TrafficLog.download_bytes)
-    ).filter(
-        TrafficLog.traffic_type == TrafficType.TUNNEL,
-        TrafficLog.recorded_at >= start_date
-    ).scalar() or 0
-    
-    # Daily breakdown
-    daily_direct = db.query(
-        cast(TrafficLog.recorded_at, Date).label('date'),
-        func.sum(TrafficLog.upload_bytes).label('upload'),
-        func.sum(TrafficLog.download_bytes).label('download')
-    ).filter(
-        TrafficLog.traffic_type == TrafficType.DIRECT,
-        TrafficLog.recorded_at >= start_date
-    ).group_by(
-        cast(TrafficLog.recorded_at, Date)
-    ).all()
-    
-    daily_tunnel = db.query(
-        cast(TrafficLog.recorded_at, Date).label('date'),
-        func.sum(TrafficLog.upload_bytes).label('upload'),
-        func.sum(TrafficLog.download_bytes).label('download')
-    ).filter(
-        TrafficLog.traffic_type == TrafficType.TUNNEL,
-        TrafficLog.recorded_at >= start_date
-    ).group_by(
-        cast(TrafficLog.recorded_at, Date)
-    ).all()
-    
-    # Combine daily data
-    daily_combined = {}
-    for day in daily_direct:
-        daily_combined[day.date.isoformat()] = {
-            "date": day.date.isoformat(),
-            "direct_gb": round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2),
-            "tunnel_gb": 0
+    try:
+        from ..models.user import TrafficType
+        from sqlalchemy import cast, Date
+        
+        start_date = datetime.utcnow() - timedelta(days=days)
+        
+        # Direct traffic
+        direct_traffic = db.query(
+            func.sum(TrafficLog.upload_bytes + TrafficLog.download_bytes)
+        ).filter(
+            TrafficLog.traffic_type == TrafficType.DIRECT,
+            TrafficLog.recorded_at >= start_date
+        ).scalar() or 0
+        
+        # Tunnel traffic
+        tunnel_traffic = db.query(
+            func.sum(TrafficLog.upload_bytes + TrafficLog.download_bytes)
+        ).filter(
+            TrafficLog.traffic_type == TrafficType.TUNNEL,
+            TrafficLog.recorded_at >= start_date
+        ).scalar() or 0
+        
+        # Daily breakdown
+        daily_direct = db.query(
+            cast(TrafficLog.recorded_at, Date).label('date'),
+            func.sum(TrafficLog.upload_bytes).label('upload'),
+            func.sum(TrafficLog.download_bytes).label('download')
+        ).filter(
+            TrafficLog.traffic_type == TrafficType.DIRECT,
+            TrafficLog.recorded_at >= start_date
+        ).group_by(
+            cast(TrafficLog.recorded_at, Date)
+        ).all()
+        
+        daily_tunnel = db.query(
+            cast(TrafficLog.recorded_at, Date).label('date'),
+            func.sum(TrafficLog.upload_bytes).label('upload'),
+            func.sum(TrafficLog.download_bytes).label('download')
+        ).filter(
+            TrafficLog.traffic_type == TrafficType.TUNNEL,
+            TrafficLog.recorded_at >= start_date
+        ).group_by(
+            cast(TrafficLog.recorded_at, Date)
+        ).all()
+        
+        # Combine daily data
+        daily_combined = {}
+        for day in daily_direct:
+            daily_combined[day.date.isoformat()] = {
+                "date": day.date.isoformat(),
+                "direct_gb": round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2),
+                "tunnel_gb": 0
+            }
+        
+        for day in daily_tunnel:
+            date_str = day.date.isoformat()
+            if date_str in daily_combined:
+                daily_combined[date_str]["tunnel_gb"] = round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2)
+            else:
+                daily_combined[date_str] = {
+                    "date": date_str,
+                    "direct_gb": 0,
+                    "tunnel_gb": round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2)
+                }
+        
+        return {
+            "summary": {
+                "direct": {
+                    "bytes": direct_traffic,
+                    "gb": round(direct_traffic / (1024**3), 2)
+                },
+                "tunnel": {
+                    "bytes": tunnel_traffic,
+                    "gb": round(tunnel_traffic / (1024**3), 2)
+                },
+                "total": {
+                    "bytes": direct_traffic + tunnel_traffic,
+                    "gb": round((direct_traffic + tunnel_traffic) / (1024**3), 2)
+                }
+            },
+            "daily": list(daily_combined.values())
         }
-    
-    for day in daily_tunnel:
-        date_str = day.date.isoformat()
-        if date_str in daily_combined:
-            daily_combined[date_str]["tunnel_gb"] = round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2)
-        else:
-            daily_combined[date_str] = {
-                "date": date_str,
-                "direct_gb": 0,
-                "tunnel_gb": round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2)
-            }
-    
-    return {
-        "summary": {
-            "direct": {
-                "bytes": direct_traffic,
-                "gb": round(direct_traffic / (1024**3), 2)
+    except Exception as e:
+        # If traffic_type column doesn't exist or has issues, return empty data
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Error in traffic-by-type endpoint: {e}")
+        
+        # Return empty but valid structure
+        return {
+            "summary": {
+                "direct": {"bytes": 0, "gb": 0},
+                "tunnel": {"bytes": 0, "gb": 0},
+                "total": {"bytes": 0, "gb": 0}
             },
-            "tunnel": {
-                "bytes": tunnel_traffic,
-                "gb": round(tunnel_traffic / (1024**3), 2)
-            },
-            "total": {
-                "bytes": direct_traffic + tunnel_traffic,
-                "gb": round((direct_traffic + tunnel_traffic) / (1024**3), 2)
-            }
-        },
-        "daily": list(daily_combined.values())
-    }
+            "daily": []
+        }
 
 
 @router.get("/protocol-distribution")
