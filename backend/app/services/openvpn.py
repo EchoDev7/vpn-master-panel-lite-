@@ -194,18 +194,14 @@ auth-user-pass
             import subprocess
             import shutil
             
+            # Ensure parent data directory exists
+            os.makedirs(self.DATA_DIR, exist_ok=True)
+
             # Backup existing
             if os.path.exists(self.CA_PATH):
                 shutil.copy(self.CA_PATH, f"{self.CA_PATH}.bak")
             
-            # Ensure dir
-            os.makedirs(os.path.dirname(self.CA_PATH), exist_ok=True)
-            
             # 1. Generate CA
-            # In a real env, we might want to separate CA and Server Cert, but for 'Lite' single-server
-            # we often use the CA cert as the "root" to verify the server (which is self-signed or issued by this CA).
-            # Here we follow a simple self-signed CA approach valid for 10 years.
-            
             subprocess.run(
                 f"openssl req -new -x509 -days 3650 -nodes -text -out {self.CA_PATH} -keyout {self.CA_PATH} -subj '/CN=VPN-Master-Root-CA'",
                 shell=True, check=True
