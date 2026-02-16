@@ -132,14 +132,24 @@ const Users = () => {
         }
     };
 
-    const handleDelete = async (userId) => {
-        if (window.confirm('Are you sure you want to delete this user?')) {
-            try {
-                await apiService.deleteUser(userId);
-                loadUsers();
-            } catch (error) {
-                alert('Failed to delete user');
-            }
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [userToDelete, setUserToDelete] = useState(null);
+
+    const handleDeleteClick = (user) => {
+        setUserToDelete(user);
+        setShowDeleteModal(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!userToDelete) return;
+        try {
+            await apiService.deleteUser(userToDelete.id);
+            loadUsers();
+            setShowDeleteModal(false);
+            setUserToDelete(null);
+        } catch (error) {
+            console.error('Failed to delete user:', error);
+            alert('Failed to delete user');
         }
     };
 
@@ -198,7 +208,7 @@ const Users = () => {
                                     <button onClick={() => handleOpenConfig(user)} className="text-yellow-400 hover:text-yellow-300 p-1" title="Configuration">
                                         <Key size={18} />
                                     </button>
-                                    <button onClick={() => handleDelete(user.id)} className="text-red-400 hover:text-red-300 p-1" title="Delete">
+                                    <button onClick={() => handleDeleteClick(user)} className="text-red-400 hover:text-red-300 p-1" title="Delete">
                                         <Trash2 size={18} />
                                     </button>
                                 </td>
@@ -266,7 +276,11 @@ const Users = () => {
                                         step="0.1"
                                         className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:border-blue-500"
                                         value={formData.data_limit_gb}
-                                        onChange={e => setFormData({ ...formData, data_limit_gb: parseFloat(e.target.value) })}
+                                        onChange={e => {
+                                            // Handle leading zeros or empty string cleanly
+                                            const val = e.target.value;
+                                            setFormData({ ...formData, data_limit_gb: val === '' ? 0 : parseFloat(val) })
+                                        }}
                                     />
                                     <span className="text-xs text-gray-500">0 = Unlimited</span>
                                 </div>
@@ -319,6 +333,34 @@ const Users = () => {
                     </div>
                 </div>
             )}
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteModal && userToDelete && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+                    <div className="bg-gray-800 rounded-xl p-6 w-full max-w-sm border border-gray-700 shadow-2xl text-center">
+                        <Trash2 className="mx-auto text-red-500 mb-4" size={48} />
+                        <h3 className="text-xl font-bold text-white mb-2">Delete User?</h3>
+                        <p className="text-gray-400 mb-6">
+                            Are you sure you want to delete <span className="text-white font-semibold">{userToDelete.username}</span>? This action cannot be undone.
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setShowDeleteModal(false)}
+                                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDelete}
+                                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg font-medium"
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Config Modal */}
             {showConfigModal && selectedConfigUser && (
                 <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
