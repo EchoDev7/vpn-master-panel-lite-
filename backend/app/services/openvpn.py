@@ -94,8 +94,10 @@ class OpenVPNService:
             "float": "1",
             "keepalive_interval": "10",
             "keepalive_timeout": "60",
-            "custom_config": ""
+            "custom_config": "",
+            "dns": "8.8.8.8,1.1.1.1" # Default DNS
         }
+        
         
         with get_db_context() as db:
             all_settings = db.query(Setting).all()
@@ -148,6 +150,13 @@ tls-client
 """
         if settings_map["compression"] != "none":
              config += f"compress {settings_map['compression']}\n"
+
+        # DNS Settings (Only if valid)
+        if settings_map.get("dns") and "," in settings_map["dns"]:
+             # Split by comma
+             for dns in settings_map["dns"].split(','):
+                 if dns.strip():
+                     config += f"dhcp-option DNS {dns.strip()}\n"
         
         config += f"""
 # Optimization
@@ -179,6 +188,28 @@ auth-user-pass
         
         return config
 
+    def _write_static_key(self, path: str):
+        """Generate OpenVPN Static Key (2048 bit) using Python"""
+        import secrets
+        
+        # OpenVPN static key format
+        # -----BEGIN OpenVPN Static key V1-----
+        # hex strings ...
+        # -----END OpenVPN Static key V1-----
+        
+        # Generate 256 bytes (2048 bits) of random data
+        key_data = secrets.token_bytes(256)
+        hex_data = key_data.hex()
+        
+        content = "-----BEGIN OpenVPN Static key V1-----\n"
+        # Split into lines of 32 chars (16 bytes)
+        for i in range(0, len(hex_data), 32):
+            content += hex_data[i:i+32] + "\n"
+        content += "-----END OpenVPN Static key V1-----\n"
+        
+        with open(path, "w") as f:
+            f.write(content)
+
     def regenerate_pki(self):
         """Regenerate CA and Server Certificates"""
         logger.info("Regenerating OpenVPN PKI...")
@@ -193,17 +224,15 @@ auth-user-pass
             if os.path.exists(self.CA_PATH):
                 shutil.copy(self.CA_PATH, f"{self.CA_PATH}.bak")
             
-            # 1. Generate CA
+            # 1. Generate CA (using openssl which is usually available)
+            # If openssl is missing, we are in trouble, but it's more standard than openvpn cli
             subprocess.run(
                 f"openssl req -new -x509 -days 3650 -nodes -text -out {self.CA_PATH} -keyout {self.CA_PATH} -subj '/CN=VPN-Master-Root-CA'",
                 shell=True, check=True
             )
             
-            # 2. Generate TLS Auth Key (ta.key)
-            subprocess.run(
-                f"openvpn --genkey secret {self.TA_PATH}",
-                shell=True, check=True
-            )
+            # 2. Generate TLS Auth Key (ta.key) using Python (No dependency on openvpn cli)
+            self._write_static_key(self.TA_PATH)
             
             return True
         except Exception as e:
