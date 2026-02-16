@@ -134,14 +134,15 @@ install_dependencies() {
     
     export DEBIAN_FRONTEND=noninteractive
     
-    print_info "Updating package lists..."
+    print_info "Updating package lists and upgrading system..."
     apt update -qq > /dev/null 2>&1
+    apt upgrade -y > /dev/null 2>&1
     
-    print_info "Installing VPN Core Services..."
+    print_info "Installing VPN Core Services (Latest)..."
     apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent --no-install-recommends > /dev/null 2>&1
     print_success "OpenVPN & WireGuard installed"
     
-    print_info "Installing Python 3.11 (lightweight)..."
+    print_info "Installing Python 3.11 (latest)..."
     add-apt-repository ppa:deadsnakes/ppa -y > /dev/null 2>&1
     apt install -y python3.11 python3.11-venv python3.11-dev python3-pip --no-install-recommends > /dev/null 2>&1
     
@@ -156,13 +157,13 @@ install_dependencies() {
     print_success "Nginx-light installed"
     
     # Node.js for frontend
-    print_info "Installing Node.js 18..."
-    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - > /dev/null 2>&1
+    print_info "Installing Node.js 20 (LTS)..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
     apt install -y nodejs --no-install-recommends > /dev/null 2>&1
-    print_success "Node.js installed"
+    print_success "Node.js 20 installed"
     
     print_info "Installing essential tools..."
-    apt install -y curl wget git unzip --no-install-recommends > /dev/null 2>&1
+    apt install -y curl wget git unzip software-properties-common --no-install-recommends > /dev/null 2>&1
     
     # Clean up
     apt autoremove -y > /dev/null 2>&1
@@ -196,26 +197,26 @@ setup_backend() {
     print_info "Installing minimal Python dependencies..."
     source venv/bin/activate
     
-    # Create minimal requirements
+    # Create minimal requirements with loose versioning for latest compatible
     cat > requirements.txt << EOF
 # Core (minimal)
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
 
 # Database - SQLite only (no PostgreSQL)
-sqlalchemy==2.0.25
-aiosqlite==0.19.0
+sqlalchemy>=2.0.25
+aiosqlite>=0.19.0
 
 # Security (minimal)
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
 
 # Utils (minimal)
-python-dotenv==1.0.0
-psutil==5.9.8
+python-dotenv>=1.0.0
+psutil>=5.9.8
 EOF
     
     pip install --upgrade pip -q > /dev/null 2>&1
