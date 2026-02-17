@@ -400,15 +400,24 @@ EOF
 setup_firewall() {
     print_step "Configuring Firewall"
     
-    ufw --force enable > /dev/null 2>&1
+    ufw default deny incoming
+    ufw default allow outgoing
+    
     ufw allow 22/tcp > /dev/null 2>&1
+    ufw allow 80/tcp > /dev/null 2>&1
+    ufw allow 443/tcp > /dev/null 2>&1
+    
+    # Panel ports
     ufw allow 3000/tcp > /dev/null 2>&1
     ufw allow 8000/tcp > /dev/null 2>&1
+    
+    # VPN ports
     ufw allow 1194/udp > /dev/null 2>&1
-    ufw allow 443/tcp > /dev/null 2>&1 # Fix: Allow OpenVPN TCP
     ufw allow 51820/udp > /dev/null 2>&1
     
-    print_success "Firewall configured"
+    ufw --force enable > /dev/null 2>&1
+    
+    print_success "Firewall configured (secured)"
 }
 
 show_resource_usage() {
