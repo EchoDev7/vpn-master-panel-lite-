@@ -142,17 +142,51 @@ class OpenVPNService:
             return f"# ERROR READING: {path}"
 
     def _ensure_pki(self):
-        """Ensure PKI (CA/Cert/Key/DH) exists"""
+        """Ensure PKI (CA/Cert/Key/DH) exists and is valid"""
         # dh_path = os.path.join(self.DATA_DIR, "dh.pem") 
         # We use 'dh none', so we don't strictly need dh.pem
         if (os.path.exists(self.CA_PATH) and 
-            os.path.exists(self.TA_PATH)):
-            return
+            os.path.exists(self.TA_PATH) and
+            os.path.exists(os.path.join(self.DATA_DIR, "server.crt")) and
+            os.path.exists(os.path.join(self.DATA_DIR, "server.key"))):
+            
+            # Validate Key Pair Match
+            if self._validate_key_pair():
+                return
+            else:
+                logger.warning("⚠️ PKI Key/Cert mismatch detected! Regenerating...")
         
         try:
             self.regenerate_pki()
         except Exception as e:
             logger.error(f"Auto-generation of PKI failed: {e}")
+
+    def _validate_key_pair(self) -> bool:
+        """Check if server.crt and server.key match"""
+        try:
+            cert_path = os.path.join(self.DATA_DIR, "server.crt")
+            key_path = os.path.join(self.DATA_DIR, "server.key")
+            
+            with open(cert_path, "rb") as f:
+                cert = x509.load_pem_x509_certificate(f.read(), default_backend())
+            
+            with open(key_path, "rb") as f:
+                private_key = serialization.load_pem_private_key(
+                    f.read(), password=None, backend=default_backend()
+                )
+            
+            # Compare public keys
+            pub_key_cert = cert.public_key().public_bytes(
+                serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            pub_key_key = private_key.public_key().public_bytes(
+                serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            
+            return pub_key_cert == pub_key_key
+        except Exception as e:
+            logger.error(f"PKI Validation Error: {e}")
+            return False
 
     def _load_settings(self) -> Dict[str, str]:
         """Load all OpenVPN settings from DB, merged with defaults"""
