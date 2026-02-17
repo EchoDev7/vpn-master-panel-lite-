@@ -367,6 +367,53 @@ EOF
     print_success "Nginx configured (optimized for 1 core)"
 }
 
+setup_pki() {
+    print_step "Initializing OpenVPN PKI (EasyRSA)"
+    
+    # Install easy-rsa if missing (should be installed by dependencies, but double check)
+    if [ ! -d "/usr/share/easy-rsa" ]; then
+        apt install -y easy-rsa > /dev/null 2>&1
+    fi
+
+    # Setup EasyRSA directory
+    rm -rf /opt/vpn-master-panel/easy-rsa
+    cp -r /usr/share/easy-rsa /opt/vpn-master-panel/easy-rsa
+    cd /opt/vpn-master-panel/easy-rsa
+    
+    # Initialize PKI
+    ./easyrsa init-pki
+    
+    # Build CA (Batch mode, no pass)
+    print_info "Generating CA..."
+    export EASYRSA_BATCH=1
+    export EASYRSA_REQ_CN="VPN-Master-Root-CA"
+    ./easyrsa build-ca nopass
+    
+    # Build Server Key/Cert
+    print_info "Generating Server Cert/Key..."
+    export EASYRSA_REQ_CN="server"
+    ./easyrsa build-server-full server nopass
+    
+    # Copy keys to backend data dir (so backend sees them)
+    mkdir -p /opt/vpn-master-panel/backend/data/openvpn
+    cp pki/ca.crt /opt/vpn-master-panel/backend/data/openvpn/
+    cp pki/issued/server.crt /opt/vpn-master-panel/backend/data/openvpn/
+    cp pki/private/server.key /opt/vpn-master-panel/backend/data/openvpn/
+    
+    # Copy keys to /etc/openvpn (for the service)
+    mkdir -p /etc/openvpn
+    cp pki/ca.crt /etc/openvpn/
+    cp pki/issued/server.crt /etc/openvpn/
+    cp pki/private/server.key /etc/openvpn/
+    
+    # Generate TLS Auth Key (Official OpenVPN method)
+    print_info "Generating TLS Auth Key..."
+    openvpn --genkey --secret /opt/vpn-master-panel/backend/data/openvpn/ta.key
+    cp /opt/vpn-master-panel/backend/data/openvpn/ta.key /etc/openvpn/ta.key
+    
+    print_success "PKI Initialized (Standard EasyRSA)"
+}
+
 setup_systemd() {
     print_step "Creating Lightweight Service"
     
@@ -523,6 +570,7 @@ main() {
     setup_backend
     setup_frontend
     setup_nginx
+    setup_pki
     setup_systemd
     setup_firewall
     

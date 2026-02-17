@@ -141,25 +141,33 @@ class OpenVPNService:
             logger.error(f"Failed to read {path}: {e}")
             return f"# ERROR READING: {path}"
 
+    # ================================================================
+    # PKI VALIDATION (Official EasyRSA ONLY)
+    # ================================================================
+
     def _ensure_pki(self):
         """Ensure PKI (CA/Cert/Key/DH) exists and is valid"""
-        # dh_path = os.path.join(self.DATA_DIR, "dh.pem") 
-        # We use 'dh none', so we don't strictly need dh.pem
-        if (os.path.exists(self.CA_PATH) and 
-            os.path.exists(self.TA_PATH) and
-            os.path.exists(os.path.join(self.DATA_DIR, "server.crt")) and
-            os.path.exists(os.path.join(self.DATA_DIR, "server.key"))):
-            
-            # Validate Key Pair Match
-            if self._validate_key_pair():
-                return
-            else:
-                logger.warning("⚠️ PKI Key/Cert mismatch detected! Regenerating...")
+        # We STRICTLY rely on easy-rsa generated keys from install.sh/update.sh
+        # We do NOT generate keys in Python to avoid non-standard configs.
         
-        try:
-            self.regenerate_pki()
-        except Exception as e:
-            logger.error(f"Auto-generation of PKI failed: {e}")
+        required_files = [
+            self.CA_PATH,
+            self.TA_PATH,
+            os.path.join(self.DATA_DIR, "server.crt"),
+            os.path.join(self.DATA_DIR, "server.key")
+        ]
+        
+        missing = [f for f in required_files if not os.path.exists(f)]
+        
+        if missing:
+            logger.critical(f"❌ MISSING PKI FILES: {missing}")
+            logger.critical("⚠️ Please run './update.sh' to generate standard OpenVPN keys via EasyRSA.")
+            # We do not raise here to allow the service to start (web UI), 
+            # but OpenVPN service itself will fail until fixed.
+        else:
+             # Validate Key Pair Match just to be safe
+            if not self._validate_key_pair():
+                logger.warning("⚠️ PKI Key/Cert mismatch detected! Run './update.sh' to fix.")
 
     def _validate_key_pair(self) -> bool:
         """Check if server.crt and server.key match and key is unencrypted"""
@@ -174,7 +182,7 @@ class OpenVPNService:
                 key_data = f.read()
                 # Check for encryption header (Basic check)
                 if b"ENCRYPTED" in key_data or b"Proc-Type: 4,ENCRYPTED" in key_data:
-                    logger.warning("⚠️ Server key is encrypted (password protected). Regeneration required.")
+                    logger.warning("⚠️ Server key is encrypted (password protected). Regeneration required via update.sh.")
                     return False
                 
                 private_key = serialization.load_pem_private_key(
@@ -219,163 +227,6 @@ class OpenVPNService:
             return settings["server_ip"]
         return self.server_ip
 
-    # ================================================================
-    # PURE PYTHON PKI GENERATION (Fixes "CA does not create" issues)
-    # ================================================================
-
-    def _generate_private_key(self):
-        return rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
-        )
-
-    def _save_key(self, key, path):
-        with open(path, "wb") as f:
-            f.write(key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption()
-            ))
-
-    def _generate_self_signed_ca(self, key):
-        subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, u"VPN-Master-Root-CA"),
-        ])
-        cert = x509.CertificateBuilder().subject_name(
-            subject
-        ).issuer_name(
-            issuer
-        ).public_key(
-            key.public_key()
-        ).serial_number(
-            x509.random_serial_number()
-        ).not_valid_before(
-            datetime.utcnow()
-        ).not_valid_after(
-            datetime.utcnow() + timedelta(days=3650)
-        ).add_extension(
-            x509.BasicConstraints(ca=True, path_length=None), critical=True,
-        ).sign(key, hashes.SHA256(), default_backend())
-        return cert
-
-    def _generate_server_cert(self, ca_cert, ca_key, server_key):
-        subject = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, u"VPN-Master-Server"),
-        ])
-        cert = x509.CertificateBuilder().subject_name(
-            subject
-        ).issuer_name(
-            ca_cert.subject
-        ).public_key(
-            server_key.public_key()
-        ).serial_number(
-            x509.random_serial_number()
-        ).not_valid_before(
-            datetime.utcnow()
-        ).not_valid_after(
-            datetime.utcnow() + timedelta(days=3650)
-        ).add_extension(
-            x509.BasicConstraints(ca=False, path_length=None), critical=True,
-        ).add_extension(
-            x509.KeyUsage(
-                digital_signature=True,
-                content_commitment=False,
-                key_encipherment=True,
-                data_encipherment=False,
-                key_agreement=False,
-                key_cert_sign=False,
-                crl_sign=False,
-                encipher_only=False,
-                decipher_only=False
-            ), critical=True
-        ).add_extension(
-             x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]), critical=True
-        ).sign(ca_key, hashes.SHA256(), default_backend())
-        return cert
-
-    def _save_cert(self, cert, path):
-        with open(path, "wb") as f:
-            f.write(cert.public_bytes(serialization.Encoding.PEM))
-
-    def _write_static_key(self, path: str):
-        """Generate OpenVPN Static Key (tls-crypt/auth)"""
-        key_data = secrets.token_bytes(256)
-        hex_data = key_data.hex()
-        content = "-----BEGIN OpenVPN Static key V1-----\n"
-        for i in range(0, len(hex_data), 32):
-            content += hex_data[i:i+32] + "\n"
-        content += "-----END OpenVPN Static key V1-----\n"
-        with open(path, "w") as f:
-            f.write(content)
-
-    def regenerate_pki(self):
-        """Regenerate CA and Server Certificates using Cryptography library"""
-        logger.info("Regenerating OpenVPN PKI (Python)...")
-        os.makedirs(self.DATA_DIR, exist_ok=True)
-
-        try:
-            # 1. Generate CA
-            ca_key = self._generate_private_key()
-            ca_cert = self._generate_self_signed_ca(ca_key)
-            self._save_key(ca_key, self.CA_KEY_PATH)
-            self._save_cert(ca_cert, self.CA_PATH)
-            logger.info("✅ Generated CA")
-
-            # 2. Generate Server Cert
-            server_key = self._generate_private_key()
-            server_cert = self._generate_server_cert(ca_cert, ca_key, server_key)
-            self._save_key(server_key, os.path.join(self.DATA_DIR, "server.key"))
-            self._save_cert(server_cert, os.path.join(self.DATA_DIR, "server.crt"))
-            logger.info("✅ Generated Server Cert")
-
-            # 3. Generate TLS Key
-            self._write_static_key(self.TA_PATH)
-            logger.info("✅ Generated TLS Key")
-
-            # 4. Generate DH Params (fallback to openssl or pre-generated)
-            # Generating 2048-bit DH in Python is slow. We'll try openssl if available,
-            # otherwise skip (modern clients with ECDHE don't strictly need it if config is right, 
-            # but server.conf usually references it).
-            dh_path = os.path.join(self.DATA_DIR, "dh.pem")
-            import subprocess
-            try:
-                # Use openssl to generate DH params (faster/standard)
-                subprocess.run(
-                    ["openssl", "dhparam", "-out", dh_path, "2048"], 
-                    check=True, 
-                    stdout=subprocess.DEVNULL, 
-                    stderr=subprocess.DEVNULL
-                )
-                logger.info("✅ Generated DH Params (2048 bit)")
-            except Exception as e:
-                logger.warning(f"DH Gen failed ({e}). Creating dummy DH (secure if using ECDHE)...")
-                with open(dh_path, "w") as f:
-                    f.write("-----BEGIN DH PARAMETERS-----\n...") # Dummy content logic or fallback
-                    # Actually, for OpenVPN 2.4+ and ECDHE, DH is less critical but server.conf expects it.
-                    # We will write a pre-generated 2048-bit DH param set if openssl fails
-                    f.write(self._get_fallback_dh())
-                logger.info("✅ Using Fallback DH Params")
-            try:
-                # Use dsaparam for speed (safe for modern OpenVPN)
-                subprocess.run(
-                    f"openssl dhparam -dsaparam -out {dh_path} 2048",
-                    shell=True, check=True, timeout=30
-                )
-                logger.info("✅ Generated DH Params")
-            except Exception:
-                logger.warning("Authentication via DH failed or OpenSSL not found. "
-                               "Using dummy DH or skipping (ECDHE preferred).")
-                # Create a small dummy or skip? OpenVPN server might fail to start if dh is missing.
-                # Write a minimal DH if needed, but for now we rely on openssl being present
-                # which we verified IS present on the system.
-                pass 
-
-            return True
-        except Exception as e:
-            logger.error(f"PKI Gen Failed: {e}")
-            raise e
-
     def get_ca_info(self) -> Dict[str, Any]:
         """Get CA info using cryptography"""
         if not os.path.exists(self.CA_PATH):
@@ -407,6 +258,7 @@ class OpenVPNService:
     def generate_client_config(
         self,
         username: str,
+
         password: str = None,
         server_ip: str = None,
         port: int = None,
