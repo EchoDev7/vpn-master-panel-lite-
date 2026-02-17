@@ -1,34 +1,50 @@
 #!/bin/bash
 
 # VPN Master Panel - System Diagnostics & Health Report
-# Usage: sudo ./check_status.sh
+# Usage: sudo ./check_status.sh [--live]
 
 # --- Configuration & Styling ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
 # Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}Error: This script must be run as root to access system logs and services.${NC}"
+  echo -e "${RED}Error: This script must be run as root.${NC}"
   exit 1
 fi
 
-clear
+# Live Mode Handler
+if [ "$1" == "--live" ] || [ "$1" == "-l" ]; then
+    while true; do
+        $0 --internal-run
+        sleep 2
+    done
+    exit 0
+fi
+
+# Clear screen for fresh output
+if [ "$1" == "--internal-run" ]; then
+    clear
+else
+    # First run clear
+    clear
+fi
+
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║    🔍 VPN MASTER PANEL - SYSTEM HEALTH & DIAGNOSTICS         ║${NC}"
+echo -e "${CYAN}║    🔍 VPN MASTER PANEL - PROFESSIONAL SYSTEM MONITOR         ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
-echo -e "Generated: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+echo -e "Report Time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo ""
 
 # Function to print aligned status
 print_status() {
     local MESSAGE="$1"
     local STATUS="$2"
-    local WIDTH=60
     
     if [ "$STATUS" == "ok" ]; then
         echo -e "  [${GREEN}  OK  ${NC}] $MESSAGE"
@@ -39,229 +55,173 @@ print_status() {
     fi
 }
 
-# --- 1. System Resources ---
-echo -e "${BOLD}${YELLOW}📊 1. System Resources${NC}"
+# --- 1. Project & System Status (Real-time) ---
+echo -e "${BOLD}${YELLOW}📊 1. System & Project Status${NC}"
 echo -e "--------------------------------------------------------"
 
-# Load Average
-LOAD=$(uptime | awk -F'load average:' '{ print $2 }' | xargs)
-echo -e "  System Load: ${CYAN}$LOAD${NC}"
+# Git/Project Status
+if [ -d ".git" ]; then
+    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
+    MSG=$(git log -1 --pretty=%B 2>/dev/null | head -n 1)
+    
+    echo -e "  Project Version: ${CYAN}$COMMIT${NC} ($BRANCH)"
+    echo -e "  Latest Change:   ${CYAN}$MSG${NC}"
+    
+    # Check for uncommitted changes
+    if [ -n "$(git status --porcelain)" ]; then
+        echo -e "  File Changes:    ${YELLOW}⚠️  Detected Uncommitted Changes (Dev Mode?)${NC}"
+        git status --short | head -n 3 | sed 's/^/    /' 
+        if [ $(git status --porcelain | wc -l) -gt 3 ]; then echo "    ...and more"; fi
+    else
+        echo -e "  File Changes:    ${GREEN}Clean (Synced with Git)${NC}"
+    fi
+else
+    echo -e "  Project Status:  ${YELLOW}Not a Git Repository${NC}"
+fi
 
-# Memory Usage
+echo -e ""
+# Load & Resources
+LOAD=$(uptime | awk -F'load average:' '{ print $2 }' | xargs)
 MEM_USED=$(free -m | awk '/^Mem:/{print $3}')
 MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
 MEM_PERCENT=$(( 100 * MEM_USED / MEM_TOTAL ))
-
-if [ "$MEM_PERCENT" -gt 90 ]; then
-    print_status "Memory Usage: ${MEM_USED}MB / ${MEM_TOTAL}MB (${MEM_PERCENT}%)" "warn"
-else
-    print_status "Memory Usage: ${MEM_USED}MB / ${MEM_TOTAL}MB (${MEM_PERCENT}%)" "ok"
-fi
-
-# Disk Usage (Root Partition)
 DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+
+echo -e "  System Load:     ${CYAN}$LOAD${NC}"
+if [ "$MEM_PERCENT" -gt 90 ]; then
+    print_status "Memory: ${MEM_USED}MB / ${MEM_TOTAL}MB (${MEM_PERCENT}%)" "warn"
+else
+    print_status "Memory: ${MEM_USED}MB / ${MEM_TOTAL}MB (${MEM_PERCENT}%)" "ok"
+fi
+
 if [ "$DISK_USAGE" -gt 90 ]; then
-    print_status "Disk Usage (/): ${DISK_USAGE}%" "fail"
+    print_status "Disk (/): ${DISK_USAGE}%" "fail"
 else
-    print_status "Disk Usage (/): ${DISK_USAGE}%" "ok"
+    print_status "Disk (/): ${DISK_USAGE}%" "ok"
 fi
 
-# --- 2. Network Interface Status ---
-echo -e "\n${BOLD}${YELLOW}📡 2. Network Configuration${NC}"
+# --- 2. Service & Dependency Integrity ---
+echo -e "\n${BOLD}${YELLOW}⚙️  2. Installed Packages & Versions${NC}"
 echo -e "--------------------------------------------------------"
 
-# Public IP (IPv4)
-PUBLIC_IP=$(curl -4 -s --max-time 3 ifconfig.me)
-if [ -z "$PUBLIC_IP" ]; then
-    print_status "Public IP (IPv4) -> [UNKNOWN] (Check Internet Connection)" "warn"
-else
-    print_status "Public IP (IPv4): $PUBLIC_IP" "ok"
-fi
+# Function to get versions
+get_version() {
+    local cmd=$1
+    if ! command -v $cmd &> /dev/null; then echo "MISSING"; return; fi
+    
+    case $cmd in
+        python3) python3 --version | awk '{print $2}' ;;
+        pip) pip --version | awk '{print $2}' ;;
+        node) node -v ;;
+        npm) npm -v ;;
+        openvpn) openvpn --version | head -n 1 | awk '{print $2}' ;;
+        nginx) nginx -v 2>&1 | awk -F'/' '{print $2}' ;;
+        git) git --version | awk '{print $3}' ;;
+        curl) curl --version | head -n 1 | awk '{print $2}' ;;
+        ufw) ufw --version | grep -v 'Copyright' | head -n 1 ;; # ufw version output varies
+        sqlite3) sqlite3 --version | awk '{print $1}' ;;
+        wg) wg --version | awk '{print $2}' ;; # usually just 'wireguard-tools v1.0...'
+        docker) docker --version | awk '{print $3}' | tr -d ',' ;;
+        *) echo "INSTALLED" ;;
+    esac
+}
 
-# Public IP (IPv6)
-PUBLIC_IPV6=$(curl -6 -s --max-time 3 -H "User-Agent: curl" ipv6.icanhazip.com)
-if [ -z "$PUBLIC_IPV6" ]; then
-    print_status "Public IP (IPv6) -> [NOT DETECTED/DISABLED]" "warn"
-else
-    print_status "Public IP (IPv6): $PUBLIC_IPV6" "ok"
-fi
-
-# Listening Ports
-echo -e "\n${CYAN}Active Listening Ports:${NC}"
-if command -v netstat >/dev/null; then
-    netstat -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $4, $7}' | grep -E '(:8000|:3000|:1194|:51820|:443|:80|:22)'
-else
-    ss -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $5, $7}' | grep -E '(:8000|:3000|:1194|:51820|:443|:80|:22)'
-fi
-
-# --- 3. Core Services ---
-echo -e "\n${BOLD}${YELLOW}⚙️  3. Service Status & Dependencies${NC}"
-echo -e "--------------------------------------------------------"
-
-SERVICES=("vpnmaster-backend" "nginx" "openvpn@server" "wg-quick@wg0" "ufw")
-for SERVICE in "${SERVICES[@]}"; do
-    if systemctl is-active --quiet "$SERVICE"; then
-        print_status "Service: $SERVICE -> Running" "ok"
-    else
-        STATUS=$(systemctl is-failed "$SERVICE")
-        if [ "$STATUS" == "failed" ]; then
-            print_status "Service: $SERVICE -> FAILED (Check logs)" "fail"
-        else
-            print_status "Service: $SERVICE -> Stopped" "warn"
-        fi
-    fi
-done
-
-# Check Installed Dependencies
-echo -e "\n${CYAN}Package Verification:${NC}"
 DEPENDENCIES=("openvpn" "nginx" "python3" "pip" "node" "npm" "git" "curl" "ufw" "sqlite3" "wg")
-ALL_DEPS_OK=true
 
 for DEP in "${DEPENDENCIES[@]}"; do
-    if command -v $DEP >/dev/null 2>&1; then
-        VERSION=""
-        # Concise version check
-        if [ "$DEP" == "python3" ]; then
-             VERSION=$(python3 --version | awk '{print $2}')
-        elif [ "$DEP" == "node" ]; then
-             VERSION=$(node -v)
-        elif [ "$DEP" == "openvpn" ]; then
-             VERSION=$(openvpn --version | head -n 1 | awk '{print $2}')
-        fi
-        
-        if [ -n "$VERSION" ]; then
-             echo -e "  [${GREEN} INSTALLED ${NC}] $DEP ($VERSION)"
-        else
-             echo -e "  [${GREEN} INSTALLED ${NC}] $DEP"
-        fi
-    else
+    VER=$(get_version $DEP)
+    if [ "$VER" == "MISSING" ]; then
         echo -e "  [${RED} MISSING  ${NC}] $DEP"
-        ALL_DEPS_OK=false
+    else
+        # If version check failed to return string but command exists
+        if [ -z "$VER" ] || [ "$VER" == "INSTALLED" ]; then
+             echo -e "  [${GREEN} INSTALLED ${NC}] $DEP"
+        else
+             echo -e "  [${GREEN} INSTALLED ${NC}] $DEP ${CYAN}($VER)${NC}"
+        fi
     fi
 done
 
-if [ "$ALL_DEPS_OK" = false ]; then
-    echo -e "${YELLOW}Warning: Some dependencies are missing. Run ./update.sh to fix.${NC}"
-fi
-
-# --- 4. VPN Configuration Audit ---
-echo -e "\n${BOLD}${YELLOW}🔒 4. VPN Configuration Audit${NC}"
-echo -e "--------------------------------------------------------"
-
-# OpenVPN
-OVPN_CONF="/etc/openvpn/server.conf"
-if [ -f "$OVPN_CONF" ]; then
-    OVPN_PORT=$(grep '^port ' $OVPN_CONF | awk '{print $2}')
-    OVPN_PROTO=$(grep '^proto ' $OVPN_CONF | awk '{print $2}')
-    print_status "OpenVPN Config Found (/etc/openvpn/server.conf)" "ok"
-    echo -e "      -> Mode: ${OVPN_PROTO:-udp} | Port: ${OVPN_PORT:-1194}"
-else
-    print_status "OpenVPN Config MISSING" "fail"
-fi
-
-# WireGuard
-WG_CONF="/etc/wireguard/wg0.conf"
-if [ -f "$WG_CONF" ]; then
-    WG_PORT=$(grep '^ListenPort' $WG_CONF | awk -F'=' '{print $2}' | xargs)
-    print_status "WireGuard Config Found (/etc/wireguard/wg0.conf)" "ok"
-    echo -e "      -> Mode: udp | Port: ${WG_PORT:-51820}"
-else
-    print_status "WireGuard Config Not Setup (Optional)" "warn"
-fi
-
-# --- 5. Application Connectivity & Database ---
-echo -e "\n${BOLD}${YELLOW}🔌 5. Connectivity & API Health${NC}"
-echo -e "--------------------------------------------------------"
-
-# Port Checks
-if nc -z 127.0.0.1 8001; then
-     print_status "Backend Port (8001) -> Listening" "ok"
-else
-     print_status "Backend Port (8001) -> CLOSED" "fail"
-fi
-
-if nc -z 127.0.0.1 3000; then
-     print_status "Frontend Port (3000) -> Listening" "ok"
-else
-     print_status "Frontend Port (3000) -> CLOSED" "fail"
-fi
-
-# Database Integrity
-if [ -f "/opt/vpn-master-panel/backend/vpnmaster_lite.db" ]; then
-    print_status "Database File Present" "ok"
-    
-    # Execute Python-based Deep Check
-    if [ -f "/opt/vpn-master-panel/backend/check_db.py" ]; then
-        cd /opt/vpn-master-panel/backend
-        python3 check_db.py
-        cd ..
+echo -e "\n${CYAN}💡 Optimization Suggestions (Optional):${NC}"
+SUGGESTIONS=("htop" "iftop" "fail2ban" "jq" "tree" "speedtest")
+for SUG in "${SUGGESTIONS[@]}"; do
+    if ! command -v $SUG &> /dev/null; then
+         echo -e "  - ${YELLOW}$SUG${NC} is not installed (Recommended for monitoring/security)"
+    else
+         echo -e "  - ${GREEN}$SUG${NC} is installed"
     fi
+done
+
+# --- 3. VPN & Network Configuration ---
+echo -e "\n${BOLD}${YELLOW}🔒 3. Network & VPN Configuration${NC}"
+echo -e "--------------------------------------------------------"
+
+# Public IPs
+PUBLIC_IP=$(curl -4 -s --max-time 2 ifconfig.me)
+PUBLIC_IPV6=$(curl -6 -s --max-time 2 -H "User-Agent: curl" ipv6.icanhazip.com)
+echo -e "  Public IPv4:     ${GREEN}${PUBLIC_IP:-UNKNOWN}${NC}"
+echo -e "  Public IPv6:     ${GREEN}${PUBLIC_IPV6:-NOT DETECTED}${NC}"
+
+# Config Audits
+if [ -f "/etc/openvpn/server.conf" ]; then
+    OVPN_PORT=$(grep '^port ' /etc/openvpn/server.conf | awk '{print $2}')
+    print_status "OpenVPN Configured (Port ${OVPN_PORT:-1194})" "ok"
 else
-    print_status "Database File MISSING" "fail"
+    print_status "OpenVPN Configuration Missing" "fail"
 fi
 
-# API Health Monitor
-echo -e "\n${CYAN}API Endpoint Status:${NC}"
+if [ -f "/etc/wireguard/wg0.conf" ]; then
+    WG_PORT=$(grep '^ListenPort' /etc/wireguard/wg0.conf | awk -F'=' '{print $2}' | xargs)
+    print_status "WireGuard Configured (Port ${WG_PORT:-51820})" "ok"
+else
+    print_status "WireGuard Verification Skipped (Config not found)" "warn"
+fi
 
+# --- 4. API & Service Health ---
+echo -e "\n${BOLD}${YELLOW}🔌 4. API & Connectivity Health${NC}"
+echo -e "--------------------------------------------------------"
+
+# API Checks
 API_BASE="http://127.0.0.1:8001"
-# Format: Endpoint|Name
 APIS=(
-    "/api/health|System Health"
-    "/docs|API Documentation"
-    "/api/v1/monitoring/server-resources|System Resources" 
-    "/api/v1/monitoring/dashboard|Dashboard Stats"
-    "/api/v1/auth/login|Auth Service"
+    "/api/health|Core System"
+    "/docs|Documentation"
+    "/api/v1/monitoring/server-resources|Resource Monitor" 
+    "/api/v1/monitoring/dashboard|Dashboard Data"
 )
 
 for API in "${APIS[@]}"; do
     ENDPOINT="${API%%|*}"
     NAME="${API##*|}"
-    
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_BASE$ENDPOINT")
     
     if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "307" ]; then
-        print_status "API: $NAME -> [ACTIVE] ($HTTP_CODE)" "ok"
+        print_status "$NAME ($ENDPOINT) -> Connected" "ok"
     elif [ "$HTTP_CODE" == "401" ] || [ "$HTTP_CODE" == "403" ] || [ "$HTTP_CODE" == "405" ]; then
-        # 403 Forbidden is expected for secured endpoints when accessed without token
-        print_status "API: $NAME -> [SECURE & ACTIVE] (Status: $HTTP_CODE)" "ok"
+         print_status "$NAME ($ENDPOINT) -> Secured & Active" "ok"
     else
-        print_status "API: $NAME -> [OFFLINE] (Status: $HTTP_CODE)" "fail"
+        print_status "$NAME ($ENDPOINT) -> Offline (Code: $HTTP_CODE)" "fail"
     fi
 done
 
-# --- 6. Security & Kernel ---
-echo -e "\n${BOLD}${YELLOW}🛡️  6. Security & Kernel Settings${NC}"
+# --- End of Single Run ---
+# If internal run (live mode), stop here
+if [ "$1" == "--internal-run" ]; then
+    echo -e "\n${BLUE}Updating in 2 seconds... (Ctrl+C to stop)${NC}"
+    exit 0
+fi
+
+# --- Live Logs (Only for standard run) ---
+echo -e "\n${BOLD}${YELLOW}🚨 5. Recent Critical Log Events${NC}"
 echo -e "--------------------------------------------------------"
-
-if [ -c /dev/net/tun ]; then
-    print_status "TUN Device interface available" "ok"
-else
-    print_status "TUN Device MISSING (/dev/net/tun)" "fail"
-fi
-
-IP_FWD=$(cat /proc/sys/net/ipv4/ip_forward)
-if [ "$IP_FWD" == "1" ]; then
-    print_status "IPv4 Forwarding Enabled" "ok"
-else
-    print_status "IPv4 Forwarding DISABLED" "fail"
-fi
-
-# DEBUG: Dump OpenVPN Config if failed
-if systemctl is-failed --quiet openvpn@server; then
-    echo -e "\n${RED}⚠️  DEBUG: Dumping OpenVPN Config (/etc/openvpn/server.conf):${NC}"
-    grep -vE '^#|^$' /etc/openvpn/server.conf | head -n 20
-fi
-
-# --- 7. Critical Logs ---
-echo -e "\n${BOLD}${YELLOW}🚨 7. Recent Critical System Logs (Last 50 Lines)${NC}"
-echo -e "--------------------------------------------------------"
-journalctl -p 3 -n 50 --no-pager | tail -n 10
+journalctl -p 3 -n 10 --no-pager
 
 echo -e "\n${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}✅ System Diagnostics Completed Successfully.${NC}"
+echo -e "${GREEN}✅ Diagnostic Scan Complete.${NC}"
+echo -e "💡  Tip: Run with ${BOLD}--live${NC} for real-time dashboard."
 echo -e "${YELLOW}👇 Streaming Live Logs (Press Ctrl+C to stop)...${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# Tail logs for all related services
-journalctl -u vpnmaster-backend -u nginx -u openvpn@server -u wg-quick@wg0 -f -n 20
+journalctl -u vpnmaster-backend -u nginx -u openvpn@server -f -n 20
