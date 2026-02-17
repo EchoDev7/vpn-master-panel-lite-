@@ -134,7 +134,7 @@ repair_nginx() {
     cat > /etc/nginx/sites-available/vpnmaster << EOF
 # Backend API
 server {
-    listen 8000;
+    listen 0.0.0.0:8000;
     server_name _;
 
     location / {
@@ -149,7 +149,7 @@ server {
 
 # Frontend
 server {
-    listen 3000;
+    listen 0.0.0.0:3000;
     server_name _;
 
     root /opt/vpn-master-panel/frontend/dist;

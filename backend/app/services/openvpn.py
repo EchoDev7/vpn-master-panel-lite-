@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ====================================================================
 OPENVPN_DEFAULTS: Dict[str, str] = {
     # --- Network ---
-    "protocol": "tcp",              # tcp for port 443 stealth
+    "protocol": "tcp4",             # tcp4 to enforce IPv4 (avoids IPv6 binding)
     "port": "443",                  # HTTPS port to blend with normal traffic
     "mtu": "1400",                  # Lower MTU for Iran mobile/ISP networks
     "topology": "subnet",           # subnet (recommended) or net30

@@ -57,25 +57,21 @@ fi
 echo -e "\n${BOLD}${YELLOW}📡 2. Network & Ports${NC}"
 echo -e "--------------------------------------------------------"
 # List listening ports
+# List listening ports (IPv4 Preferred)
+echo -e "${CYAN}Listening Ports (Service : Port -> Process):${NC}"
 if command -v netstat >/dev/null; then
-    PORTS=$(netstat -tulnp | grep -E '(:8000|:3000|:1194|:51820|:443|:80|:22)')
+    # Show PID/Program name, filter for LISTEN, mostly IPv4 or IPv6 mapped
+    netstat -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $4, $7}' | grep -E '(:8000|:3000|:1194|:51820|:443|:80|:22)'
 else
-    PORTS=$(ss -tulnp | grep -E '(:8000|:3000|:1194|:51820|:443|:80|:22)')
+    ss -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $5, $7}' | grep -E '(:8000|:3000|:1194|:51820|:443|:80|:22)'
 fi
 
-if [ -z "$PORTS" ]; then
-    print_status "No critical ports found listening!" "fail"
-else
-    echo -e "${CYAN}Listening Ports:${NC}"
-    echo "$PORTS" | awk '{print "  " $4 " (" $7 ")"}'
-fi
-
-# Public IP Check
-PUBLIC_IP=$(curl -s --max-time 3 ifconfig.me)
+# Public IP Check (Forced IPv4)
+PUBLIC_IP=$(curl -4 -s --max-time 3 ifconfig.me)
 if [ -z "$PUBLIC_IP" ]; then
     print_status "Cannot detect Public IP (Internet issue?)" "warn"
 else
-    print_status "Public IP: $PUBLIC_IP" "ok"
+    print_status "Public IP (IPv4): $PUBLIC_IP" "ok"
 fi
 
 # 3. Service Health
