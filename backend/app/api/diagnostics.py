@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 import subprocess
 import shutil
 import logging
+import os
 from ..utils.security import get_current_admin
 from ..models.user import User
 
@@ -214,21 +215,171 @@ async def get_full_diagnostics(
     except Exception as e:
         logger.error(f"Error in tools section: {e}")
 
-    # 5. Project Info
+    # 6. Network & Connectivity (Enhanced)
     try:
-        # Use proper CWD for git commands
-        cwd = "/opt/vpn-master-panel"
-        branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=cwd).stdout.strip()
-        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=cwd).stdout.strip()
-        msg = subprocess.run(["git", "log", "-1", "--pretty=%B"], capture_output=True, text=True, cwd=cwd).stdout.strip()
+        # Public IPs
+        public_ipv4 = subprocess.run(["curl", "-4", "-s", "--max-time", "2", "ifconfig.me"], capture_output=True, text=True).stdout.strip() or "Unknown"
+        public_ipv6 = subprocess.run(["curl", "-6", "-s", "--max-time", "2", "-H", "User-Agent: curl", "ipv6.icanhazip.com"], capture_output=True, text=True).stdout.strip() or "Not Detected"
         
-        status_output = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=cwd).stdout.strip()
-        changes = len(status_output.split('\n')) if status_output else 0
-        
+        # Latency
+        try:
+            latency_out = subprocess.run(["ping", "-c", "1", "8.8.8.8"], capture_output=True, text=True).stdout
+            latency = latency_out.split("time=")[1].split(" ")[0] + "ms"
+        except:
+            latency = "Timeout"
+            
+        # Active Ports (Netstat/SS)
+        listening_ports = []
+        try:
+            if shutil.which("netstat"):
+                cmd = ["netstat", "-tulnp"]
+                col_idx = 3 # 4th column is Local Address
+            else:
+                cmd = ["ss", "-tulnp"]
+                col_idx = 4 # 5th column
+                
+            out = subprocess.run(cmd, capture_output=True, text=True).stdout
+            for line in out.splitlines():
+                if "LISTEN" in line or "udp" in line:
+                    parts = line.split()
+                    if len(parts) > col_idx:
+                        addr = parts[col_idx]
+                        port = addr.split(":")[-1]
+                        if port in ["8000", "3000", "1194", "51820", "443", "80", "22"]:
+                             listening_ports.append(f"{addr}")
+        except:
+            listening_ports = ["Error fetching ports"]
+            
+        # Firewall
+        ufw_status = "Unknown"
+        if shutil.which("ufw"):
+             ufw_check = subprocess.run(["ufw", "status"], capture_output=True, text=True).stdout
+             if "Status: active" in ufw_check:
+                 rule_count = ufw_check.count("[") 
+                 ufw_status = f"Active ({rule_count} rules)"
+             else:
+                 ufw_status = "Inactive"
+                 
+        network_stats = {
+            "public_ipv4": public_ipv4,
+            "public_ipv6": public_ipv6,
+            "latency": latency,
+            "listening_ports": list(set(listening_ports)),
+            "firewall_status": ufw_status
+        }
     except Exception as e:
-         logger.error(f"Error getting git info: {e}")
-         branch, commit, msg, changes = "Unknown", "Unknown", "Unknown", 0
+        logger.error(f"Error in network section: {e}")
+        network_stats = {}
 
+    # 7. VPN Security & Certs
+    vpn_security = {}
+    try:
+        # TUN
+        tun_status = os.path.exists("/dev/net/tun")
+        
+        # IP Forwarding
+        try:
+            with open("/proc/sys/net/ipv4/ip_forward", "r") as f:
+                ip_fwd = f.read().strip() == "1"
+        except:
+            ip_fwd = False
+            
+        # Cert Expiry
+        cert_expiry = "Unknown"
+        if os.path.exists("/etc/openvpn/server.crt"):
+            try:
+                cert_out = subprocess.run(["openssl", "x509", "-enddate", "-noout", "-in", "/etc/openvpn/server.crt"], capture_output=True, text=True).stdout
+                cert_expiry = cert_out.split("=")[1].strip()
+            except:
+                pass
+                
+        vpn_security = {
+            "tun_available": tun_status,
+            "ip_forwarding": ip_fwd,
+            "cert_expiry": cert_expiry
+        }
+    except Exception as e:
+         logger.error(f"Error in vpn security section: {e}")
+
+    # 8. Intelligent Log Analysis
+    log_analysis = []
+    try:
+        log_files = ["/var/log/syslog", "/var/log/openvpn/openvpn.log", "/var/log/nginx/error.log"]
+        error_patterns = {
+            "private key password verification failed": {"level": "CRITICAL", "msg": "PKI Key Encrypted/Corrupt", "fix": "Run './update.sh' to force-regenerate keys."},
+            "Address already in use": {"level": "CRITICAL", "msg": "Port Conflict", "fix": "Check if another service is using the port (netstat -tulnp)."},
+            "Options error": {"level": "ERROR", "msg": "Configuration Syntax Error", "fix": "Check server.conf for invalid directives."},
+            "Permission denied": {"level": "ERROR", "msg": "File Permission Issue", "fix": "Run 'chown -R root:root /etc/openvpn' or check AppArmor."},
+            "CRL: cannot read": {"level": "WARN", "msg": "CRL File Missing/Unreadable", "fix": "Regenerate CRL or check permissions."}
+        }
+        
+        # We can't read root logs easily if not running as root, 
+        # but the service runs as root, so it should work.
+        # Reading last 50 lines of journalctl for services is safer
+        
+        cmd_ovpn = ["journalctl", "-u", "openvpn@server", "-n", "50", "--no-pager"]
+        cmd_back = ["journalctl", "-u", "vpnmaster-backend", "-n", "50", "--no-pager"]
+        
+        logs_to_scan = ""
+        logs_to_scan += subprocess.run(cmd_ovpn, capture_output=True, text=True).stdout
+        logs_to_scan += subprocess.run(cmd_back, capture_output=True, text=True).stdout
+        
+        for line in logs_to_scan.splitlines():
+            for pattern, info in error_patterns.items():
+                if pattern in line:
+                    # Avoid duplicates
+                    issue = {
+                        "level": info["level"],
+                        "message": info["msg"],
+                        "fix": info["fix"],
+                        "log_snippet": line[:100] + "..."
+                    }
+                    if issue not in log_analysis:
+                        log_analysis.append(issue)
+                        
+        if not log_analysis:
+             log_analysis = [{"level": "OK", "message": "No critical error patterns detected.", "fix": ""}]
+             
+    except Exception as e:
+        logger.error(f"Error in log analysis: {e}")
+        log_analysis = [{"level": "ERROR", "message": f"Failed to analyze logs: {str(e)}", "fix": ""}]
+
+    # 9. Deep Database Check
+    db_health = {"status": "Unknown", "details": []}
+    try:
+        from ..database import SessionLocal
+        from sqlalchemy import text
+        
+        db = SessionLocal()
+        try:
+            # Integrity
+            res = db.execute(text("PRAGMA integrity_check")).fetchone()[0]
+            db_health["integrity"] = "OK" if res == "ok" else "FAIL"
+            
+            # Tables
+            tables = ["users", "settings", "vpn_servers", "traffic_logs"]
+            existing = db.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+            existing_names = [r[0] for r in existing]
+            missing = [t for t in tables if t not in existing_names]
+            
+            if missing:
+                db_health["status"] = "FAIL"
+                db_health["missing_tables"] = missing
+            else:
+                db_health["status"] = "OK"
+                
+            # Admin check
+            admin = db.execute(text("SELECT username FROM users WHERE role IN ('SUPER_ADMIN', 'ADMIN', 'super_admin', 'admin')")).fetchone()
+            db_health["admin_user"] = admin[0] if admin else "MISSING"
+            
+        except Exception as e:
+            db_health["status"] = "ERROR"
+            db_health["error"] = str(e)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Error in DB check: {e}")
+        
     return {
         "system": system_stats,
         "packages": package_status,
@@ -240,5 +391,9 @@ async def get_full_diagnostics(
             "last_message": msg,
             "uncommitted_changes": changes
         },
+        "network": network_stats,
+        "vpn_security": vpn_security,
+        "logs": log_analysis,
+        "database": db_health,
         "timestamp": time.time()
     }
