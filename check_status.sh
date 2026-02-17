@@ -198,9 +198,10 @@ for API in "${APIS[@]}"; do
     # Capture HTTP Code only
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_BASE$ENDPOINT")
     
-    if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "405" ] || [ "$HTTP_CODE" == "401" ] || [ "$HTTP_CODE" == "307" ]; then
-        # 405/401/307 is fine, means service operates (Method Not Allowed / Unauthorized / Redirect)
+    if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "307" ]; then
         print_status "API: $NAME ($ENDPOINT) -> [ONLINE] (Code: $HTTP_CODE)" "ok"
+    elif [ "$HTTP_CODE" == "401" ] || [ "$HTTP_CODE" == "403" ] || [ "$HTTP_CODE" == "405" ]; then
+        print_status "API: $NAME ($ENDPOINT) -> [ONLINE] (Protected/Method: $HTTP_CODE)" "ok"
     else
         print_status "API: $NAME ($ENDPOINT) -> [OFFLINE] (Code: $HTTP_CODE)" "fail"
     fi
