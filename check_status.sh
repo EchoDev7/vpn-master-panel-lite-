@@ -390,18 +390,67 @@ else
     echo -e "  Project Status:  ${YELLOW}Not a Git Repository${NC}"
 fi
 
-# --- Troubleshooting Hints (Unique Logic) ---
+# --- 10. Intelligent Log Analysis (AI-Powered Diagnostics) ---
+echo -e "\n${BOLD}${CYAN}🧠 10. Intelligent Log Analysis${NC}"
+echo -e "--------------------------------------------------------"
+
+LOG_FILES=("/var/log/syslog" "/var/log/openvpn/openvpn.log" "/var/log/nginx/error.log")
+FOUND_ISSUES=0
+
+analyze_log_line() {
+    local LINE="$1"
+    local SVC="$2"
+    
+    # KNOWLEDGE BASE: Known Error Patterns
+    if [[ "$LINE" == *"private key password verification failed"* ]]; then
+        echo -e "  [${RED}CRITICAL${NC}] $SVC: PKI Key Encrypted/Corrupt"
+        echo -e "      ↳ ${YELLOW}Fix: Run './update.sh' to force-regenerate keys.${NC}"
+        FOUND_ISSUES=1
+    elif [[ "$LINE" == *"Address already in use"* ]]; then
+        echo -e "  [${RED}CRITICAL${NC}] $SVC: Port Conflict"
+        echo -e "      ↳ ${YELLOW}Fix: Check if another service is using the port (netstat -tulnp).${NC}"
+        FOUND_ISSUES=1
+    elif [[ "$LINE" == *"Options error"* ]]; then
+        echo -e "  [${RED}ERROR${NC}] $SVC: Configuration Syntax Error"
+        echo -e "      ↳ ${YELLOW}Fix: Check server.conf for invalid directives.${NC}"
+        FOUND_ISSUES=1
+    elif [[ "$LINE" == *"Permission denied"* ]]; then
+        echo -e "  [${RED}ERROR${NC}] $SVC: File Permission Issue"
+        echo -e "      ↳ ${YELLOW}Fix: Run 'chown -R root:root /etc/openvpn' or check AppArmor.${NC}"
+        FOUND_ISSUES=1
+    elif [[ "$LINE" == *"CRL: cannot read"* ]]; then
+        echo -e "  [${YELLOW}WARN${NC}] $SVC: CRL File Missing/Unreadable"
+        echo -e "      ↳ ${YELLOW}Fix: Regenerate CRL or check permissions.${NC}"
+        FOUND_ISSUES=1
+    elif [[ "$LINE" == *"event_wait : Interrupted system call"* ]]; then
+        # Often normal during restart, but excessive = flapping
+        : # Ignore for now unless frequent
+    fi
+}
+
+# Scan JournalCTL for critical services (Last 50 lines)
+echo -e "  Scanning recent system logs..."
+while read -r LINE; do
+    analyze_log_line "$LINE" "System/OpenVPN"
+done < <(journalctl -u openvpn@server -n 50 --no-pager)
+
+while read -r LINE; do
+    analyze_log_line "$LINE" "Backend"
+done < <(journalctl -u vpnmaster-backend -n 50 --no-pager)
+
+if [ "$FOUND_ISSUES" -eq 0 ]; then
+    echo -e "  [${GREEN}OK${NC}] No critical error patterns detected in recent logs."
+else
+    echo -e "\n  ${YELLOW}⚠️  Issues detected above. Please attempt the suggested fixes.${NC}"
+fi
+
+# --- Troubleshooting Hints ---
 if [ "$1" != "--internal-run" ]; then
     echo -e "\n${BOLD}${CYAN}💡 Quick Fixes:${NC}"
-    echo -e "  - OpenVPN Down?   ${YELLOW}journalctl -u openvpn@server -n 20${NC}"
-    echo -e "  - Backend Down?   ${YELLOW}journalctl -u vpnmaster-backend -n 20${NC}"
-    echo -e "  - DB Issues?      ${YELLOW}Delete .db file & restart service${NC}"
-    echo -e "  - Live Dashboard? ${YELLOW}./check_status.sh --live${NC}"
+    echo -e "  - OpenVPN Flapping? ${YELLOW}./update.sh (Fixes PKI/Config)${NC}"
+    echo -e "  - Backend Restart?  ${YELLOW}systemctl restart vpnmaster-backend${NC}"
+    echo -e "  - Live Dashboard?   ${YELLOW}./check_status.sh --live${NC}"
     
-    echo -e "\n${BOLD}${YELLOW}🚨 CRITICAL ERROR LOGS (Past 10 mins):${NC}" 
-    # Grep specifically for Errors in critical services found in last 100 lines
-    journalctl -n 200 --since "10 minutes ago" | grep -iE 'error|failed|fatal|exception' | grep -v 'ignored' | tail -n 5
-    
-    echo -e "\n${BOLD}${YELLOW}📜 Recent System Activity:${NC}" 
-    journalctl -p 3 -n 10 --no-pager
+    echo -e "\n${BOLD}${YELLOW}📜 Recent Raw Logs (Last 10 Lines):${NC}" 
+    journalctl -u openvpn@server -n 10 --no-pager | sed 's/^/  /'
 fi
