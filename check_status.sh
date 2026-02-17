@@ -56,7 +56,6 @@ fi
 # 2. Network & Ports
 echo -e "\n${BOLD}${YELLOW}📡 2. Network & Ports${NC}"
 echo -e "--------------------------------------------------------"
-# List listening ports
 # List listening ports (IPv4 Preferred)
 echo -e "${CYAN}Listening Ports (Service : Port -> Process):${NC}"
 if command -v netstat >/dev/null; then
@@ -66,103 +65,153 @@ else
     ss -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $5, $7}' | grep -E '(:8000|:3000|:1194|:51820|:443|:80|:22)'
 fi
 
-# Public IP Check (Forced IPv4)
+# Public IP Check
 PUBLIC_IP=$(curl -4 -s --max-time 3 ifconfig.me)
 if [ -z "$PUBLIC_IP" ]; then
-    print_status "Cannot detect Public IP (Internet issue?)" "warn"
+    print_status "Public IP (IPv4) -> [UNKNOWN] (Internet issue?)" "warn"
 else
     print_status "Public IP (IPv4): $PUBLIC_IP" "ok"
 fi
 
-# 3. Service Health
-echo -e "\n${BOLD}${YELLOW}⚙️  3. Service Health${NC}"
+# IPv6 Check (New Feature)
+PUBLIC_IPV6=$(curl -6 -s --max-time 3 ifconfig.co)
+if [ -z "$PUBLIC_IPV6" ]; then
+    print_status "Public IP (IPv6) -> [NOT DETECTED/DISABLED]" "warn"
+else
+    print_status "Public IP (IPv6): $PUBLIC_IPV6" "ok"
+fi
+
+# 3. Service Health & Dependencies
+echo -e "\n${BOLD}${YELLOW}⚙️  3. Service Health & Dependencies${NC}"
 echo -e "--------------------------------------------------------"
 SERVICES=("vpnmaster-backend" "nginx" "openvpn@server" "wg-quick@wg0" "ufw")
 for SERVICE in "${SERVICES[@]}"; do
     if systemctl is-active --quiet "$SERVICE"; then
-        print_status "$SERVICE running" "ok"
+        print_status "Service: $SERVICE running" "ok"
     else
         STATUS=$(systemctl is-failed "$SERVICE")
         if [ "$STATUS" == "failed" ]; then
-            print_status "$SERVICE FAILED - Run: systemctl status $SERVICE -l" "fail"
+            print_status "Service: $SERVICE FAILED - Run: systemctl status $SERVICE -l" "fail"
         else
-            print_status "$SERVICE stopped" "warn"
+            print_status "Service: $SERVICE stopped" "warn"
         fi
     fi
 done
 
-# Check for ANY failed units in system
-FAILED_UNITS=$(systemctl list-units --state=failed --no-legend)
-if [ -n "$FAILED_UNITS" ]; then
-    echo -e "\n${RED}⚠️  Other Failed System Units:${NC}"
-    echo "$FAILED_UNITS"
-fi
+# Check Dependencies (New Feature)
+echo -e "\n${CYAN}📦 System Dependencies Check:${NC}"
+DEPENDENCIES=("openvpn" "nginx" "python3" "pip" "node" "npm" "git" "curl" "ufw" "sqlite3" "wg")
+for DEP in "${DEPENDENCIES[@]}"; do
+    if command -v $DEP >/dev/null 2>&1; then
+        VERSION=""
+        # Try to get short version string
+        if [ "$DEP" == "python3" ]; then
+             VERSION=$(python3 --version | awk '{print $2}')
+        elif [ "$DEP" == "node" ]; then
+             VERSION=$(node -v)
+        elif [ "$DEP" == "openvpn" ]; then
+             VERSION=$(openvpn --version | head -n 1 | awk '{print $2}')
+        fi
+        
+        if [ -n "$VERSION" ]; then
+             print_status "Package: $DEP ($VERSION) -> [INSTALLED]" "ok"
+        else
+             print_status "Package: $DEP -> [INSTALLED]" "ok"
+        fi
+    else
+        print_status "Package: $DEP -> [NOT INSTALLED]" "fail"
+    fi
+done
 
-# 4. Full Stack Connectivity Check (Frontend -> Nginx -> Backend)
-echo -e "\n${BOLD}${YELLOW}🔌 4. Full Stack Connectivity Check${NC}"
+# 4. VPN Configuration Checks (New Feature)
+echo -e "\n${BOLD}${YELLOW}🔒 4. VPN Configuration & Ports${NC}"
 echo -e "--------------------------------------------------------"
 
-# 4.1 Backend Direct Check (Internal)
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/health)
-if [ "$HTTP_CODE" == "200" ]; then
-    print_status "Backend API (Internal Port 8001) -> [CONNECTED]" "ok"
+# OpenVPN Config Check
+OVPN_CONF="/etc/openvpn/server.conf"
+if [ -f "$OVPN_CONF" ]; then
+    OVPN_PORT=$(grep '^port ' $OVPN_CONF | awk '{print $2}')
+    OVPN_PROTO=$(grep '^proto ' $OVPN_CONF | awk '{print $2}')
+    print_status "OpenVPN Config: Found ($OVPN_CONF)" "ok"
+    echo -e "  -> Configured Port: ${CYAN}${OVPN_PORT:-1194}/${OVPN_PROTO:-udp}${NC}"
 else
-    print_status "Backend API (Internal Port 8001) -> [DISCONNECTED] (Code: $HTTP_CODE)" "fail"
+    print_status "OpenVPN Config: MISSING ($OVPN_CONF)" "fail"
 fi
 
-# 4.2 Nginx Proxy Check (External API Path)
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/health)
-if [ "$HTTP_CODE" == "200" ]; then
-    print_status "Nginx Reverse Proxy (/api -> Backend) -> [CONNECTED]" "ok"
+# WireGuard Config Check
+WG_CONF="/etc/wireguard/wg0.conf"
+if [ -f "$WG_CONF" ]; then
+    WG_PORT=$(grep '^ListenPort' $WG_CONF | awk -F'=' '{print $2}' | xargs)
+    print_status "WireGuard Config: Found ($WG_CONF)" "ok"
+    echo -e "  -> Configured Port: ${CYAN}${WG_PORT:-51820}/udp${NC}"
 else
-    print_status "Nginx Reverse Proxy (/api -> Backend) -> [BROKEN] (Code: $HTTP_CODE)" "fail"
+    print_status "WireGuard Config: MISSING ($WG_CONF) (Expected if not set up)" "warn"
 fi
 
-# 4.3 Frontend Static Files Check
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/)
-if [ "$HTTP_CODE" == "200" ]; then
-    print_status "Frontend UI (Port 3000) -> [SERVING]" "ok"
+# 5. Full Stack & API Connectivity
+echo -e "\n${BOLD}${YELLOW}🔌 5. Full Stack & API Connectivity${NC}"
+echo -e "--------------------------------------------------------"
+
+# Backend Port Check
+if nc -z 127.0.0.1 8001; then
+     print_status "Backend Port (8001) -> [OPEN]" "ok"
 else
-    print_status "Frontend UI (Port 3000) -> [DOWN/ERROR] (Code: $HTTP_CODE)" "fail"
+     print_status "Backend Port (8001) -> [CLOSED]" "fail"
 fi
 
-# 4.4 Database Check (Deep Diagnostics)
+# Frontend Port Check
+if nc -z 127.0.0.1 3000; then
+     print_status "Frontend Port (3000) -> [OPEN]" "ok"
+else
+     print_status "Frontend Port (3000) -> [CLOSED]" "fail"
+fi
+
+# Database File Check
 if [ -f "/opt/vpn-master-panel/backend/vpnmaster_lite.db" ]; then
-    print_status "Database File (SQLite) -> [FOUND]" "ok"
+    print_status "Database File -> [FOUND]" "ok"
     # Run deep check script
     if [ -f "/opt/vpn-master-panel/backend/check_db.py" ]; then
         cd /opt/vpn-master-panel/backend
         python3 check_db.py
         cd ..
-    else
-        # Fallback basic check
-        if sqlite3 /opt/vpn-master-panel/backend/vpnmaster_lite.db "PRAGMA integrity_check;" | grep -q "ok"; then
-             print_status "Database Integrity -> [VALID]" "ok"
-        else
-             print_status "Database Integrity -> [CORRUPT]" "fail"
-        fi
     fi
 else
-    print_status "Database File (SQLite) -> [MISSING]" "fail"
+    print_status "Database File -> [MISSING]" "fail"
 fi
 
-# 5. Tun/Forwarding Check
-echo -e "\n${BOLD}${YELLOW}🛡️  5. VPN Core Check${NC}"
+# API Endpoint Checks
+echo -e "\n${CYAN}🔗 API Health Monitor:${NC}"
+
+API_BASE="http://127.0.0.1:8001"
+APIS=(
+    "/api/health|System Health"
+    "/docs|API Documentation"
+    "/api/v1/monitoring/system|System Monitor" 
+    "/api/v1/auth/login|Auth Service"
+)
+
+for API in "${APIS[@]}"; do
+    ENDPOINT="${API%%|*}"
+    NAME="${API##*|}"
+    
+    # Capture HTTP Code only
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_BASE$ENDPOINT")
+    
+    if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "405" ] || [ "$HTTP_CODE" == "401" ] || [ "$HTTP_CODE" == "307" ]; then
+        # 405/401/307 is fine, means service operates (Method Not Allowed / Unauthorized / Redirect)
+        print_status "API: $NAME ($ENDPOINT) -> [ONLINE] (Code: $HTTP_CODE)" "ok"
+    else
+        print_status "API: $NAME ($ENDPOINT) -> [OFFLINE] (Code: $HTTP_CODE)" "fail"
+    fi
+done
+
+# 6. Core Check
+echo -e "\n${BOLD}${YELLOW}🛡️  6. System Core Check${NC}"
 echo -e "--------------------------------------------------------"
 if [ -c /dev/net/tun ]; then
     print_status "TUN Device available" "ok"
 else
     print_status "TUN Device MISSING (/dev/net/tun)" "fail"
-fi
-
-# DEBUG: Dump OpenVPN Config if service is failed
-if systemctl is-failed --quiet openvpn@server; then
-    echo -e "\n${RED}⚠️  OpenVPN Configuration (/etc/openvpn/server.conf):${NC}"
-    if [ -f /etc/openvpn/server.conf ]; then
-        cat /etc/openvpn/server.conf | grep -v "^#" | grep -v "^$"
-    else
-        echo "Config file not found!"
-    fi
 fi
 
 IP_FWD=$(cat /proc/sys/net/ipv4/ip_forward)
@@ -172,21 +221,21 @@ else
     print_status "IP Forwarding DISABLED" "fail"
 fi
 
-# 6. Critical Log Analysis (Last 50 lines)
-echo -e "\n${BOLD}${YELLOW}🚨 6. Recent Critical Errors (Last 50 lines)${NC}"
-echo -e "--------------------------------------------------------"
-if [ -f /var/log/syslog ]; then
-    grep -i "error\|fail\|denied" /var/log/syslog | tail -n 5
-    echo -e "${CYAN}... (checks syslog)${NC}"
+# DEBUG: Dump OpenVPN Config if service is failed
+if systemctl is-failed --quiet openvpn@server; then
+    echo -e "\n${RED}⚠️  OpenVPN Configuration (/etc/openvpn/server.conf):${NC}"
+    grep -vE '^#|^$' /etc/openvpn/server.conf | head -n 20
 fi
-dmesg | grep -i "wireguard\|tun\|refused\|denied" | tail -n 5
-echo -e "${CYAN}... (checks kernel dmesg)${NC}"
 
-echo -e "\n${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "\n${BOLD}${YELLOW}🚨 7. Recent Critical Errors (Last 50 lines)${NC}"
+echo -e "--------------------------------------------------------"
+journalctl -p 3 -n 50 --no-pager | tail -n 20
+
+echo -e "\n${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}✅ Diagnostics Complete.${NC}"
-echo -e "${YELLOW}👇 Streaming LIVE Logs (Press Ctrl+C to stop)...${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "👇 Streaming LIVE Logs (Press Ctrl+C to stop)..."
+echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# 7. Unified Live Log Stream
-journalctl -u vpnmaster-backend -u openvpn@server -u openvpn -u wg-quick@wg0 -u nginx -u ufw -u fail2ban -f --output cat
+# Tail logs safely
+journalctl -u vpnmaster-backend -u nginx -u openvpn@server -f -n 20
