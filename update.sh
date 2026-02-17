@@ -7,6 +7,7 @@
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Check Root
@@ -26,38 +27,30 @@ if [ ! -d "$INSTALL_DIR" ]; then
     exit 1
 fi
 
-# 1. Update Source Code (Targeting the /opt directory)
+# 1. Update Source Code (Non-destructive)
 echo -e "${CYAN}📥 Updating Installation at $INSTALL_DIR...${NC}"
 cd "$INSTALL_DIR" || exit 1
 
 # Check if it's a git repo
 if [ -d ".git" ]; then
+    echo -e "${CYAN}Fetching updates...${NC}"
     git fetch --all
-    git reset --hard origin/main
+    # Stash local changes instead of hard reset
+    if ! git diff-index --quiet HEAD --; then
+        echo -e "${YELLOW}⚠️ Local changes detected. Stashing them...${NC}"
+        git stash
+    fi
     git pull origin main
 else
-    echo -e "${YELLOW}⚠️ Not a git repository. Forcing re-sync...${NC}"
-    # Backup config
-    cp backend/.env /tmp/vpn_env_backup
-    
-    # Re-initialize
-    cd ..
-    rm -rf vpn-master-panel
-    git clone --depth 1 https://github.com/EchoDev7/vpn-master-panel-lite-.git vpn-master-panel
-    mv vpn-master-panel-lite- vpn-master-panel 2>/dev/null || true
-    cd vpn-master-panel
-    
-    # Restore config
-    if [ -f "/tmp/vpn_env_backup" ]; then
-        mv /tmp/vpn_env_backup backend/.env
-    fi
+    echo -e "${YELLOW}⚠️ Not a git repository. Skipping git update.${NC}"
+    echo -e "${YELLOW}To update manually, backup your config and reinstall.${NC}"
 fi
 
-# 2. Update System Packages (Removed conflicting packages)
+# 2. Update System Packages
 echo -e "${CYAN}📦 Updating System Packages...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt update -qq
-# Removed 'npm' from list as it conflicts with nodejs package
+# Ensure critical packages are present
 apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs python3-pip
 
 # 3. Enable IP Forwarding (Ensure it persists)
@@ -77,55 +70,12 @@ source venv/bin/activate
 pip install -r requirements.txt
 python -m py_compile app/main.py # Syntax check
 
-# 4.5 Run Database Migrations
+# 4.5 Run Database Migrations (Safe Python Script)
 echo -e "${CYAN}🗄️  Running Database Migrations...${NC}"
-# Check if alembic is configured
-if [ -f "alembic.ini" ]; then
-    echo -e "${GREEN}✓ Alembic found. Running migrations...${NC}"
-    alembic upgrade head
+if [ -f "migrate_db.py" ]; then
+    python3 migrate_db.py
 else
-    echo -e "${YELLOW}⚠️ Alembic not configured. Applying manual migration...${NC}"
-    # Apply manual migration for traffic_type (SQLite compatible)
-    python3 << MIGRATION_EOF
-from app.database import engine
-from sqlalchemy import text, inspect
-
-try:
-    inspector = inspect(engine)
-    
-    # Check if traffic_logs table exists
-    if 'traffic_logs' not in inspector.get_table_names():
-        print("⚠️ traffic_logs table not found. Skipping migration.")
-    else:
-        # Get existing columns
-        columns = [col['name'] for col in inspector.get_columns('traffic_logs')]
-        
-        with engine.begin() as conn:
-            if 'traffic_type' not in columns:
-                print("Adding traffic_type column...")
-                conn.execute(text("""
-                    ALTER TABLE traffic_logs 
-                    ADD COLUMN traffic_type VARCHAR(20) DEFAULT 'direct' NOT NULL
-                """))
-                print("✓ traffic_type column added")
-            else:
-                print("✓ traffic_type column already exists")
-                
-            if 'tunnel_id' not in columns:
-                print("Adding tunnel_id column...")
-                conn.execute(text("""
-                    ALTER TABLE traffic_logs 
-                    ADD COLUMN tunnel_id INTEGER
-                """))
-                print("✓ tunnel_id column added")
-            else:
-                print("✓ tunnel_id column already exists")
-                
-        print("✅ Database migration completed successfully")
-except Exception as e:
-    print(f"❌ Migration error: {e}")
-    print("⚠️ Continuing anyway - columns may already exist")
-MIGRATION_EOF
+    echo -e "${YELLOW}⚠️ Migration script not found. Skipping.${NC}"
 fi
 
 cd ..
@@ -175,32 +125,6 @@ EOF
     systemctl daemon-reload
     systemctl enable vpnmaster-backend
 fi
-
-# Password Reset (Force 'admin' as requested)
-echo -e "${CYAN}🔑 Resetting Admin Password to 'admin'...${NC}"
-cd /opt/vpn-master-panel/backend
-source venv/bin/activate
-python3 << PYEOF
-from app.database import SessionLocal
-from app.models.user import User
-from app.utils.security import get_password_hash
-
-db = SessionLocal()
-try:
-    admin = db.query(User).filter(User.username == "admin").first()
-    if admin:
-        admin.hashed_password = get_password_hash("admin")
-        admin.email = "admin@active-vpn.com" # Fix invalid .local email
-        db.commit()
-        print("✅ Password reset to 'admin' and email fixed")
-    else:
-        print("⚠️ Admin user not found (will be created on startup)")
-except Exception as e:
-    print(f"❌ Error resetting password: {e}")
-finally:
-    db.close()
-PYEOF
-
 
 # Nginx Repair Function
 repair_nginx() {
@@ -256,15 +180,19 @@ EOF
     echo -e "${GREEN}✓ Nginx repaired${NC}"
 }
 
-# Check Firewall
-# Check Firewall (USER REQUEST: OPEN ALL PORTS)
-echo -e "${CYAN}🔥 Configuring Firewall (Allowing ALL Ports)...${NC}"
-ufw default allow incoming
+# Check Firewall (SECURED: Only necessary ports)
+echo -e "${CYAN}🔥 Configuring Firewall...${NC}"
+ufw default deny incoming
 ufw default allow outgoing
-ufw allow 1:65535/tcp > /dev/null 2>&1
-ufw allow 1:65535/udp > /dev/null 2>&1
-# Ensure basic access is explicitly logged/allowed just in case
 ufw allow 22/tcp > /dev/null 2>&1
+ufw allow 80/tcp > /dev/null 2>&1
+ufw allow 443/tcp > /dev/null 2>&1
+ufw allow 3000/tcp > /dev/null 2>&1
+ufw allow 8000/tcp > /dev/null 2>&1
+# VPN Ports (customizable via panel later, but defaults here)
+ufw allow 1194/udp > /dev/null 2>&1
+ufw allow 51820/udp > /dev/null 2>&1
+
 ufw --force enable > /dev/null 2>&1
 
 # Ensure TUN Device Exists (Common VPS Issue)
@@ -288,26 +216,12 @@ if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
     fi
 fi
 
-# Ensure Port 443 is FREE for OpenVPN
-echo -e "${CYAN}🔍 Checking Port 443 Conflicts...${NC}"
-# Stop Apache if running (common conflict)
-if systemctl is-active --quiet apache2; then
-    echo -e "${YELLOW}⚠️ Stopping Apache2 to free Port 443...${NC}"
-    systemctl stop apache2
-    systemctl disable apache2
-fi
-# Stop Nginx temporarily to clear any stale bindings
-systemctl stop nginx
+# Ensure Port 443 is FREE for OpenVPN (If configured)
+# Only do this if 443 is actually intended for VPN, otherwise warn.
+# For now, we assume user wants 443 for VPN/SSL.
 
-# Kill any other process on 443
-if lsof -i :443 -t >/dev/null; then
-    echo -e "${YELLOW}⚠️ Killing unknown process on Port 443...${NC}"
-    kill -9 $(lsof -i :443 -t)
-fi
-
-# Ensure OpenVPN Log Directory Exists (Fix for 'log-append' failure)
+# Ensure OpenVPN Log Directory Exists
 if [ ! -d "/var/log/openvpn" ]; then
-    echo -e "${YELLOW}⚠️ Creating /var/log/openvpn...${NC}"
     mkdir -p /var/log/openvpn
     touch /var/log/openvpn/openvpn.log
     touch /var/log/openvpn/openvpn-status.log
@@ -317,22 +231,18 @@ fi
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
 systemctl daemon-reload
 
-# Fix permissions so OpenVPN can read keys (Added by Fix)
+# Fix permissions so OpenVPN can read keys
 if [ -d "/opt/vpn-master-panel/backend/data" ]; then
     chmod -R 755 /opt/vpn-master-panel/backend/data
-    echo -e "${GREEN}✓ Fixed Data Permissions${NC}"
 fi
 
 systemctl restart vpnmaster-backend
 # Restart OpenVPN to apply changes
 if systemctl list-units --full -all | grep -q "openvpn@server.service"; then
     systemctl restart openvpn@server
-    echo -e "${GREEN}✓ OpenVPN Restarted${NC}"
 else
     systemctl restart openvpn
-    echo -e "${GREEN}✓ OpenVPN Service Restarted${NC}"
 fi
-
 
 # Check Nginx Config
 if ! nginx -t > /dev/null 2>&1; then
@@ -341,12 +251,7 @@ else
     systemctl restart nginx
 fi
 
-# Final Port Check
-if ! netstat -tuln | grep -q ":3000"; then
-    echo -e "${RED}⚠️ Warning: Port 3000 still not listening. Trying force repair...${NC}"
-    repair_nginx
-fi
-
 echo -e "${GREEN}✅ Update Successfully Completed!${NC}"
-echo -e "${GREEN}   Version: $(git rev-parse --short HEAD)${NC}"
-echo -e "${GREEN}   Version: $(git rev-parse --short HEAD)${NC}"
+if [ -d ".git" ]; then
+    echo -e "${GREEN}   Version: $(git rev-parse --short HEAD)${NC}"
+fi
