@@ -451,6 +451,9 @@ if [ "$1" != "--internal-run" ]; then
     echo -e "  - Backend Restart?  ${YELLOW}systemctl restart vpnmaster-backend${NC}"
     echo -e "  - Live Dashboard?   ${YELLOW}./check_status.sh --live${NC}"
     
-    echo -e "\n${BOLD}${YELLOW}📜 Recent Raw Logs (Last 10 Lines):${NC}" 
+    echo -e "\n${BOLD}${YELLOW}📜 Recent OpenVPN Logs (Last 10 Lines):${NC}" 
     journalctl -u openvpn@server -n 10 --no-pager | sed 's/^/  /'
+
+    echo -e "\n${BOLD}${YELLOW}📜 Recent Backend Logs (Last 10 Lines):${NC}"
+    journalctl -u vpnmaster-backend -n 10 --no-pager | sed 's/^/  /'
 fi
