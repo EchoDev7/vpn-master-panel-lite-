@@ -74,7 +74,7 @@ else
 fi
 
 # IPv6 Check (New Feature)
-PUBLIC_IPV6=$(curl -6 -s --max-time 3 ifconfig.co)
+PUBLIC_IPV6=$(curl -6 -s --max-time 3 -H "User-Agent: curl" ipv6.icanhazip.com)
 if [ -z "$PUBLIC_IPV6" ]; then
     print_status "Public IP (IPv6) -> [NOT DETECTED/DISABLED]" "warn"
 else
@@ -186,7 +186,8 @@ API_BASE="http://127.0.0.1:8001"
 APIS=(
     "/api/health|System Health"
     "/docs|API Documentation"
-    "/api/v1/monitoring/system|System Monitor" 
+    "/api/v1/monitoring/server-resources|System Resources" 
+    "/api/v1/monitoring/dashboard|Dashboard Stats"
     "/api/v1/auth/login|Auth Service"
 )
 
