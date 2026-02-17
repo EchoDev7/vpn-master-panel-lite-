@@ -130,16 +130,21 @@ else
     print_status "Frontend UI (Port 3000) -> [DOWN/ERROR] (Code: $HTTP_CODE)" "fail"
 fi
 
-# 4.4 Database Check (via Backend)
-# We can check DB by hitting an endpoint that requires DB access, e.g. system info or user check
-# Or we can check file existence for SQLite
+# 4.4 Database Check (Deep Diagnostics)
 if [ -f "/opt/vpn-master-panel/backend/vpnmaster_lite.db" ]; then
     print_status "Database File (SQLite) -> [FOUND]" "ok"
-    # Basic integrity check
-    if sqlite3 /opt/vpn-master-panel/backend/vpnmaster_lite.db "PRAGMA integrity_check;" | grep -q "ok"; then
-         print_status "Database Integrity -> [VALID]" "ok"
+    # Run deep check script
+    if [ -f "/opt/vpn-master-panel/backend/check_db.py" ]; then
+        cd /opt/vpn-master-panel/backend
+        python3 check_db.py
+        cd ..
     else
-         print_status "Database Integrity -> [CORRUPT]" "fail"
+        # Fallback basic check
+        if sqlite3 /opt/vpn-master-panel/backend/vpnmaster_lite.db "PRAGMA integrity_check;" | grep -q "ok"; then
+             print_status "Database Integrity -> [VALID]" "ok"
+        else
+             print_status "Database Integrity -> [CORRUPT]" "fail"
+        fi
     fi
 else
     print_status "Database File (SQLite) -> [MISSING]" "fail"
