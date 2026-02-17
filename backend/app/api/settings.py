@@ -284,6 +284,10 @@ async def apply_server_config(
         
         # Try to write to system path (may need root)
         try:
+            # SAFETY CHECK: Ensure we are NOT overwriting keys
+            if "BEGIN PRIVATE KEY" in config:
+                raise ValueError("Security violation: Attempted to write private key to server.conf")
+                
             with open(config_path, "w") as f:
                 f.write(config)
             system_written = True
