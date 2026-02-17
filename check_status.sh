@@ -159,6 +159,16 @@ else
     print_status "TUN Device MISSING (/dev/net/tun)" "fail"
 fi
 
+# DEBUG: Dump OpenVPN Config if service is failed
+if systemctl is-failed --quiet openvpn@server; then
+    echo -e "\n${RED}⚠️  OpenVPN Configuration (/etc/openvpn/server.conf):${NC}"
+    if [ -f /etc/openvpn/server.conf ]; then
+        cat /etc/openvpn/server.conf | grep -v "^#" | grep -v "^$"
+    else
+        echo "Config file not found!"
+    fi
+fi
+
 IP_FWD=$(cat /proc/sys/net/ipv4/ip_forward)
 if [ "$IP_FWD" == "1" ]; then
     print_status "IP Forwarding enabled" "ok"
