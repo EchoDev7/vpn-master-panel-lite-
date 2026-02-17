@@ -529,7 +529,7 @@ class OpenVPNService:
         lines.append("persist-key")
         lines.append("persist-tun")
         lines.append("status /var/log/openvpn/openvpn-status.log")
-        lines.append("log-append /var/log/openvpn/openvpn.log")
+        # lines.append("log-append /var/log/openvpn/openvpn.log") # Disable file logging for journalctl
         lines.append("user nobody")
         lines.append("group nogroup")
 
