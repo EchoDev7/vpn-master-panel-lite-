@@ -64,8 +64,8 @@ def check_database():
             print_status(f"All Core Tables Present ({len(existing_tables)} total)", "ok")
             
         # 5. Critical Data Check
-        # Check Admin User
-        cursor.execute("SELECT username, status FROM users WHERE role='admin'")
+        # Check Admin User (Super Admin or Admin)
+        cursor.execute("SELECT username, status FROM users WHERE role='super_admin' OR role='admin' LIMIT 1")
         admin = cursor.fetchone()
         if admin:
             # status is an Enum in python, but string in sqlite usually
