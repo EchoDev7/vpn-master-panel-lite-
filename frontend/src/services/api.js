@@ -208,6 +208,11 @@ class APIService {
     return this.client.get('/settings/wg-obfuscation/script');
   }
 
+  // Diagnostics
+  async getFullDiagnostics() {
+    return this.client.get('/diagnostics/full');
+  }
+
   // Generic methods
   async get(url, config = {}) {
     return this.client.get(url, config);
