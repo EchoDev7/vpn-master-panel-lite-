@@ -85,19 +85,35 @@ if [ -f "$KEY_FILE" ]; then
     fi
 fi
 
-# 3.5 CLEANUP: Remove Encrypted/Corrupt OpenVPN Keys (Force Regeneration)
+# 3.5 CLEANUP & REPAIR: Fix OpenVPN Keys (Deterministic)
 KEY_FILE="/opt/vpn-master-panel/backend/data/openvpn/server.key"
-if [ -f "$KEY_FILE" ]; then
-    # Condition 1: Key is explicitly encrypted
-    if grep -q "ENCRYPTED" "$KEY_FILE" || grep -q "Proc-Type: 4,ENCRYPTED" "$KEY_FILE"; then
-        echo -e "${YELLOW}⚠️ Detected Encrypted Server Key. Deleting to force regeneration...${NC}"
-        rm -f "$KEY_FILE"
-        rm -f "/opt/vpn-master-panel/backend/data/openvpn/server.crt"
-    # Condition 2: OpenVPN failed to start recently (likely due to password)
-    elif systemctl is-failed --quiet openvpn@server; then
-        echo -e "${YELLOW}⚠️ OpenVPN Service Failed. Assuming Corrupt/Password-Protected Key. Deleting...${NC}"
-        rm -f "$KEY_FILE"
-        rm -f "/opt/vpn-master-panel/backend/data/openvpn/server.crt"
+SHOULD_FIX_PKI=false
+
+if [ ! -f "$KEY_FILE" ]; then
+    SHOULD_FIX_PKI=true
+elif grep -q "ENCRYPTED" "$KEY_FILE" || grep -q "Proc-Type: 4,ENCRYPTED" "$KEY_FILE"; then
+    echo -e "${YELLOW}⚠️ Detected Encrypted Server Key.${NC}"
+    SHOULD_FIX_PKI=true
+elif systemctl is-failed --quiet openvpn@server; then
+     echo -e "${YELLOW}⚠️ OpenVPN Service is in FAILED state.${NC}"
+     SHOULD_FIX_PKI=true
+fi
+
+if [ "$SHOULD_FIX_PKI" = true ]; then
+    echo -e "${CYAN}🔧 Running Standalone PKI Repair Tool...${NC}"
+    # Ensure venv is created if not exists (might happen on fresh run)
+    if [ ! -d "backend/venv" ]; then cd backend && python3 -m venv venv && cd ..; fi
+    
+    # Run the fix script
+    if [ -f "backend/fix_pki.py" ]; then
+        backend/venv/bin/python3 backend/fix_pki.py
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ PKI Repaired Successfully${NC}"
+        else
+            echo -e "${RED}❌ PKI Repair Failed${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠️ fix_pki.py not found${NC}"
     fi
 fi
 
