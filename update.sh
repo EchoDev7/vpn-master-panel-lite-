@@ -50,13 +50,39 @@ fi
 echo -e "${CYAN}📦 Updating System Packages...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt update -qq
-# Ensure critical packages are present
-apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs python3-pip openssl
+# Ensure critical packages are present - Added fail2ban
+apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs python3-pip openssl fail2ban
+
+# Configure Fail2Ban if missing
+if [ ! -f "/etc/fail2ban/jail.local" ]; then
+    echo -e "${CYAN}🛡️  Configuring Fail2Ban...${NC}"
+    cat > /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 3
+
+[sshd]
+enabled = true
+EOF
+    systemctl restart fail2ban
+    systemctl enable fail2ban
+fi
 
 # 3. Enable IP Forwarding (Ensure it persists)
 if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
     echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
     sysctl -p
+fi
+
+# 3.5 CLEANUP: Remove Encrypted/Corrupt OpenVPN Keys (Force Regeneration)
+KEY_FILE="/opt/vpn-master-panel/backend/data/openvpn/server.key"
+if [ -f "$KEY_FILE" ]; then
+    if grep -q "ENCRYPTED" "$KEY_FILE" || grep -q "Proc-Type: 4,ENCRYPTED" "$KEY_FILE"; then
+        echo -e "${YELLOW}⚠️ Detected Encrypted/Corrupt Server Key. Deleting to force regeneration...${NC}"
+        rm -f "$KEY_FILE"
+        rm -f "/opt/vpn-master-panel/backend/data/openvpn/server.crt"
+    fi
 fi
 
 # 4. Update Backend Dependencies
