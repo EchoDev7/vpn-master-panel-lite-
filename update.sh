@@ -76,12 +76,17 @@ if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
 fi
 
 # 3.5 CLEANUP: Remove Encrypted/Corrupt OpenVPN Keys (Force Regeneration)
+# 3.5 CLEANUP: Remove Encrypted/Corrupt OpenVPN Keys (Force Regeneration)
 KEY_FILE="/opt/vpn-master-panel/backend/data/openvpn/server.key"
 if [ -f "$KEY_FILE" ]; then
-    if grep -q "ENCRYPTED" "$KEY_FILE" || grep -q "Proc-Type: 4,ENCRYPTED" "$KEY_FILE"; then
+    # Check for ENCRYPTED header or missing BEGIN PRIVATE KEY
+    if grep -q "ENCRYPTED" "$KEY_FILE" || grep -q "Proc-Type: 4,ENCRYPTED" "$KEY_FILE" || ! grep -q "BEGIN PRIVATE KEY" "$KEY_FILE"; then
         echo -e "${YELLOW}⚠️ Detected Encrypted/Corrupt Server Key. Deleting to force regeneration...${NC}"
         rm -f "$KEY_FILE"
         rm -f "/opt/vpn-master-panel/backend/data/openvpn/server.crt"
+        # Also clean /etc/openvpn to be sure
+        rm -f "/etc/openvpn/server.key"
+        rm -f "/etc/openvpn/server.crt"
     fi
 fi
 
