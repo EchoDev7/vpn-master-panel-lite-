@@ -251,6 +251,11 @@ else
     systemctl restart nginx
 fi
 
+# Ensure check_status.sh is executable
+if [ -f "check_status.sh" ]; then
+    chmod +x check_status.sh
+fi
+
 echo -e "${GREEN}✅ Update Successfully Completed!${NC}"
 if [ -d ".git" ]; then
     echo -e "${GREEN}   Version: $(git rev-parse --short HEAD)${NC}"
