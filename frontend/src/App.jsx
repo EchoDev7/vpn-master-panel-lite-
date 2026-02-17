@@ -8,6 +8,7 @@ import Settings from './components/Settings'
 import Tunnels from './components/Tunnels'
 import Servers from './components/Servers'
 import Analytics from './components/Analytics'
+import Diagnostics from './components/Diagnostics'
 import Login from './components/Login'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -64,6 +65,9 @@ function MainLayout() {
                             <Link to="/subscription" className="text-gray-300 hover:text-white transition-colors">
                                 Subscription
                             </Link>
+                            <Link to="/diagnostics" className="text-gray-300 hover:text-white transition-colors">
+                                Diagnostics
+                            </Link>
                             <Link to="/settings" className="text-gray-300 hover:text-white transition-colors">
                                 Settings
                             </Link>
@@ -91,6 +95,7 @@ function MainLayout() {
                         <Route path="/tunnels" element={<Tunnels />} />
                         <Route path="/users" element={<Users />} />
                         <Route path="/subscription" element={<SubscriptionPlans />} />
+                        <Route path="/diagnostics" element={<Diagnostics />} />
                         <Route path="/settings" element={<Settings />} />
                     </Routes>
                 </ErrorBoundary>
