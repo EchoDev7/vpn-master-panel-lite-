@@ -51,7 +51,7 @@ echo -e "${CYAN}📦 Updating System Packages...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt update -qq
 # Ensure critical packages are present
-apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs python3-pip
+apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs python3-pip openssl
 
 # 3. Enable IP Forwarding (Ensure it persists)
 if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
