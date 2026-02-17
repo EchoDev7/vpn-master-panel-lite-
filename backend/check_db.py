@@ -65,11 +65,11 @@ def check_database():
             
         # 5. Critical Data Check
         # Check Admin User
-        cursor.execute("SELECT username, is_active FROM users WHERE role='admin'")
+        cursor.execute("SELECT username, status FROM users WHERE role='admin'")
         admin = cursor.fetchone()
         if admin:
-            status_str = "Active" if admin[1] else "Inactive"
-            print_status(f"Admin User Found: {admin[0]} ({status_str})", "ok")
+            # status is an Enum in python, but string in sqlite usually
+            print_status(f"Admin User Found: {admin[0]} (Status: {admin[1]})", "ok")
         else:
             print_status("No Admin User Found!", "fail")
             

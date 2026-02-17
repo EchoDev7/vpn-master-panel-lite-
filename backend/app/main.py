@@ -139,6 +139,15 @@ async def health_check():
         "version": settings.APP_VERSION
     }
 
+@app.get("/api/health")
+async def api_health_check():
+    """API Health check endpoint for Nginx"""
+    return {
+        "status": "healthy",
+        "service": "backend",
+        "version": settings.APP_VERSION
+    }
+
 
 # Root endpoint
 @app.get("/")
