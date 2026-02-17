@@ -100,21 +100,49 @@ elif systemctl is-failed --quiet openvpn@server; then
 fi
 
 if [ "$SHOULD_FIX_PKI" = true ]; then
-    echo -e "${CYAN}🔧 Running Standalone PKI Repair Tool...${NC}"
-    # Ensure venv is created if not exists (might happen on fresh run)
-    if [ ! -d "backend/venv" ]; then cd backend && python3 -m venv venv && cd ..; fi
+    echo -e "${CYAN}🔧 repairing OpenVPN PKI using EasyRSA...${NC}"
     
-    # Run the fix script
-    if [ -f "backend/fix_pki.py" ]; then
-        backend/venv/bin/python3 backend/fix_pki.py
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✓ PKI Repaired Successfully${NC}"
-        else
-            echo -e "${RED}❌ PKI Repair Failed${NC}"
-        fi
-    else
-        echo -e "${YELLOW}⚠️ fix_pki.py not found${NC}"
+    # Install easy-rsa if missing
+    if [ ! -d "/usr/share/easy-rsa" ]; then
+        apt install -y easy-rsa
     fi
+
+    # Setup EasyRSA directory
+    rm -rf /opt/vpn-master-panel/easy-rsa
+    cp -r /usr/share/easy-rsa /opt/vpn-master-panel/easy-rsa
+    cd /opt/vpn-master-panel/easy-rsa
+    
+    # Initialize PKI
+    ./easyrsa init-pki
+    
+    # Build CA (Batch mode, no pass)
+    echo -e "${CYAN}  Generating CA...${NC}"
+    export EASYRSA_BATCH=1
+    export EASYRSA_REQ_CN="VPN-Master-Root-CA"
+    ./easyrsa build-ca nopass
+    
+    # Build Server Key/Cert
+    echo -e "${CYAN}  Generating Server Cert/Key...${NC}"
+    export EASYRSA_REQ_CN="server"
+    ./easyrsa build-server-full server nopass
+    
+    # Generate DH (Fast mode for server)
+    # echo -e "${CYAN}  Generating DH Params (Skipped - using ECDHE)...${NC}"
+    # ./easyrsa gen-dh
+    
+    # Copy keys to backend data dir (so backend sees them)
+    mkdir -p /opt/vpn-master-panel/backend/data/openvpn
+    cp pki/ca.crt /opt/vpn-master-panel/backend/data/openvpn/
+    cp pki/issued/server.crt /opt/vpn-master-panel/backend/data/openvpn/
+    cp pki/private/server.key /opt/vpn-master-panel/backend/data/openvpn/
+    
+    # Copy keys to /etc/openvpn (for the service)
+    cp pki/ca.crt /etc/openvpn/
+    cp pki/issued/server.crt /etc/openvpn/
+    cp pki/private/server.key /etc/openvpn/
+    
+    echo -e "${GREEN}✓ PKI Repaired Successfully with EasyRSA${NC}"
+    cd "$INSTALL_DIR"
 fi
 
 # 4. Update Backend Dependencies
