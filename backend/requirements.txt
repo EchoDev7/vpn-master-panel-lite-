@@ -45,3 +45,6 @@ scapy==2.5.0
 # Logging & Metrics
 loguru==0.7.2
 sentry-sdk==1.40.0
+
+# Notifications
+python-telegram-bot==20.7
