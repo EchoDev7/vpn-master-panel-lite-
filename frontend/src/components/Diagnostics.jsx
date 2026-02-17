@@ -240,11 +240,117 @@ export default function Diagnostics() {
                 </div>
             </div>
 
+            {/* Network & Security Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Network connectivity */}
+                <div className="bg-gray-800/50 p-6 rounded-xl border border-gray-700 backdrop-blur-sm">
+                    <h3 className="text-gray-400 mb-4 flex items-center gap-2">
+                        <Activity className="w-5 h-5" /> Network Connectivity
+                    </h3>
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span className="text-gray-400">Public IPv4</span>
+                            <span className="text-white font-mono text-sm">{data.network?.public_ipv4 || 'Unknown'}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span className="text-gray-400">Public IPv6</span>
+                            <span className="text-white font-mono text-sm">{data.network?.public_ipv6 || 'Not Detected'}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span className="text-gray-400">Latency (Google DNS)</span>
+                            <span className={`font-mono text-sm ${data.network?.latency === 'Timeout' ? 'text-red-400' : 'text-green-400'}`}>
+                                {data.network?.latency}
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span className="text-gray-400">Firewall (UFW)</span>
+                            <span className="text-white font-mono text-sm">{data.network?.firewall_status}</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* VPN Security */}
+                <div className="bg-gray-800/50 p-6 rounded-xl border border-gray-700 backdrop-blur-sm">
+                    <h3 className="text-gray-400 mb-4 flex items-center gap-2">
+                        <Shield className="w-5 h-5" /> VPN Security
+                    </h3>
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span className="text-gray-400">TUN Device</span>
+                            <span className={data.vpn_security?.tun_available ? "text-green-400" : "text-red-400"}>
+                                {data.vpn_security?.tun_available ? "Available" : "Missing"}
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span className="text-gray-400">IP Forwarding</span>
+                            <span className={data.vpn_security?.ip_forwarding ? "text-green-400" : "text-red-400"}>
+                                {data.vpn_security?.ip_forwarding ? "Enabled" : "Disabled"}
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span className="text-gray-400">Cert Expiry</span>
+                            <span className="text-blue-400 font-mono text-xs">{data.vpn_security?.cert_expiry}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span className="text-gray-400">Database Health</span>
+                            <span className={data.database?.status === 'OK' ? "text-green-400" : "text-red-400"}>
+                                {data.database?.status}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Intelligent Log Analysis */}
+            <div className="bg-gray-800/50 rounded-xl border border-gray-700 backdrop-blur-sm overflow-hidden">
+                <div className="p-6 border-b border-gray-700">
+                    <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                        <Terminal className="w-5 h-5 text-yellow-500" /> Intelligent Log Analysis
+                    </h3>
+                </div>
+                <div className="p-6">
+                    {data.logs && data.logs.length > 0 ? (
+                        <div className="space-y-4">
+                            {data.logs.map((log, index) => (
+                                <div key={index} className={`p-4 rounded-lg border ${log.level === 'CRITICAL' ? 'bg-red-900/20 border-red-700 text-red-200' :
+                                        log.level === 'ERROR' ? 'bg-orange-900/20 border-orange-700 text-orange-200' :
+                                            log.level === 'WARN' ? 'bg-yellow-900/20 border-yellow-700 text-yellow-200' :
+                                                'bg-green-900/20 border-green-700 text-green-200'
+                                    }`}>
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <h4 className="font-bold flex items-center gap-2">
+                                                [{log.level}] {log.message}
+                                            </h4>
+                                            {log.fix && (
+                                                <p className="mt-1 text-sm opacity-90">
+                                                    💡 <span className="font-semibold">Fix:</span> {log.fix}
+                                                </p>
+                                            )}
+                                            {log.log_snippet && (
+                                                <pre className="mt-2 text-xs opacity-75 overflow-x-auto p-2 bg-black/30 rounded">
+                                                    {log.log_snippet}
+                                                </pre>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-center py-8 text-gray-500">
+                            <CheckCircle className="w-12 h-12 mx-auto mb-3 text-green-500/50" />
+                            <p>No critical error patterns detected in recent logs.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+
             {/* Recommended Tools */}
             <div className="bg-gray-800/50 rounded-xl border border-gray-700 backdrop-blur-sm overflow-hidden">
                 <div className="p-6 border-b border-gray-700">
                     <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                        <Terminal className="w-5 h-5 text-purple-400" /> Recommended Tools
+                        <Box className="w-5 h-5 text-purple-400" /> Recommended Tools
                     </h3>
                 </div>
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
