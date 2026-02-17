@@ -273,8 +273,25 @@ fi
 
 # OpenVPN Config & CERT CHECK
 if [ -f "/etc/openvpn/server.conf" ]; then
-    OVPN_PORT=$(grep '^port ' /etc/openvpn/server.conf | awk '{print $2}')
-    print_status "OpenVPN Configured (Port ${OVPN_PORT:-1194})" "ok"
+    # Check config file setting
+    CONFIG_PORT=$(grep '^port ' /etc/openvpn/server.conf | awk '{print $2}')
+    
+    # Check ACTUAL running port
+    if command -v netstat >/dev/null; then
+        RUNNING_PORT=$(netstat -tulnp | grep 'openvpn' | head -n 1 | awk '{print $4}' | awk -F':' '{print $NF}')
+    else
+        RUNNING_PORT=$(ss -tulnp | grep 'openvpn' | head -n 1 | awk '{print $5}' | awk -F':' '{print $NF}')
+    fi
+    
+    if [ -n "$RUNNING_PORT" ]; then
+        if [ "$RUNNING_PORT" == "$CONFIG_PORT" ]; then
+            print_status "OpenVPN Running (Port $RUNNING_PORT)" "ok"
+        else
+            print_status "OpenVPN Running (Port $RUNNING_PORT) - Config Mismatch ($CONFIG_PORT)" "warn"
+        fi
+    else
+        print_status "OpenVPN Stopped (Config Port $CONFIG_PORT)" "fail"
+    fi
     
     # Check Cert Expiry
     if [ -f "/etc/openvpn/server.crt" ]; then
