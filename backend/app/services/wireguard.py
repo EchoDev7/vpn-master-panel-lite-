@@ -713,20 +713,28 @@ class WireGuardService:
         settings = self._load_settings()
         obfs_type = settings.get("wg_obfuscation_type", "none")
         port = settings.get("wg_port", "51820")
-        obfs_port = settings.get("wg_obfuscation_port", "443")
+        obfs_obfuscation_port = settings.get("wg_obfuscation_port", "443")
         domain = settings.get("wg_obfuscation_domain", "")
+
+        # SHA256 Checksums (Update these when bumping versions)
+        WSTUNNEL_VERSION = "v5.0" # Example version, adjust as needed
+        # WSTUNNEL_SHA256 = "..." 
+        
+        # UDP2RAW_VERSION = "20230206.0"
+        # UDP2RAW_SHA256 = "..."
 
         if obfs_type == "wstunnel":
             return f"""#!/bin/bash
 # WireGuard + wstunnel (WebSocket over HTTPS) Setup
 # This tunnels WG UDP traffic through WebSocket/TLS
 
-# Install wstunnel
-wget -q https://github.com/erebe/wstunnel/releases/latest/download/wstunnel_linux_amd64 -O /usr/local/bin/wstunnel
+# Install wstunnel (Pinned Version)
+WSTUNNEL_URL="https://github.com/erebe/wstunnel/releases/download/v9.0.0/wstunnel-linux-x64"
+wget -q $WSTUNNEL_URL -O /usr/local/bin/wstunnel
 chmod +x /usr/local/bin/wstunnel
 
 # Run wstunnel server (forward WebSocket → WG UDP)
-# wstunnel server --restrict-to 127.0.0.1:{port} wss://0.0.0.0:{obfs_port}
+# wstunnel server --restrict-to 127.0.0.1:{port} wss://0.0.0.0:{obfs_obfuscation_port}
 
 # Create systemd service
 cat > /etc/systemd/system/wstunnel.service << 'EOF'
@@ -735,7 +743,7 @@ Description=WStunnel WebSocket Tunnel for WireGuard
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/wstunnel server --restrict-to 127.0.0.1:{port} wss://0.0.0.0:{obfs_port}
+ExecStart=/usr/local/bin/wstunnel server --restrict-to 127.0.0.1:{port} wss://0.0.0.0:{obfs_obfuscation_port}
 Restart=always
 RestartSec=5
 
@@ -746,15 +754,16 @@ EOF
 systemctl daemon-reload
 systemctl enable --now wstunnel
 
-echo "✅ wstunnel configured on port {obfs_port} → WireGuard port {port}"
+echo "✅ wstunnel configured on port {obfs_obfuscation_port} → WireGuard port {port}"
 """
         elif obfs_type == "udp2raw":
             return f"""#!/bin/bash
 # WireGuard + udp2raw (FakeTCP) Setup
 # This encapsulates WG UDP in fake TCP packets
 
-# Install udp2raw
-wget -q https://github.com/wangyu-/udp2raw/releases/latest/download/udp2raw_binaries.tar.gz -O /tmp/udp2raw.tar.gz
+# Install udp2raw (Pinned Version)
+UDP2RAW_URL="https://github.com/wangyu-/udp2raw/releases/download/20230206.0/udp2raw_binaries.tar.gz"
+wget -q $UDP2RAW_URL -O /tmp/udp2raw.tar.gz
 tar xzf /tmp/udp2raw.tar.gz -C /usr/local/bin/ udp2raw_amd64
 mv /usr/local/bin/udp2raw_amd64 /usr/local/bin/udp2raw
 chmod +x /usr/local/bin/udp2raw
@@ -766,7 +775,7 @@ Description=UDP2RAW FakeTCP Tunnel for WireGuard
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/udp2raw -s -l 0.0.0.0:{obfs_port} -r 127.0.0.1:{port} --raw-mode faketcp -a -k vpnmaster
+ExecStart=/usr/local/bin/udp2raw -s -l 0.0.0.0:{obfs_obfuscation_port} -r 127.0.0.1:{port} --raw-mode faketcp -a -k vpnmaster
 Restart=always
 RestartSec=5
 
@@ -777,7 +786,7 @@ EOF
 systemctl daemon-reload
 systemctl enable --now udp2raw
 
-echo "✅ udp2raw configured on port {obfs_port} (FakeTCP) → WireGuard port {port}"
+echo "✅ udp2raw configured on port {obfs_obfuscation_port} (FakeTCP) → WireGuard port {port}"
 """
         else:
             return "# No obfuscation configured"
