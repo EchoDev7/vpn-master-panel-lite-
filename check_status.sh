@@ -81,10 +81,14 @@ MEM_USED=$(free -m | awk '/^Mem:/{print $3}')
 MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
 MEM_PERCENT=$(( 100 * MEM_USED / MEM_TOTAL ))
 DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+LOG_USAGE=$(df -h /var/log | awk 'NR==2 {print $5}' | sed 's/%//')
 
 echo -e "\n  System Load:     ${CYAN}$LOAD${NC}"
 print_status "Memory: ${MEM_USED}MB / ${MEM_TOTAL}MB (${MEM_PERCENT}%)" "$([ $MEM_PERCENT -gt 90 ] && echo "warn" || echo "ok")"
 print_status "Disk (/): ${DISK_USAGE}%" "$([ $DISK_USAGE -gt 90 ] && echo "fail" || echo "ok")"
+if [ "$LOG_USAGE" -gt 85 ]; then
+    print_status "Log Partition (/var/log): ${LOG_USAGE}% - DANGER!" "fail"
+fi
 
 # --- 2. Network Interface & Ports ---
 echo -e "\n${BOLD}${YELLOW}📡 2. Network & Ports${NC}"
@@ -103,6 +107,18 @@ if command -v netstat >/dev/null; then
 else
     ss -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $5, $7}' | grep -E '(:8000|:3000|:1194|:51820|:443|:80|:22)'
 fi
+
+# Firewall Rules Count
+if command -v ufw >/dev/null && [ "$(ufw status | grep -c 'Status: active')" -eq 1 ]; then
+    RULE_COUNT=$(ufw status numbered | grep -c '\[')
+    print_status "Firewall (UFW): Active with $RULE_COUNT rules" "ok"
+elif command -v iptables >/dev/null; then
+    RULE_COUNT=$(iptables -L -n | grep -c 'ACCEPT\|DROP\|REJECT')
+    print_status "Firewall (IPTables): $RULE_COUNT active rules (Approx)" "ok"
+else
+     print_status "Firewall: NOT ACTIVE or Not Detected" "warn"
+fi
+
 
 # --- 3. Core Services Check ---
 echo -e "\n${BOLD}${YELLOW}⚙️  3. Core Services Status${NC}"
@@ -213,8 +229,8 @@ for TOOL in "${TOOLS[@]}"; do
     fi
 done
 
-# --- 6. VPN Configuration & Core ---
-echo -e "\n${BOLD}${YELLOW}🔒 6. VPN Configuration & Core${NC}"
+# --- 6. VPN Configuration & Security ---
+echo -e "\n${BOLD}${YELLOW}🔒 6. VPN Configuration & Security${NC}"
 echo -e "--------------------------------------------------------"
 
 # TUN & IP Forwarding (Restored)
@@ -231,10 +247,16 @@ else
     print_status "IPv4 Forwarding DISABLED" "fail"
 fi
 
-# OpenVPN Config
+# OpenVPN Config & CERT CHECK
 if [ -f "/etc/openvpn/server.conf" ]; then
     OVPN_PORT=$(grep '^port ' /etc/openvpn/server.conf | awk '{print $2}')
     print_status "OpenVPN Configured (Port ${OVPN_PORT:-1194})" "ok"
+    
+    # Check Cert Expiry
+    if [ -f "/etc/openvpn/server.crt" ]; then
+        END_DATE=$(openssl x509 -enddate -noout -in /etc/openvpn/server.crt | cut -d= -f2)
+        print_status "OpenVPN Cert Valid Until: $END_DATE" "ok"
+    fi
 else
     print_status "OpenVPN Configuration Missing" "fail"
 fi
@@ -297,7 +319,7 @@ for ENDPOINT in "${APIS[@]}"; do
     fi
 done
 
-# --- Troubleshooting Hints (Only for manual run) ---
+# --- Troubleshooting Hints (Unique Logic) ---
 if [ "$1" != "--internal-run" ]; then
     echo -e "\n${BOLD}${CYAN}💡 Quick Fixes:${NC}"
     echo -e "  - OpenVPN Down?   ${YELLOW}journalctl -u openvpn@server -n 20${NC}"
@@ -305,6 +327,10 @@ if [ "$1" != "--internal-run" ]; then
     echo -e "  - DB Issues?      ${YELLOW}Delete .db file & restart service${NC}"
     echo -e "  - Live Dashboard? ${YELLOW}./check_status.sh --live${NC}"
     
-    echo -e "\n${BOLD}${YELLOW}🚨 System Logs (Last 15 lines):${NC}" 
-    journalctl -p 3 -n 15 --no-pager
+    echo -e "\n${BOLD}${YELLOW}🚨 CRITICAL ERROR LOGS (Past 10 mins):${NC}" 
+    # Grep specifically for Errors in critical services found in last 100 lines
+    journalctl -n 200 --since "10 minutes ago" | grep -iE 'error|failed|fatal|exception' | grep -v 'ignored' | tail -n 5
+    
+    echo -e "\n${BOLD}${YELLOW}📜 Recent System Activity:${NC}" 
+    journalctl -p 3 -n 10 --no-pager
 fi
