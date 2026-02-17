@@ -564,6 +564,16 @@ class OpenVPNService:
 
         return "\n".join(lines)
 
-
+    def _find_plugin(self, plugin_name: str) -> str:
+        """Find OpenVPN plugin location"""
+        possible_paths = [
+            f"/usr/lib/openvpn/plugins/{plugin_name}",
+            f"/usr/lib/x86_64-linux-gnu/openvpn/plugins/{plugin_name}",
+            f"/usr/local/lib/openvpn/plugins/{plugin_name}",
+        ]
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+        return None
 # Singleton
 openvpn_service = OpenVPNService()
