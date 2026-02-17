@@ -143,11 +143,12 @@ class OpenVPNService:
 
     def _ensure_pki(self):
         """Ensure PKI (CA/Cert/Key/DH) exists"""
-        dh_path = os.path.join(self.DATA_DIR, "dh.pem")
+        # dh_path = os.path.join(self.DATA_DIR, "dh.pem") 
+        # We use 'dh none', so we don't strictly need dh.pem
         if (os.path.exists(self.CA_PATH) and 
-            os.path.exists(self.TA_PATH) and 
-            os.path.exists(dh_path)):
+            os.path.exists(self.TA_PATH)):
             return
+        
         try:
             self.regenerate_pki()
         except Exception as e:
@@ -509,7 +510,8 @@ class OpenVPNService:
         lines.append(f"ca {self.CA_PATH}")
         lines.append(f"cert {os.path.join(self.DATA_DIR, 'server.crt')}")
         lines.append(f"key {os.path.join(self.DATA_DIR, 'server.key')}")
-        lines.append(f"dh {os.path.join(self.DATA_DIR, 'dh.pem')}")
+        # Modern OpenVPN with ECDHE doesn't need DH params
+        lines.append("dh none")
 
         tls_mode = settings.get("tls_control_channel", "tls-crypt")
         if tls_mode == "tls-crypt":
