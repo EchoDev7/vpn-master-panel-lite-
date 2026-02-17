@@ -65,7 +65,8 @@ def check_database():
             
         # 5. Critical Data Check
         # Check Admin User (Super Admin or Admin)
-        cursor.execute("SELECT username, status FROM users WHERE role='super_admin' OR role='admin' LIMIT 1")
+        # SQLAlchemy Enum stores names (SUPER_ADMIN) by default, not values (super_admin)
+        cursor.execute("SELECT username, status FROM users WHERE role IN ('SUPER_ADMIN', 'ADMIN', 'super_admin', 'admin') LIMIT 1")
         admin = cursor.fetchone()
         if admin:
             # status is an Enum in python, but string in sqlite usually
