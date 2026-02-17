@@ -379,9 +379,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/vpn-master-panel/backend
-Environment="PATH=/opt/vpn-master-panel/backend/venv/bin"
-
-# Lightweight config: 1 worker, limited memory
+Environment="PATH=/opt/vpn-master-panel/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/opt/vpn-master-panel/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --limit-concurrency 50
 
 # Memory limits

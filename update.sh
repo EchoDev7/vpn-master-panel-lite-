@@ -85,6 +85,22 @@ if [ -f "$KEY_FILE" ]; then
     fi
 fi
 
+# 3.5 CLEANUP: Remove Encrypted/Corrupt OpenVPN Keys (Force Regeneration)
+KEY_FILE="/opt/vpn-master-panel/backend/data/openvpn/server.key"
+if [ -f "$KEY_FILE" ]; then
+    # Condition 1: Key is explicitly encrypted
+    if grep -q "ENCRYPTED" "$KEY_FILE" || grep -q "Proc-Type: 4,ENCRYPTED" "$KEY_FILE"; then
+        echo -e "${YELLOW}⚠️ Detected Encrypted Server Key. Deleting to force regeneration...${NC}"
+        rm -f "$KEY_FILE"
+        rm -f "/opt/vpn-master-panel/backend/data/openvpn/server.crt"
+    # Condition 2: OpenVPN failed to start recently (likely due to password)
+    elif systemctl is-failed --quiet openvpn@server; then
+        echo -e "${YELLOW}⚠️ OpenVPN Service Failed. Assuming Corrupt/Password-Protected Key. Deleting...${NC}"
+        rm -f "$KEY_FILE"
+        rm -f "/opt/vpn-master-panel/backend/data/openvpn/server.crt"
+    fi
+fi
+
 # 4. Update Backend Dependencies
 echo -e "${CYAN}🐍 Updating Backend...${NC}"
 cd backend
@@ -127,11 +143,11 @@ cd ..
 # 6. Repair & Restart Services
 echo -e "${CYAN}🔧 Verifying Services...${NC}"
 
-# Backend Service Repair
+# Backend Service Repair (Fix PATH issue)
 SERVICE_FILE="/etc/systemd/system/vpnmaster-backend.service"
-if [ ! -f "$SERVICE_FILE" ]; then
-    echo -e "${YELLOW}⚠️ Service file missing. Recreating...${NC}"
-    cat > "$SERVICE_FILE" << EOF
+# We force update the service file to fix the PATH
+echo -e "${YELLOW}⚠️ Updating Backend Service Definition...${NC}"
+cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=VPN Master Panel Backend (Lightweight)
 After=network.target
@@ -140,7 +156,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/vpn-master-panel/backend
-Environment="PATH=/opt/vpn-master-panel/backend/venv/bin"
+Environment="PATH=/opt/vpn-master-panel/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/opt/vpn-master-panel/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --limit-concurrency 50
 Restart=always
 RestartSec=10
@@ -148,9 +164,9 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable vpnmaster-backend
-fi
+systemctl daemon-reload
+systemctl enable vpnmaster-backend
+
 
 # Nginx Repair Function
 repair_nginx() {
