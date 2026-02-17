@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Activity, Shield, Server, Box, AlertTriangle, CheckCircle, RefreshCw, Terminal, GitBranch } from 'lucide-react';
-import axios from 'axios';
+import apiService from '../services/api';
 
 export default function Diagnostics() {
     const [data, setData] = useState(null);
@@ -11,16 +11,17 @@ export default function Diagnostics() {
     const fetchDiagnostics = async () => {
         try {
             setLoading(true);
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/v1/diagnostics/full', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await apiService.getFullDiagnostics();
             setData(response.data);
             setLastUpdated(new Date());
             setError(null);
         } catch (err) {
             console.error('Failed to fetch diagnostics:', err);
-            setError('Failed to load diagnostics data. Please try again.');
+            if (err.response && err.response.status === 401) {
+                setError('Session expired. Please login again.');
+            } else {
+                setError('Failed to load diagnostics data. Please try again.');
+            }
         } finally {
             setLoading(false);
         }
@@ -177,8 +178,8 @@ export default function Diagnostics() {
                                     {svc.name.replace('.service', '')}
                                 </span>
                                 <span className={`px-2 py-1 rounded text-xs font-semibold ${svc.active
-                                        ? 'bg-green-900/30 text-green-400 border border-green-800'
-                                        : 'bg-red-900/30 text-red-400 border border-red-800'
+                                    ? 'bg-green-900/30 text-green-400 border border-green-800'
+                                    : 'bg-red-900/30 text-red-400 border border-red-800'
                                     }`}>
                                     {svc.status}
                                 </span>
