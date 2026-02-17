@@ -163,7 +163,19 @@ install_dependencies() {
     print_success "Node.js 20 installed"
     
     print_info "Installing essential tools..."
-    apt install -y curl wget git unzip software-properties-common --no-install-recommends > /dev/null 2>&1
+    apt install -y curl wget git unzip software-properties-common fail2ban --no-install-recommends > /dev/null 2>&1
+    
+    # Configure Fail2Ban
+    cat > /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 3
+
+[sshd]
+enabled = true
+EOF
+    systemctl restart fail2ban > /dev/null 2>&1
     
     # Clean up
     apt autoremove -y > /dev/null 2>&1

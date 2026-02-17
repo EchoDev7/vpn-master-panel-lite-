@@ -162,7 +162,7 @@ class OpenVPNService:
             logger.error(f"Auto-generation of PKI failed: {e}")
 
     def _validate_key_pair(self) -> bool:
-        """Check if server.crt and server.key match"""
+        """Check if server.crt and server.key match and key is unencrypted"""
         try:
             cert_path = os.path.join(self.DATA_DIR, "server.crt")
             key_path = os.path.join(self.DATA_DIR, "server.key")
@@ -171,8 +171,14 @@ class OpenVPNService:
                 cert = x509.load_pem_x509_certificate(f.read(), default_backend())
             
             with open(key_path, "rb") as f:
+                key_data = f.read()
+                # Check for encryption header (Basic check)
+                if b"ENCRYPTED" in key_data or b"Proc-Type: 4,ENCRYPTED" in key_data:
+                    logger.warning("⚠️ Server key is encrypted (password protected). Regeneration required.")
+                    return False
+                
                 private_key = serialization.load_pem_private_key(
-                    f.read(), password=None, backend=default_backend()
+                    key_data, password=None, backend=default_backend()
                 )
             
             # Compare public keys
