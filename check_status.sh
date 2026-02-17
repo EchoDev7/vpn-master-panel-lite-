@@ -53,45 +53,50 @@ print_status() {
     fi
 }
 
-# --- 1. System & Project Status ---
-echo -e "${BOLD}${YELLOW}📊 1. System & Project Status${NC}"
+# --- 1. System & OS Status ---
+echo -e "${BOLD}${YELLOW}📊 1. System & OS Resources${NC}"
 echo -e "--------------------------------------------------------"
 
-# Git/Project Status
-if [ -d ".git" ]; then
-    COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
-    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-    MSG=$(git log -1 --pretty=%B 2>/dev/null | head -n 1)
-    
-    echo -e "  Project Version: ${CYAN}$COMMIT${NC} ($BRANCH)"
-    echo -e "  Latest Change:   ${CYAN}$MSG${NC}"
-    
-    if [ -n "$(git status --porcelain)" ]; then
-        echo -e "  File Changes:    ${YELLOW}⚠️  Uncommitted Changes Detected${NC}"
-    else
-        echo -e "  File Changes:    ${GREEN}Clean${NC}"
-    fi
+# OS Info
+if [ -f /etc/os-release ]; then
+    source /etc/os-release
+    OS_NAME="$PRETTY_NAME"
 else
-    echo -e "  Project Status:  ${YELLOW}Not a Git Repository${NC}"
+    OS_NAME="Unknown Linux"
 fi
+KERNEL=$(uname -r)
+UPTIME=$(uptime -p | sed 's/up //')
+echo -e "  OS:              ${CYAN}$OS_NAME${NC}"
+echo -e "  Kernel:          ${CYAN}$KERNEL${NC}"
+echo -e "  Uptime:          ${CYAN}$UPTIME${NC}"
 
 # Resources
 LOAD=$(uptime | awk -F'load average:' '{ print $2 }' | xargs)
 MEM_USED=$(free -m | awk '/^Mem:/{print $3}')
 MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
 MEM_PERCENT=$(( 100 * MEM_USED / MEM_TOTAL ))
+
+SWAP_USED=$(free -m | awk '/^Swap:/{print $3}')
+SWAP_TOTAL=$(free -m | awk '/^Swap:/{print $2}')
+if [ "$SWAP_TOTAL" -gt 0 ]; then
+    SWAP_PERCENT=$(( 100 * SWAP_USED / SWAP_TOTAL ))
+else
+    SWAP_PERCENT=0
+fi
+
 DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
 LOG_USAGE=$(df -h /var/log | awk 'NR==2 {print $5}' | sed 's/%//')
 
 echo -e "\n  System Load:     ${CYAN}$LOAD${NC}"
 print_status "Memory: ${MEM_USED}MB / ${MEM_TOTAL}MB (${MEM_PERCENT}%)" "$([ $MEM_PERCENT -gt 90 ] && echo "warn" || echo "ok")"
+print_status "Swap:   ${SWAP_USED}MB / ${SWAP_TOTAL}MB (${SWAP_PERCENT}%)" "$([ $SWAP_PERCENT -gt 80 ] && echo "warn" || echo "ok")"
 print_status "Disk (/): ${DISK_USAGE}%" "$([ $DISK_USAGE -gt 90 ] && echo "fail" || echo "ok")"
 if [ "$LOG_USAGE" -gt 85 ]; then
     print_status "Log Partition (/var/log): ${LOG_USAGE}% - DANGER!" "fail"
 fi
 
-# --- 2. Network Interface & Ports ---
-echo -e "\n${BOLD}${YELLOW}📡 2. Network & Ports${NC}"
+# --- 2. Network & Connectivity ---
+echo -e "\n${BOLD}${YELLOW}📡 2. Network & Connectivity${NC}"
 echo -e "--------------------------------------------------------"
 
 # Public IPs
@@ -100,7 +105,15 @@ PUBLIC_IPV6=$(curl -6 -s --max-time 2 -H "User-Agent: curl" ipv6.icanhazip.com)
 echo -e "  Public IPv4:     ${GREEN}${PUBLIC_IP:-UNKNOWN}${NC}"
 echo -e "  Public IPv6:     ${GREEN}${PUBLIC_IPV6:-NOT DETECTED}${NC}"
 
-# Listening Ports (Restored)
+# Latency Check
+LATENCY=$(ping -c 1 8.8.8.8 2>/dev/null | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
+if [ -n "$LATENCY" ]; then
+    print_status "Internet Latency (Google DNS): ${LATENCY}ms" "ok"
+else
+    print_status "Internet Connectivity Check" "fail"
+fi
+
+# Listening Ports
 echo -e "\n${CYAN}Active Listening Ports:${NC}"
 if command -v netstat >/dev/null; then
     netstat -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $4, $7}' | grep -E '(:8000|:3000|:1194|:51820|:443|:80|:22)'
@@ -119,11 +132,10 @@ else
      print_status "Firewall: NOT ACTIVE or Not Detected" "warn"
 fi
 
-
 # --- 3. Core Services Check ---
 echo -e "\n${BOLD}${YELLOW}⚙️  3. Core Services Status${NC}"
 echo -e "--------------------------------------------------------"
-SERVICES=("vpnmaster-backend" "nginx" "openvpn@server" "wg-quick@wg0" "ufw")
+SERVICES=("vpnmaster-backend" "nginx" "openvpn@server" "wg-quick@wg0" "ufw" "fail2ban")
 for SERVICE in "${SERVICES[@]}"; do
     if systemctl is-active --quiet "$SERVICE"; then
         print_status "Service: $SERVICE -> Running" "ok"
@@ -131,11 +143,23 @@ for SERVICE in "${SERVICES[@]}"; do
         STATUS=$(systemctl is-failed "$SERVICE")
         if [ "$STATUS" == "failed" ]; then
             print_status "Service: $SERVICE -> FAILED" "fail"
+        elif [ "$SERVICE" == "wg-quick@wg0" ] || [ "$SERVICE" == "fail2ban" ]; then
+             # Optional services might be stopped
+             print_status "Service: $SERVICE -> Stopped (Optional)" "warn"
         else
             print_status "Service: $SERVICE -> Stopped" "warn"
         fi
     fi
 done
+
+# Nginx Config Check
+if command -v nginx >/dev/null; then
+    if nginx -t 2>/dev/null; then
+         print_status "Nginx Configuration Syntax" "ok"
+    else
+         print_status "Nginx Configuration Syntax Error!" "fail"
+    fi
+fi
 
 # --- 4. Package Versions & Updates ---
 echo -e "\n${BOLD}${YELLOW}📦 4. Installed Packages & Updates${NC}"
@@ -257,6 +281,16 @@ if [ -f "/etc/openvpn/server.conf" ]; then
         END_DATE=$(openssl x509 -enddate -noout -in /etc/openvpn/server.crt | cut -d= -f2)
         print_status "OpenVPN Cert Valid Until: $END_DATE" "ok"
     fi
+    
+    # Monitor Active Sessions (Estimate)
+    if [ -f "/var/log/openvpn/ipp.txt" ]; then
+         ACTIVE_SESSIONS=$(cat /var/log/openvpn/ipp.txt | wc -l)
+         if [ "$ACTIVE_SESSIONS" -gt 0 ]; then
+             print_status "Active VPN Sessions (Approx): $ACTIVE_SESSIONS" "ok"
+         else
+             print_status "Active VPN Sessions: 0" "ok"
+         fi
+    fi
 else
     print_status "OpenVPN Configuration Missing" "fail"
 fi
@@ -318,6 +352,26 @@ for ENDPOINT in "${APIS[@]}"; do
         print_status "$ENDPOINT -> Unreachable ($HTTP_CODE)" "fail"
     fi
 done
+
+# --- 9. Project Status ---
+echo -e "\n${BOLD}${YELLOW}💻 9. Project Git Status${NC}"
+echo -e "--------------------------------------------------------"
+if [ -d ".git" ]; then
+    COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
+    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    MSG=$(git log -1 --pretty=%B 2>/dev/null | head -n 1)
+    
+    echo -e "  Branch/Commit:   ${CYAN}$BRANCH / $COMMIT${NC}"
+    echo -e "  Latest Change:   ${CYAN}$MSG${NC}"
+    
+    if [ -n "$(git status --porcelain)" ]; then
+        echo -e "  File Status:     ${YELLOW}⚠️  Uncommitted Changes Detected${NC}"
+    else
+        echo -e "  File Status:     ${GREEN}Clean${NC}"
+    fi
+else
+    echo -e "  Project Status:  ${YELLOW}Not a Git Repository${NC}"
+fi
 
 # --- Troubleshooting Hints (Unique Logic) ---
 if [ "$1" != "--internal-run" ]; then
