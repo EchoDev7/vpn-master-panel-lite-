@@ -102,6 +102,17 @@ elif grep -q "ENCRYPTED" "$KEY_FILE" || grep -q "Proc-Type: 4,ENCRYPTED" "$KEY_F
 elif systemctl is-failed --quiet openvpn@server; then
      echo -e "${YELLOW}⚠️ OpenVPN Service is in FAILED state.${NC}"
      SHOULD_FIX_PKI=true
+else
+    # Check Modulus Match
+    KEY_MOD=$(openssl rsa -noout -modulus -in "$KEY_FILE" 2>/dev/null | openssl md5)
+    CERT_FILE="/opt/vpn-master-panel/backend/data/openvpn/server.crt"
+    if [ -f "$CERT_FILE" ]; then
+        CERT_MOD=$(openssl x509 -noout -modulus -in "$CERT_FILE" 2>/dev/null | openssl md5)
+        if [ "$KEY_MOD" != "$CERT_MOD" ]; then
+             echo -e "${YELLOW}⚠️ Key/Cert Mismatch Detected.${NC}"
+             SHOULD_FIX_PKI=true
+        fi
+    fi
 fi
 
 if [ "$SHOULD_FIX_PKI" = true ]; then
@@ -131,20 +142,42 @@ if [ "$SHOULD_FIX_PKI" = true ]; then
     export EASYRSA_REQ_CN="server"
     ./easyrsa build-server-full server nopass
     
-    # Generate DH (Fast mode for server)
-    # echo -e "${CYAN}  Generating DH Params (Skipped - using ECDHE)...${NC}"
-    # ./easyrsa gen-dh
+    # Verify Keys (Self-Healing)
+    KEY_MOD=$(openssl rsa -noout -modulus -in pki/private/server.key 2>/dev/null | openssl md5)
+    CERT_MOD=$(openssl x509 -noout -modulus -in pki/issued/server.crt 2>/dev/null | openssl md5)
+    
+    if [ "$KEY_MOD" != "$CERT_MOD" ]; then
+        echo -e "${RED}❌ Critical Error: Generated Key/Cert mismatch!${NC}"
+        echo -e "${YELLOW}Retrying generation...${NC}"
+        # Retry once
+        rm -rf pki
+        ./easyrsa init-pki
+        ./easyrsa build-ca nopass
+        ./easyrsa build-server-full server nopass
+    fi
+    
+    # Force Remove Passphrase (Just in case)
+    openssl rsa -in pki/private/server.key -out pki/private/server.key.unsecure -passin pass: 2>/dev/null
+    if [ -f "pki/private/server.key.unsecure" ]; then
+        mv pki/private/server.key.unsecure pki/private/server.key
+    fi
     
     # Copy keys to backend data dir (so backend sees them)
     mkdir -p /opt/vpn-master-panel/backend/data/openvpn
-    cp pki/ca.crt /opt/vpn-master-panel/backend/data/openvpn/
-    cp pki/issued/server.crt /opt/vpn-master-panel/backend/data/openvpn/
-    cp pki/private/server.key /opt/vpn-master-panel/backend/data/openvpn/
+    cp -f pki/ca.crt /opt/vpn-master-panel/backend/data/openvpn/
+    cp -f pki/issued/server.crt /opt/vpn-master-panel/backend/data/openvpn/
+    cp -f pki/private/server.key /opt/vpn-master-panel/backend/data/openvpn/
     
     # Copy keys to /etc/openvpn (for the service)
-    cp pki/ca.crt /etc/openvpn/
-    cp pki/issued/server.crt /etc/openvpn/
-    cp pki/private/server.key /etc/openvpn/
+    cp -f pki/ca.crt /etc/openvpn/
+    cp -f pki/issued/server.crt /etc/openvpn/
+    cp -f pki/private/server.key /etc/openvpn/
+    
+    # Fix Permissions
+    chmod 644 /opt/vpn-master-panel/backend/data/openvpn/server.crt
+    chmod 600 /opt/vpn-master-panel/backend/data/openvpn/server.key
+    chmod 644 /etc/openvpn/server.crt
+    chmod 600 /etc/openvpn/server.key
     
     echo -e "${GREEN}✓ PKI Repaired Successfully with EasyRSA${NC}"
     cd "$INSTALL_DIR"
