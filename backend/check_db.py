@@ -72,6 +72,15 @@ def check_database():
             print_status(f"Admin User Found: {admin[0]} (Status: {admin[1]})", "ok")
         else:
             print_status("No Admin User Found!", "fail")
+            # Debug: List all users to see what's wrong
+            print(f"{YELLOW}DEBUG: Dumping all users...{NC}")
+            cursor.execute("SELECT id, username, role, status FROM users")
+            users = cursor.fetchall()
+            if not users:
+                print(f"{RED}  -> Table 'users' is EMPTY!{NC}")
+            else:
+                for u in users:
+                    print(f"  -> User: {u[1]} | Role: {u[2]} | Status: {u[3]}")
             
         # Check Settings
         cursor.execute("SELECT count(*) FROM settings")
