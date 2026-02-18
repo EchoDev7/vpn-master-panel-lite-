@@ -62,7 +62,7 @@ class OpenVPNService:
         
         # We start with minimal defaults to ensure basic keys exist
         settings = {
-            "protocol": "tcp", "port": "443", "server_subnet": "10.8.0.0",
+            "protocol": "udp", "port": "1194", "server_subnet": "10.8.0.0",
             "server_netmask": "255.255.255.0", "dev": "tun", "topology": "subnet"
         }
 
@@ -116,7 +116,8 @@ class OpenVPNService:
 
         # --- Header ---
         conf.append("# OpenVPN Server Configuration - Auto Generated")
-        conf.append(f"# Created: {subprocess.check_output(['date']).decode().strip()}")
+        from datetime import datetime
+        conf.append(f"# Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         conf.append("")
 
         # --- Network (Layer 1-3) ---
@@ -124,7 +125,7 @@ class OpenVPNService:
         conf.append(f"port {s.get('port', '443')}")
         conf.append(f"proto {s.get('protocol', 'tcp')}")
         conf.append(f"dev {s.get('dev', 'tun')}")
-        conf.append(f"dev-type {s.get('dev_type', 'tun')}")
+        # conf.append(f"dev-type {s.get('dev_type', 'tun')}") # Redundant with dev tun
         
         # Topology
         topo = s.get("topology", "subnet")
@@ -163,8 +164,9 @@ class OpenVPNService:
         elif tls_mode == "tls-auth":
             conf.append(f"tls-auth {self.TA_KEY} 0")
         elif tls_mode == "tls-crypt-v2":
-            # Requires server key specifically
-            conf.append(f"tls-crypt-v2 {self.TA_KEY}") 
+            # Requires server key specifically - Reverting to tls-crypt for this Lite version
+            # conf.append(f"tls-crypt-v2 {self.TA_KEY}") 
+            conf.append(f"tls-crypt {self.TA_KEY}")
         elif tls_mode == "none":
             # Explicitly disabled
             pass
@@ -247,7 +249,7 @@ class OpenVPNService:
             
         # Status Log
         conf.append(f"status {s.get('status_log', '/var/log/openvpn/openvpn-status.log')}")
-        conf.append(f"status-version {s.get('status_version', '2')}")
+        conf.append(f"status-version {s.get('status_version', '1')}") # v1 needed for monitoring.py
         
         # Management Interface
         mgmt = s.get("management")
@@ -255,7 +257,7 @@ class OpenVPNService:
              conf.append(f"management {mgmt}")
 
         # IP Pool Persistence
-        conf.append("ifconfig-pool-persist /var/log/openvpn/ipp.txt")
+        conf.append("ifconfig-pool-persist /etc/openvpn/ipp.txt")
 
         # --- Pushed Options ---
         conf.append("\n# --- Push Options ---")
@@ -302,7 +304,7 @@ class OpenVPNService:
                 logger.warning(f"Auth script missing at {script_to_use}. Config might be invalid until update.sh runs.")
 
             if os.path.exists(script_to_use):
-                conf.append("script-security 3")
+                conf.append("script-security 2")
                 conf.append(f"auth-user-pass-verify {script_to_use} via-file")
                 conf.append("username-as-common-name")
                 conf.append("verify-client-cert none")
@@ -379,7 +381,8 @@ class OpenVPNService:
         
         if has_remotes:
             conf.append("remote-random")
-            conf.append("resolv-retry infinite")
+            
+        conf.append("resolv-retry infinite")
 
         conf.append("nobind")
         
@@ -389,17 +392,17 @@ class OpenVPNService:
         conf.append(f"data-ciphers {s.get('data_ciphers', 'AES-256-GCM:AES-128-GCM')}")
         # Note: older clients might need 'cipher' directive, but we focus on modern.
         # Adding fallback for compatibility:
-        conf.append(f"cipher {s.get('data_ciphers_fallback', 'AES-256-GCM')}") 
+        # conf.append(f"cipher {s.get('data_ciphers_fallback', 'AES-256-GCM')}")  # Removed to avoid conflicts in 2.6+
         
         conf.append(f"tls-version-min {s.get('tls_version_min', '1.2')}")
         
-        # Compression
-        compress = s.get("compress", "")
-        if compress:
-            conf.append(f"compress {compress}")
-        elif s.get("comp_lzo") == "yes":
-            conf.append("comp-lzo")
-
+        # Compression - security risk, disable
+        conf.append("allow-compression no")
+        # conf.append(f"verb {s.get('verb', '3')}")
+        
+        # System
+        conf.append("persist-key")
+        conf.append("persist-tun")
         conf.append(f"verb {s.get('verb', '3')}")
 
         # Anti-Censorship
@@ -555,8 +558,8 @@ class OpenVPNService:
             subprocess.run(["openssl", "dhparam", "-out", self.DH_PATH, "2048"], check=True)
 
             # 6. Generate TLS-Auth Key (TA)
-            # openvpn --genkey secret ta.key
-            subprocess.run(["openvpn", "--genkey", "secret", self.TA_KEY], check=True)
+            # openvpn --genkey tls-auth ta.key
+            subprocess.run(["openvpn", "--genkey", "tls-auth", self.TA_KEY], check=True)
 
             # 7. Set Permissions (Security Fix)
             # chmod 600 server.key ta.key ca.key
