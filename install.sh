@@ -416,7 +416,7 @@ setup_pki() {
     # DH & TA
     print_info "Generating DH & TA..."
     openssl dhparam -out $DATA_DIR/dh.pem 2048 2>/dev/null
-    openvpn --genkey secret $DATA_DIR/ta.key
+    openvpn --genkey tls-auth $DATA_DIR/ta.key
 
     # Permissions
     chmod 600 $DATA_DIR/server.key $DATA_DIR/ta.key $DATA_DIR/ca.key
