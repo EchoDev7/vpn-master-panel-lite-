@@ -511,8 +511,19 @@ class OpenVPNService:
                 "-subj", "/CN=server"
             ], check=True)
 
-            # 4. Sign Server CSR with CA
-            # openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 3650
+            # 3.5 Create Extensions File for Server Cert (Critical for mobile clients)
+            # Modern clients require extendedKeyUsage=serverAuth to satisfy 'remote-cert-tls server'
+            ext_path = os.path.join(self.DATA_DIR, "server.ext")
+            with open(ext_path, "w") as f:
+                f.write("basicConstraints=CA:FALSE\n")
+                f.write("nsCertType=server\n")
+                f.write("keyUsage=digitalSignature,keyEncipherment\n")
+                f.write("extendedKeyUsage=serverAuth\n")
+                f.write("subjectKeyIdentifier=hash\n")
+                f.write("authorityKeyIdentifier=keyid,issuer\n")
+
+            # 4. Sign Server CSR with CA and Extensions
+            # openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 3650 -extfile server.ext
             subprocess.run([
                 "openssl", "x509", "-req",
                 "-in", server_csr,
@@ -520,7 +531,8 @@ class OpenVPNService:
                 "-CAkey", os.path.join(self.DATA_DIR, "ca.key"),
                 "-CAcreateserial",
                 "-out", self.SERVER_CERT,
-                "-days", "3650"
+                "-days", "3650",
+                "-extfile", ext_path
             ], check=True)
 
             # 5. Generate Diffie-Hellman (DH)
