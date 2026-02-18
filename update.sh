@@ -353,6 +353,7 @@ if [ ! -c /dev/net/tun ]; then
 fi
 
 # Deploy Auth Script to standard location (Fixes permissions issues)
+# User Request: strictly copy to /etc/openvpn/scripts/auth.py and chmod 755
 mkdir -p /etc/openvpn/scripts
 cp /opt/vpn-master-panel/backend/auth.py /etc/openvpn/scripts/auth.py
 chmod 755 /etc/openvpn/scripts/auth.py
