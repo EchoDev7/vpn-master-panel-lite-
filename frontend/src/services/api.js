@@ -247,6 +247,10 @@ class APIService {
     return this.client.get('/diagnostics/full');
   }
 
+  async getLiveLogs(lines = 50) {
+    return this.client.get('/diagnostics/live-logs', { params: { lines } });
+  }
+
   // Generic methods
   async get(url, config = {}) {
     return this.client.get(url, config);
