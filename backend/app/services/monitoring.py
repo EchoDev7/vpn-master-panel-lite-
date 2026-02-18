@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 from ..database import get_db_context
-from ..models.user import User, UserStatus
+from ..models.user import User, UserStatus, ConnectionLog
 from ..services.wireguard import wireguard_service
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,10 @@ class TrafficMonitor:
         # Cache to track last seen bytes for delta calculation
         # Format: { "username_protocol": { "rx": int, "tx": int } }
         self._traffic_cache: Dict[str, Dict[str, int]] = {}
-        self._online_users: Dict[str, datetime] = {} # username -> last_seen
+        
+        # Track active sessions for connection logging
+        # Format: { "username_protocol": { "start_time": datetime, "ip": str, "last_seen": datetime } }
+        self._active_sessions: Dict[str, Dict] = {}
 
     async def start(self):
         """Start the monitoring loop"""
@@ -59,29 +62,43 @@ class TrafficMonitor:
         with get_db_context() as db:
             users = db.query(User).filter(User.status != UserStatus.DELETED).all()
             
+            # Set of current active sessions in this cycle (username_protocol)
+            current_active_keys = set()
+
             for user in users:
                 # --- OpenVPN Traffic ---
                 if user.username in ovpn_stats:
                     self._update_usage(db, user, "openvpn", ovpn_stats[user.username])
-                    self._mark_online(user)
+                    self._handle_connection_status(db, user, "openvpn", ovpn_stats[user.username]['ip'])
+                    current_active_keys.add(f"{user.username}_openvpn")
                 
                 # --- WireGuard Traffic ---
                 # Check by Public Key
                 if user.wireguard_public_key and user.wireguard_public_key in wg_stats:
-                    self._update_usage(db, user, "wireguard", wg_stats[user.wireguard_public_key])
+                    wg_peer_stats = wg_stats[user.wireguard_public_key]
+                    self._update_usage(db, user, "wireguard", wg_peer_stats)
+                    
                     # WireGuard is stateless, check latest handshake for "online" status
-                    if wg_stats[user.wireguard_public_key].get('is_online'):
-                        self._mark_online(user)
+                    if wg_peer_stats.get('is_online'):
+                         self._handle_connection_status(db, user, "wireguard", wg_peer_stats.get('ip', 'Unknown'))
+                         current_active_keys.add(f"{user.username}_wireguard")
 
                 # --- Check Limits (Data & Expiry) ---
                 self._check_limits(db, user)
 
+            # 3. Detect Disconnections
+            # Any session in _active_sessions NOT in current_active_keys has disconnected
+            for session_key in list(self._active_sessions.keys()):
+                if session_key not in current_active_keys:
+                    # Mark as disconnected
+                    self._log_disconnection(db, session_key)
+
             db.commit()
 
-    def _parse_openvpn_status(self) -> Dict[str, Dict[str, int]]:
+    def _parse_openvpn_status(self) -> Dict[str, Dict]:
         """
         Parse OpenVPN status log.
-        Returns: { "username": { "rx": bytes, "tx": bytes } }
+        Returns: { "username": { "rx": bytes, "tx": bytes, "ip": str } }
         """
         stats = {}
         if not os.path.exists(self.OPENVPN_STATUS_LOG):
@@ -105,8 +122,9 @@ class TrafficMonitor:
                 username = parts[0]
                 try:
                     stats[username] = {
-                        "rx": int(parts[2]), # Bytes Received by Server (Upload from User)
-                        "tx": int(parts[3])  # Bytes Sent by Server (Download to User)
+                        "rx": int(parts[2]),
+                        "tx": int(parts[3]),
+                        "ip": parts[1].split(':')[0] if ':' in parts[1] else parts[1]
                     }
                 except (ValueError, IndexError):
                     continue
@@ -115,10 +133,10 @@ class TrafficMonitor:
             
         return stats
 
-    def _parse_wireguard_stats(self) -> Dict[str, Dict[str, int]]:
+    def _parse_wireguard_stats(self) -> Dict[str, Dict]:
         """
         Parse WireGuard stats from `wg show`.
-        Returns: { "public_key": { "rx": bytes, "tx": bytes, "is_online": bool } }
+        Returns: { "public_key": { "rx": bytes, "tx": bytes, "is_online": bool, "ip": str } }
         """
         stats = {}
         try:
@@ -129,16 +147,17 @@ class TrafficMonitor:
                 
             for peer in status.get("peers", []):
                 stats[peer["public_key"]] = {
-                    "rx": peer["transfer_rx"], # Received by Interface (Upload from User)
-                    "tx": peer["transfer_tx"], # Sent by Interface (Download to User)
-                    "is_online": peer.get("is_online", False)
+                    "rx": peer["transfer_rx"],
+                    "tx": peer["transfer_tx"],
+                    "is_online": peer.get("is_online", False),
+                    "ip": peer.get("endpoint", "Unknown").split(':')[0] if peer.get("endpoint") else "Unknown"
                 }
         except Exception as e:
             logger.error(f"Failed to parse WireGuard stats: {e}")
             
         return stats
 
-    def _update_usage(self, db: Session, user: User, protocol: str, current_stats: Dict[str, int]):
+    def _update_usage(self, db: Session, user: User, protocol: str, current_stats: Dict):
         """
         Calculate delta and update user totals.
         Handles counter resets (server restart).
@@ -178,9 +197,66 @@ class TrafficMonitor:
         # Update Cache
         self._traffic_cache[cache_key] = {"rx": curr_rx, "tx": curr_tx}
         
-    def _mark_online(self, user: User):
-        """Update last_connection timestamp"""
-        user.last_connection = datetime.utcnow()
+    def _handle_connection_status(self, db: Session, user: User, protocol: str, ip: str):
+        """Handle Log On event and update Active Sessions"""
+        session_key = f"{user.username}_{protocol}"
+        
+        if session_key not in self._active_sessions:
+            # New Connection detected
+            logger.info(f"User {user.username} connected via {protocol} from {ip}")
+            
+            # Log to DB
+            log = ConnectionLog(
+                user_id=user.id,
+                protocol=protocol,
+                ip_address=ip,
+                connected_at=datetime.utcnow()
+            )
+            db.add(log)
+            # We need to flush to get the ID if we wanted to update it later, 
+            # but for now we just log start. We can log duration on disconnect.
+            
+            # Update User last_connection
+            user.last_connection = datetime.utcnow()
+            
+            # Add to local active sessions
+            self._active_sessions[session_key] = {
+                "start_time": datetime.utcnow(),
+                "ip": ip,
+                "user_id": user.id
+            }
+        else:
+            # Existing connection, just update heartbeat/last_seen locally if needed
+            # For WireGuard proper "Online" status, we rely on the `is_online` flag passed in.
+            user.last_connection = datetime.utcnow()
+
+    def _log_disconnection(self, db: Session, session_key: str):
+        """Handle Disconnect event"""
+        if session_key in self._active_sessions:
+            session_data = self._active_sessions.pop(session_key)
+            username = session_key.split('_')[0]
+            
+            logger.info(f"User {username} disconnected (Session duration: {datetime.utcnow() - session_data['start_time']})")
+            
+            # In a more advanced system, we might update the specific ConnectionLog entry with 'disconnected_at'
+            # For now, we just remove it from active tracking. 
+            # If we want to log disconnection time, we'd need to fetch the last log entry or keep track of Log ID.
+            # Let's keep it simple for now: We have the 'connected_at' log.
+            # We could add a "Disconnection" log or update the existing one.
+            # Updating is better for clean history.
+            
+            try:
+                # Find the latest open connection log for this user/protocol
+                last_log = db.query(ConnectionLog).filter(
+                    ConnectionLog.user_id == session_data['user_id'],
+                    ConnectionLog.protocol == session_key.split('_')[1],
+                    ConnectionLog.disconnected_at == None
+                ).order_by(ConnectionLog.connected_at.desc()).first()
+                
+                if last_log:
+                    last_log.disconnected_at = datetime.utcnow()
+            except Exception as e:
+                logger.error(f"Error updating disconnect log: {e}")
 
     def _check_limits(self, db: Session, user: User):
         """Check Data Limit and Expiry"""
@@ -210,3 +286,4 @@ class TrafficMonitor:
             pass
 
 traffic_monitor = TrafficMonitor()
+```
