@@ -11,14 +11,14 @@ class Settings(BaseSettings):
     
     # App Info
     APP_NAME: str = "VPN Master Panel"
-    APP_VERSION: str = "1.0.1"
+    APP_VERSION: str = "3.0.0"
     DEBUG: bool = False
     
     # API Settings
     API_V1_PREFIX: str = "/api/v1"
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
-    API_PORT: int = 8000  # Alias for PORT
+    PORT: int = 8001
+    API_PORT: int = 8001  # Alias for PORT
     WEB_PORT: int = 3000  # Frontend port
     
     # VPN Ports
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: List[str] = ["*"]
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
