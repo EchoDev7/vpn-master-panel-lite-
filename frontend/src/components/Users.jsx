@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Trash2, RefreshCw, Key, Shield, CheckSquare, Square, MoreHorizontal, Activity, Clock, Download, Upload, X, Search, ChevronLeft, ChevronRight, Filter, Terminal, Power, CalendarPlus, Link, Copy } from 'lucide-react';
+import { UserPlus, Trash2, RefreshCw, Key, Shield, CheckSquare, Square, MoreHorizontal, Activity, Clock, Download, Upload, X, Search, ChevronLeft, ChevronRight, Filter, Terminal, Power, CalendarPlus, Link, Copy, Check } from 'lucide-react';
 import { apiService } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
@@ -220,6 +220,10 @@ const Users = () => {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [userToDelete, setUserToDelete] = useState(null);
 
+    const [showRegenerateModal, setShowRegenerateModal] = useState(false);
+    const [userToRegenerate, setUserToRegenerate] = useState(null);
+    const [copiedUserId, setCopiedUserId] = useState(null);
+
     const handleDeleteClick = (user) => {
         setUserToDelete(user);
         setShowDeleteModal(true);
@@ -335,19 +339,27 @@ const Users = () => {
         }
         const link = `${window.location.protocol}//${window.location.host}/sub/${user.subscription_token}`;
         navigator.clipboard.writeText(link);
-        alert('Subscription link copied to clipboard!');
+
+        setCopiedUserId(user.id);
+        setTimeout(() => setCopiedUserId(null), 2000);
     };
 
-    const handleRegenerateToken = async (user) => {
-        if (!window.confirm(`Are you sure you want to regenerate the subscription token for ${user.username}? The old link will stop working.`)) return;
+    const handleOpenRegenerate = (user) => {
+        setUserToRegenerate(user);
+        setShowRegenerateModal(true);
+    };
+
+    const confirmRegenerate = async () => {
+        if (!userToRegenerate) return;
         try {
-            await apiService.regenerateToken(user.id);
-            alert('Token regenerated successfully. Please send the new link.');
-            loadUsers(); // Refresh list to get new token
-            // If details modal is open, refresh it too
-            if (showDetailsModal && selectedUser && selectedUser.id === user.id) {
-                handleOpenDetails(user);
+            await apiService.regenerateToken(userToRegenerate.id);
+            alert('Token regenerated successfully.');
+            loadUsers();
+            if (showDetailsModal && selectedUser && selectedUser.id === userToRegenerate.id) {
+                handleOpenDetails(userToRegenerate);
             }
+            setShowRegenerateModal(false);
+            setUserToRegenerate(null);
         } catch (error) {
             console.error('Failed to regenerate token:', error);
             alert('Failed to regenerate token');
@@ -493,7 +505,7 @@ const Users = () => {
                                         <RefreshCw size={18} />
                                     </button>
                                     <button onClick={() => handleCopySubscription(user)} className="text-cyan-400 hover:text-cyan-300 p-1" title="Copy Subscription Link">
-                                        <Link size={18} />
+                                        {copiedUserId === user.id ? <Check size={18} /> : <Link size={18} />}
                                     </button>
                                     <button onClick={() => handleDeleteClick(user)} className="text-red-400 hover:text-red-300 p-1" title="Delete">
                                         <Trash2 size={18} />
@@ -757,6 +769,35 @@ const Users = () => {
                 )
             }
 
+            {/* Regenerate Token Modal */}
+            {
+                showRegenerateModal && userToRegenerate && (
+                    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+                        <div className="bg-gray-800 rounded-xl p-6 w-full max-w-sm border border-gray-700 shadow-2xl text-center">
+                            <RefreshCw className="mx-auto text-yellow-500 mb-4" size={48} />
+                            <h3 className="text-xl font-bold text-white mb-2">Regenerate Token?</h3>
+                            <p className="text-gray-400 mb-6">
+                                This will invalidate the old link for <span className="text-white font-semibold">{userToRegenerate.username}</span>. The user will need the new link to connect.
+                            </p>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setShowRegenerateModal(false)}
+                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={confirmRegenerate}
+                                    className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white py-2 rounded-lg font-medium"
+                                >
+                                    Regenerate
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
             {/* Renew Modal */}
             {
                 showRenewModal && userToRenew && (
@@ -934,7 +975,7 @@ const Users = () => {
                                             <Power size={14} /> Kill Session
                                         </button>
                                     )}
-                                    <button onClick={() => handleRegenerateToken(selectedUser)} className="text-gray-400 hover:text-white p-2 hover:bg-gray-700/50 rounded-lg transition-colors" title="Regenerate Subscription Token">
+                                    <button onClick={() => handleOpenRegenerate(selectedUser)} className="text-gray-400 hover:text-white p-2 hover:bg-gray-700/50 rounded-lg transition-colors" title="Regenerate Subscription Token">
                                         <RefreshCw size={20} />
                                     </button>
                                     <button onClick={() => setShowDetailsModal(false)} className="text-gray-400 hover:text-white p-2 hover:bg-gray-700/50 rounded-lg transition-colors">
