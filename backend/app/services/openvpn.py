@@ -291,10 +291,17 @@ class OpenVPNService:
              auth_mode = "cert"
 
         if auth_mode == "password":
-            if pam_plugin:
-                conf.append(f"plugin {pam_plugin} login")
+            # Use custom python script for DB auth instead of PAM
+            auth_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "auth.py")
+            if os.path.exists(auth_script):
+                conf.append("script-security 3")
+                conf.append(f"auth-user-pass-verify {auth_script} via-file")
                 conf.append("username-as-common-name")
-                conf.append("verify-client-cert none") # Password only (insecure without good CA, but standard for some VPN panels)
+                conf.append("verify-client-cert none")
+            elif pam_plugin:
+                conf.append(f"plugin {pam_plugin} login") # Fallback to PAM if script missing
+                conf.append("username-as-common-name")
+                conf.append("verify-client-cert none")
             else:
                 conf.append("# PAM Plugin missing - Fallback to Cert Only")
                 conf.append("verify-client-cert require")
