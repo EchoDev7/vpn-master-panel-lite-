@@ -689,47 +689,58 @@ async def get_user_logs(
     current_admin: User = Depends(get_current_admin)
 ):
     """
-    Get raw OpenVPN logs filtered for this user (Admin only)
+    Get raw connection logs filtered for this user (Admin only).
+    Scans auth.log first (for auth attempts), then openvpn.log (for session details).
     """
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
-    log_file = "/var/log/openvpn/openvpn.log"
-    import os
-    if not os.path.exists(log_file):
-        return {"logs": ["Log file not found."]}
-        
-    try:
-        # Use grep to filter logs for the username
-        # preventing injection by using subprocess list args
-        import subprocess
-        cmd = ["grep", user.username, log_file]
-        
-        # We process the whole file with grep, then take tail
-        # This might be heavy for huge logs, but standard for diagnostics
-        # A better approach for production: tail first then grep, but we might miss old sessions.
-        # Let's do: grep | tail
-        
-        # Safe execution
-        ps_grep = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        ps_tail = subprocess.Popen(["tail", "-n", str(lines)], stdin=ps_grep.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        
-        # Closers
-        ps_grep.stdout.close()
-        
-        output, _ = ps_tail.communicate()
-        
-        log_lines = output.splitlines()
-        if not log_lines:
-            # Fallback: Check if user is in status log
-            return {"logs": ["No specific logs found for this user in openvpn.log"]}
+    logs = []
+    
+    # helper to run grep
+    def grep_file(filepath, pattern, n_lines):
+        if not os.path.exists(filepath):
+            return []
+        try:
+            # We use a shell pipeline: grep "pattern" file | tail -n lines
+            # Use specific list arguments for security where possible, but pipeline needs checks
+            # Simplest: use grep's own max count? No, we want latest.
+            import subprocess
             
-        return {"logs": log_lines}
+            # 1. Grep all matches
+            cmd_grep = ["grep", pattern, filepath]
+            p1 = subprocess.Popen(cmd_grep, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            # 2. Tail the last N
+            cmd_tail = ["tail", "-n", str(n_lines)]
+            p2 = subprocess.Popen(cmd_tail, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            p1.stdout.close() # Allow p1 to receive SIGPIPE if p2 exits.
+            output, _ = p2.communicate()
+            
+            return output.splitlines()
+        except Exception as e:
+            return [f"Error reading {os.path.basename(filepath)}: {str(e)}"]
+
+    import os
+    
+    # 1. Check Auth Log (High value)
+    auth_logs = grep_file("/var/log/openvpn/auth.log", user.username, lines)
+    if auth_logs:
+        logs.extend([f"--- Auth Logs for {user.username} ---"] + auth_logs)
         
-    except Exception as e:
-        logger.error(f"Failed to fetch logs: {e}")
-        return {"logs": [f"Error fetching logs: {str(e)}"]}
+    # 2. Check System Log (Context)
+    # This is noisier, maybe only if auth logs are empty or requested?
+    # Let's include it but limit it.
+    sys_logs = grep_file("/var/log/openvpn/openvpn.log", user.username, 20)
+    if sys_logs:
+         logs.extend([f"\n--- System Logs for {user.username} ---"] + sys_logs)
+         
+    if not logs:
+        logs = ["No recent connection attempts found in logs."]
+        
+    return {"logs": logs}
 
 
 @router.post("/{user_id}/kill")
