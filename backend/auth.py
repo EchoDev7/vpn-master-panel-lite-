@@ -24,6 +24,9 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
 def auth_user(username, password):
+    # F9: Brute-Force Detection - Log IP
+    client_ip = os.environ.get("untrusted_ip", "unknown")
+    
     try:
         engine = create_engine(SQLALCHEMY_DATABASE_URL)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -57,50 +60,58 @@ def auth_user(username, password):
                  logging.warning(f"AUTH_ERROR: Invalid expiry format for {username}: {expiry}")
                  return False
 
-        # Connection Limit Check
-        # User Request: Enforce connection_limit which is ignored in other parts
-        # We parse the status log text file directly to count active sessions
+        # Connection Limit Check (F3 - User Requested via Management Socket)
         try:
-             # Check limit from DB - we need to query it
+             # Check limit from DB
              limit_query = "SELECT connection_limit FROM users WHERE username = :username"
              limit_res = db.execute(limit_query, {'username': username}).fetchone()
              limit = limit_res[0] if limit_res else 0
              
              if limit > 0:
-                 status_log = "/var/log/openvpn/openvpn-status.log"
-                 if os.path.exists(status_log):
-                     with open(status_log, 'r') as f:
-                         content = f.read()
-                         # Simple substring count is risky (username as substring of another), 
-                         # but for a basic auth script without heavy parsing, filtering lines is better.
-                         # V1: "Common Name,..." -> line.startswith("username,")
-                         # V2: "CLIENT_LIST,username,..."
-                         
-                         count = 0
-                         for line in content.splitlines():
-                             parts = line.split(',')
-                             # V1 Check
-                             if len(parts) > 1 and parts[0] == username:
-                                 count += 1
-                             # V2 Check
-                             elif len(parts) > 1 and parts[0] == "CLIENT_LIST" and parts[1] == username:
-                                 count += 1
-                                 
-                         # Current connection attempt adds +1? No, we are authenticating BEFORE connection.
-                         if count >= limit:
-                             logging.warning(f"AUTH_FAILED: User {username} reached connection limit ({count}/{limit})")
-                             return False
+                 # Helper to Get Active Connections via Socket (Inline to keep auth.py standalone)
+                 import socket
+                 def count_active_sessions(target_user):
+                     try:
+                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                             s.settimeout(2)
+                             s.connect(('127.0.0.1', 7505))
+                             s.recv(1024) # banner
+                             s.sendall(b'status 2\n')
+                             resp = b''
+                             while True:
+                                 chunk = s.recv(4096)
+                                 if not chunk: break
+                                 resp += chunk
+                                 if b'END' in resp or b'ERROR' in resp: break
+                             s.sendall(b'quit\n')
+                             
+                             # Parse
+                             count = 0
+                             for line in resp.decode(errors='ignore').splitlines():
+                                 if line.startswith('CLIENT_LIST,') and 'Common Name' not in line:
+                                     parts = line.split(',')
+                                     # parts[1] is username
+                                     if len(parts) > 1 and parts[1] == target_user:
+                                         count += 1
+                             return count
+                     except:
+                         return 0 # Fail open if mgmt socket down
+                 
+                 active_count = count_active_sessions(username)
+                 # Current attempt is NOT yet in the list (auth phase happens before)
+                 if active_count >= limit:
+                     logging.warning(f"AUTH_FAILED: User {username} connection limit exceeded ({active_count}/{limit})")
+                     return False
+
         except Exception as e:
              logging.error(f"AUTH_LIMIT_CHECK_ERROR: {e}")
-             # Fail open or closed? Closed matches "Strict" requirement.
-             # But if log is missing, maybe open. Let's log and proceed for now to avoid lockout on error.
              pass
 
         if verify_password(password, hashed_pw):
-            logging.info(f"AUTH_SUCCESS: User {username}")
+            logging.info(f"AUTH_SUCCESS: User {username} from {client_ip}")
             return True
         else:
-            logging.warning(f"AUTH_FAILED: User {username} wrong password")
+            logging.warning(f"AUTH_FAILED: User {username} from {client_ip} wrong password")
             return False
             
     except Exception as e:
