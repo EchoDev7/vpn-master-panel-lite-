@@ -61,8 +61,8 @@ def init_default_settings(db: Session):
         # =============================================
 
         # --- Network & Server ---
-        "ovpn_protocol": "tcp",
-        "ovpn_port": "443",
+        "ovpn_protocol": "udp",
+        "ovpn_port": "1194",
         "ovpn_dev": "tun",
         "ovpn_dev_type": "tun",
         "ovpn_topology": "subnet",
