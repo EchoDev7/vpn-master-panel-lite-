@@ -16,7 +16,10 @@ const Users = () => {
         email: '',
         data_limit_gb: 0,
         expiry_days: 30,
-        status: 'active'
+        status: 'active',
+        openvpn_enabled: true,
+        wireguard_enabled: true,
+        l2tp_enabled: false
     };
 
     const [formData, setFormData] = useState(initialFormState);
@@ -52,7 +55,10 @@ const Users = () => {
             email: user.email || '',
             data_limit_gb: user.data_limit_gb,
             expiry_days: 0, // Not used in update directly mostly, but good to have
-            status: user.status
+            status: user.status,
+            openvpn_enabled: user.openvpn_enabled,
+            wireguard_enabled: user.wireguard_enabled,
+            l2tp_enabled: user.l2tp_enabled
         });
         setShowModal(true);
     };
@@ -153,6 +159,18 @@ const Users = () => {
         }
     };
 
+    const handleResetTraffic = async (user) => {
+        if (!window.confirm(`Reset traffic usage for ${user.username}?`)) return;
+        try {
+            await apiService.resetUserTraffic(user.id);
+            loadUsers();
+            alert('Traffic reset successfully');
+        } catch (error) {
+            console.error('Failed to reset traffic:', error);
+            alert('Failed to reset traffic');
+        }
+    };
+
     if (loading && users.length === 0) {
         return <div className="p-8 text-center text-gray-400">Loading users...</div>;
     }
@@ -188,15 +206,30 @@ const Users = () => {
                             <tr key={user.id} className="hover:bg-gray-700/30 transition-colors">
                                 <td className="p-4 text-white font-medium">{user.username}</td>
                                 <td className="p-4">
-                                    <span className={`px-2 py-1 rounded text-xs ${user.status === 'active' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                        {user.status}
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <div className={`w-2.5 h-2.5 rounded-full ${user.is_online ? 'bg-green-500 animate-pulse' : 'bg-gray-600'}`} title={user.is_online ? "Online" : "Offline"}></div>
+                                        <span className={`px-2 py-1 rounded text-xs ${user.status === 'active' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                            {user.status}
+                                        </span>
+                                    </div>
                                 </td>
                                 <td className="p-4 text-gray-300">
                                     {user.data_limit_gb > 0 ? `${user.data_limit_gb} GB` : 'Unlimited'}
                                 </td>
                                 <td className="p-4 text-gray-300">
-                                    {user.data_usage_gb?.toFixed(2) || 0} GB
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-sm">{(user.data_usage_gb || 0).toFixed(2)} GB</span>
+                                        {user.data_limit_gb > 0 && (
+                                            <div className="w-24 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full rounded-full ${(user.data_usage_gb / user.data_limit_gb) > 0.9 ? 'bg-red-500' :
+                                                            (user.data_usage_gb / user.data_limit_gb) > 0.7 ? 'bg-yellow-500' : 'bg-blue-500'
+                                                        }`}
+                                                    style={{ width: `${Math.min((user.data_usage_gb / user.data_limit_gb) * 100, 100)}%` }}
+                                                ></div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </td>
                                 <td className="p-4 text-gray-300">
                                     {user.expiry_date ? new Date(user.expiry_date).toLocaleDateString() : 'Never'}
@@ -207,6 +240,9 @@ const Users = () => {
                                     </button>
                                     <button onClick={() => handleOpenConfig(user)} className="text-yellow-400 hover:text-yellow-300 p-1" title="Configuration">
                                         <Key size={18} />
+                                    </button>
+                                    <button onClick={() => handleResetTraffic(user)} className="text-purple-400 hover:text-purple-300 p-1" title="Reset Traffic">
+                                        <RefreshCw size={18} />
                                     </button>
                                     <button onClick={() => handleDeleteClick(user)} className="text-red-400 hover:text-red-300 p-1" title="Delete">
                                         <Trash2 size={18} />
@@ -311,6 +347,39 @@ const Users = () => {
                                             </select>
                                         </>
                                     )}
+                                </div>
+                            </div>
+
+                            <div className="bg-gray-700/30 p-3 rounded-lg border border-gray-700">
+                                <label className="block text-gray-400 text-sm mb-2">Allowed Protocols</label>
+                                <div className="flex gap-4">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={formData.openvpn_enabled}
+                                            onChange={e => setFormData({ ...formData, openvpn_enabled: e.target.checked })}
+                                            className="form-checkbox bg-gray-600 border-gray-500 rounded text-blue-500 focus:ring-0 focus:ring-offset-0"
+                                        />
+                                        <span className="text-gray-300 text-sm">OpenVPN</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={formData.wireguard_enabled}
+                                            onChange={e => setFormData({ ...formData, wireguard_enabled: e.target.checked })}
+                                            className="form-checkbox bg-gray-600 border-gray-500 rounded text-green-500 focus:ring-0 focus:ring-offset-0"
+                                        />
+                                        <span className="text-gray-300 text-sm">WireGuard</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={formData.l2tp_enabled}
+                                            onChange={e => setFormData({ ...formData, l2tp_enabled: e.target.checked })}
+                                            className="form-checkbox bg-gray-600 border-gray-500 rounded text-purple-500 focus:ring-0 focus:ring-offset-0"
+                                        />
+                                        <span className="text-gray-300 text-sm">L2TP</span>
+                                    </label>
                                 </div>
                             </div>
 
