@@ -101,6 +101,7 @@ class UserResponse(BaseModel):
     
     created_at: datetime
     last_connection: Optional[datetime] = None
+    is_online: Optional[bool] = False
     
     class Config:
         from_attributes = True
