@@ -46,6 +46,8 @@ const Users = () => {
         email: '',
         data_limit_gb: 0,
         expiry_days: 30,
+        connection_limit: 3,
+        speed_limit_mbps: 0,
         status: 'active',
         openvpn_enabled: true,
         wireguard_enabled: true,
@@ -99,6 +101,8 @@ const Users = () => {
             email: user.email || '',
             data_limit_gb: user.data_limit_gb,
             expiry_days: 0, // Not used in update directly mostly, but good to have
+            connection_limit: user.connection_limit || 3,
+            speed_limit_mbps: user.speed_limit_mbps || 0,
             status: user.status,
             openvpn_enabled: user.openvpn_enabled,
             wireguard_enabled: user.wireguard_enabled,
@@ -118,6 +122,8 @@ const Users = () => {
             // Handle numeric fields allowing empty string in UI
             payload.data_limit_gb = payload.data_limit_gb === '' ? 0 : parseFloat(payload.data_limit_gb);
             payload.expiry_days = payload.expiry_days === '' ? 0 : parseInt(payload.expiry_days);
+            payload.connection_limit = payload.connection_limit === '' ? 3 : parseInt(payload.connection_limit);
+            payload.speed_limit_mbps = payload.speed_limit_mbps === '' ? 0 : parseInt(payload.speed_limit_mbps);
 
             if (modalMode === 'create') {
                 await apiService.createUser(payload);
@@ -734,6 +740,33 @@ const Users = () => {
                                     </div>
                                 </div>
 
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-gray-400 text-sm mb-1">Max Connections</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:border-blue-500"
+                                            value={formData.connection_limit}
+                                            onChange={e => setFormData({ ...formData, connection_limit: e.target.value })}
+                                            placeholder="Default: 3"
+                                        />
+                                        <span className="text-xs text-gray-500">0 = Unlimited</span>
+                                    </div>
+                                    <div>
+                                        <label className="block text-gray-400 text-sm mb-1">Speed Limit (Mbps)</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:border-blue-500"
+                                            value={formData.speed_limit_mbps}
+                                            onChange={e => setFormData({ ...formData, speed_limit_mbps: e.target.value })}
+                                            placeholder="0 = Unlimited"
+                                        />
+                                        <span className="text-xs text-gray-500">0 = No Limit</span>
+                                    </div>
+                                </div>
+
                                 <div className="bg-gray-700/30 p-3 rounded-lg border border-gray-700">
                                     <label className="block text-gray-400 text-sm mb-2">Allowed Protocols</label>
                                     <div className="flex gap-4">
@@ -784,7 +817,7 @@ const Users = () => {
                                 </div>
                             </form>
                         </div>
-                    </div>
+                    </div >
                 )
             }
 
@@ -802,13 +835,15 @@ const Users = () => {
                 confirmText={confirmation.confirmText}
                 confirmColor={confirmation.confirmColor}
             />
-            {toast && (
-                <Toast
-                    message={toast.message}
-                    type={toast.type}
-                    onClose={closeToast}
-                />
-            )}
+            {
+                toast && (
+                    <Toast
+                        message={toast.message}
+                        type={toast.type}
+                        onClose={closeToast}
+                    />
+                )
+            }
 
             {/* Renew Modal */}
             {
