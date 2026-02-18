@@ -435,15 +435,26 @@ async def get_full_diagnostics(
                 "/api/v1/monitoring/dashboard"
             ]
             
+            import asyncio
+            
             for ep in endpoints:
                 try:
-                    # Use curl for simplicity and speed
-                    code = subprocess.run(
-                        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", f"{api_base}{ep}"], 
-                        capture_output=True, 
-                        text=True, 
-                        timeout=2
-                    ).stdout.strip()
+                    # Async subprocess to avoid blocking the event loop
+                    proc = await asyncio.create_subprocess_exec(
+                        "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", f"{api_base}{ep}",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    
+                    try:
+                        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+                        code = stdout.decode().strip()
+                    except asyncio.TimeoutError:
+                        code = "000"
+                        try:
+                            proc.kill()
+                        except:
+                            pass
                     
                     status = "Unreachable"
                     if code in ["200", "307", "401", "403", "405"]:
@@ -454,7 +465,7 @@ async def get_full_diagnostics(
                         "status": status,
                         "code": code
                     })
-                except:
+                except Exception as e:
                     api_health.append({"endpoint": ep, "status": "Unreachable", "code": "000"})
         except Exception as e:
             logger.error(f"Error in API health check: {e}")
