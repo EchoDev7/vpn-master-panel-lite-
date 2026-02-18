@@ -234,6 +234,9 @@ EOF
     pip install --upgrade pip -q > /dev/null 2>&1
     pip install -r requirements.txt -q > /dev/null 2>&1
     print_success "Lightweight dependencies installed"
+
+    # Ensure auth script is executable
+    chmod +x /opt/vpn-master-panel/backend/auth.py > /dev/null 2>&1 || true
     
     # Generate config
     SECRET_KEY=$(openssl rand -hex 32)
