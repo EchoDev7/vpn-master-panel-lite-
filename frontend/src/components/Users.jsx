@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Trash2, RefreshCw, Key, Shield, CheckSquare, Square, MoreHorizontal, Activity, Clock, Download, Upload, X, Search, ChevronLeft, ChevronRight, Filter, Terminal, Power, CalendarPlus } from 'lucide-react';
+import { UserPlus, Trash2, RefreshCw, Key, Shield, CheckSquare, Square, MoreHorizontal, Activity, Clock, Download, Upload, X, Search, ChevronLeft, ChevronRight, Filter, Terminal, Power, CalendarPlus, Link, Copy } from 'lucide-react';
 import { apiService } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
@@ -328,6 +328,32 @@ const Users = () => {
         }
     };
 
+    const handleCopySubscription = (user) => {
+        if (!user.subscription_token) {
+            alert('User does not have a subscription token.');
+            return;
+        }
+        const link = `${window.location.protocol}//${window.location.host}/sub/${user.subscription_token}`;
+        navigator.clipboard.writeText(link);
+        alert('Subscription link copied to clipboard!');
+    };
+
+    const handleRegenerateToken = async (user) => {
+        if (!window.confirm(`Are you sure you want to regenerate the subscription token for ${user.username}? The old link will stop working.`)) return;
+        try {
+            await apiService.regenerateToken(user.id);
+            alert('Token regenerated successfully. Please send the new link.');
+            loadUsers(); // Refresh list to get new token
+            // If details modal is open, refresh it too
+            if (showDetailsModal && selectedUser && selectedUser.id === user.id) {
+                handleOpenDetails(user);
+            }
+        } catch (error) {
+            console.error('Failed to regenerate token:', error);
+            alert('Failed to regenerate token');
+        }
+    };
+
     if (loading && users.length === 0) {
         return <div className="p-8 text-center text-gray-400">Loading users...</div>;
     }
@@ -465,6 +491,9 @@ const Users = () => {
                                     </button>
                                     <button onClick={() => handleResetTraffic(user)} className="text-purple-400 hover:text-purple-300 p-1" title="Reset Traffic">
                                         <RefreshCw size={18} />
+                                    </button>
+                                    <button onClick={() => handleCopySubscription(user)} className="text-cyan-400 hover:text-cyan-300 p-1" title="Copy Subscription Link">
+                                        <Link size={18} />
                                     </button>
                                     <button onClick={() => handleDeleteClick(user)} className="text-red-400 hover:text-red-300 p-1" title="Delete">
                                         <Trash2 size={18} />
@@ -905,6 +934,9 @@ const Users = () => {
                                             <Power size={14} /> Kill Session
                                         </button>
                                     )}
+                                    <button onClick={() => handleRegenerateToken(selectedUser)} className="text-gray-400 hover:text-white p-2 hover:bg-gray-700/50 rounded-lg transition-colors" title="Regenerate Subscription Token">
+                                        <RefreshCw size={20} />
+                                    </button>
                                     <button onClick={() => setShowDetailsModal(false)} className="text-gray-400 hover:text-white p-2 hover:bg-gray-700/50 rounded-lg transition-colors">
                                         <X size={24} />
                                     </button>
