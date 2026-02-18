@@ -222,8 +222,10 @@ class OpenVPNService:
         conf.append("\n# --- System ---")
         conf.append(f"user {s.get('user', 'nobody')}")
         conf.append(f"group {s.get('group', 'nogroup')}")
-        conf.append(f"persist-key {s.get('pers_key', '1') == '1' and 'persist-key' or ''}")
-        conf.append(f"persist-tun {s.get('pers_tun', '1') == '1' and 'persist-tun' or ''}")
+        if s.get('pers_key', '1') == '1':
+            conf.append("persist-key")
+        if s.get('pers_tun', '1') == '1':
+            conf.append("persist-tun")
         
         conf.append(f"verb {s.get('verb', '3')}")
         if s.get("mute"):
