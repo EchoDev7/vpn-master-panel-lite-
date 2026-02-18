@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Trash2, RefreshCw, Key, Shield, CheckSquare, Square, MoreHorizontal, Activity, Clock, Download, Upload, X, Search, ChevronLeft, ChevronRight, Filter, Terminal, Power } from 'lucide-react';
+import { UserPlus, Trash2, RefreshCw, Key, Shield, CheckSquare, Square, MoreHorizontal, Activity, Clock, Download, Upload, X, Search, ChevronLeft, ChevronRight, Filter, Terminal, Power, CalendarPlus } from 'lucide-react';
 import { apiService } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
