@@ -217,6 +217,10 @@ class APIService {
     return this.client.post('/settings/server-config/apply');
   }
 
+  async getOpenVPNVersion() {
+    return this.client.get('/settings/openvpn/version');
+  }
+
   // WireGuard endpoints
   async getWGServerConfigPreview() {
     return this.client.get('/settings/wg-server-config/preview');
