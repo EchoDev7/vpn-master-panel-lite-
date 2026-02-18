@@ -26,17 +26,33 @@ def main():
 
     print("🔧 Generating OpenVPN Server Config...")
     try:
-        # Check and Init DB
         from app.database import init_db
-        print("🗄️  Initializing Database (if needed)...")
-        init_db()
+        # We need asyncio loop for DB operations
+        import asyncio
+        from app.services.openvpn import OpenVPNService
+        from app.settings import settings
 
-        service = OpenVPNService()
-        
-        print("🔐 Ensuring PKI (Certs/Keys) exist...")
-        service._ensure_pki()
-        
-        config_content = service.generate_server_config()
+        async def generate():
+            print("🗄️  Initializing Database...")
+            await init_db()
+            
+            # Service needs DB session ideally, but we can hack it for config generation
+            # which mostly relies on settings.
+            # However, OpenVPNService might need DB to check for existing users/settings.
+            # Let's instantiate it properly.
+            service = OpenVPNService()
+            
+            print("🔐 Ensuring PKI (Certs/Keys) exist...")
+            await service.ensure_pki()
+            
+            print("📝 Generating Config Content...")
+            # We need to fetch settings from DB to get custom config/port/etc
+            # For now, we rely on default or env vars if DB fails, but init_db should work.
+            
+            config_content = await service.generate_server_config()
+            return config_content
+
+        config_content = asyncio.run(generate())
         
         config_path = "/etc/openvpn/server.conf"
         with open(config_path, "w") as f:
