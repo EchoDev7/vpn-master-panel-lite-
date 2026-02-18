@@ -32,6 +32,7 @@ class UserCreate(BaseModel):
     # Limits
     data_limit_gb: float = 0  # 0 = unlimited
     connection_limit: int = 1
+    speed_limit_mbps: int = 0 # 0 = unlimited
     expiry_days: Optional[int] = 30
     
     # Protocol settings
@@ -65,6 +66,7 @@ class UserUpdate(BaseModel):
     # Limits
     data_limit_gb: Optional[float] = None
     connection_limit: Optional[int] = None
+    speed_limit_mbps: Optional[int] = None
     expiry_date: Optional[datetime] = None
     expiry_days: Optional[int] = None
     
