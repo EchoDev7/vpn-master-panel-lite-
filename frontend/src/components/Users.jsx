@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Trash2, RefreshCw, Key, Shield, CheckSquare, Square, MoreHorizontal, Activity, Clock, Download, Upload, X, Search, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
+import { UserPlus, Trash2, RefreshCw, Key, Shield, CheckSquare, Square, MoreHorizontal, Activity, Clock, Download, Upload, X, Search, ChevronLeft, ChevronRight, Filter, Terminal, Power } from 'lucide-react';
 import { apiService } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
@@ -22,6 +22,11 @@ const Users = () => {
     const [pageSize, setPageSize] = useState(20);
     const [totalPages, setTotalPages] = useState(1);
     const [totalUsers, setTotalUsers] = useState(0);
+
+    // Phase 4: Diagnostics
+    const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'logs'
+    const [debugLogs, setDebugLogs] = useState([]);
+    const [logsLoading, setLogsLoading] = useState(false);
 
     // Initial State matches backend UserCreate/UserUpdate models
     const initialFormState = {
@@ -235,6 +240,33 @@ const Users = () => {
             alert('Failed to load user details');
         } finally {
             setDetailsLoading(false);
+        }
+    };
+
+    const handleFetchLogs = async (userId) => {
+        setLogsLoading(true);
+        try {
+            const response = await apiService.getUserLogs(userId);
+            setDebugLogs(response.data.logs || []);
+        } catch (error) {
+            console.error('Failed to fetch logs:', error);
+            setDebugLogs(['Error fetching logs.']);
+        } finally {
+            setLogsLoading(false);
+        }
+    };
+
+    const handleKillSession = async (user) => {
+        if (!window.confirm(`Are you sure you want to KILL the active session for ${user.username}? This will disconnect them immediately.`)) return;
+        try {
+            const response = await apiService.killUserSession(user.id);
+            const results = response.data.results.join('\n');
+            alert(`Session Kill Result:\n${results}`);
+            // Refresh details to see if online status changes (might take a minute for sync)
+            handleOpenDetails(user);
+        } catch (error) {
+            console.error('Failed to kill session:', error);
+            alert('Failed to kill session');
         }
     };
 
@@ -707,19 +739,42 @@ const Users = () => {
                                             {selectedUser.status}
                                         </span>
                                     </h3>
-                                    <p className="text-gray-400 text-sm mt-1">User Details & Activity Log</p>
+                                    <div className="flex gap-4 mt-4">
+                                        <button
+                                            onClick={() => setActiveTab('overview')}
+                                            className={`pb-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'overview' ? 'text-blue-400 border-blue-400' : 'text-gray-400 border-transparent hover:text-gray-300'}`}
+                                        >
+                                            Overview
+                                        </button>
+                                        <button
+                                            onClick={() => { setActiveTab('logs'); handleFetchLogs(selectedUser.id); }}
+                                            className={`pb-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'logs' ? 'text-blue-400 border-blue-400' : 'text-gray-400 border-transparent hover:text-gray-300'}`}
+                                        >
+                                            Troubleshooting Logs
+                                        </button>
+                                    </div>
                                 </div>
-                                <button onClick={() => setShowDetailsModal(false)} className="text-gray-400 hover:text-white p-2 hover:bg-gray-700/50 rounded-lg transition-colors">
-                                    <X size={24} />
-                                </button>
+                                <div className="flex items-center gap-3">
+                                    {selectedUser.is_online && (
+                                        <button
+                                            onClick={() => handleKillSession(selectedUser)}
+                                            className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/50 px-3 py-1.5 rounded-lg flex items-center gap-2 text-xs font-bold uppercase tracking-wider transition-colors"
+                                        >
+                                            <Power size={14} /> Kill Session
+                                        </button>
+                                    )}
+                                    <button onClick={() => setShowDetailsModal(false)} className="text-gray-400 hover:text-white p-2 hover:bg-gray-700/50 rounded-lg transition-colors">
+                                        <X size={24} />
+                                    </button>
+                                </div>
                             </div>
 
-                            <div className="p-6 overflow-y-auto custom-scrollbar space-y-8">
+                            <div className="p-6 overflow-y-auto custom-scrollbar space-y-8 flex-1">
                                 {detailsLoading ? (
                                     <div className="flex justify-center py-20">
                                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
                                     </div>
-                                ) : (
+                                ) : activeTab === 'overview' ? (
                                     <>
                                         {/* Stats Cards & Chart */}
                                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -822,6 +877,39 @@ const Users = () => {
                                             </div>
                                         </div>
                                     </>
+                                ) : (
+                                    <div className="h-full flex flex-col">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                                                <Terminal size={20} className="text-gray-400" /> System Logs (OpenVPN)
+                                            </h4>
+                                            <button
+                                                onClick={() => handleFetchLogs(selectedUser.id)}
+                                                className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                                            >
+                                                <RefreshCw size={14} /> Refresh
+                                            </button>
+                                        </div>
+                                        <div className="bg-black/80 rounded-xl border border-gray-700 p-4 font-mono text-xs overflow-y-auto max-h-[500px] flex-1">
+                                            {logsLoading ? (
+                                                <div className="text-gray-400 animate-pulse">Loading logs...</div>
+                                            ) : debugLogs.length > 0 ? (
+                                                <div className="space-y-1">
+                                                    {debugLogs.map((log, i) => (
+                                                        <div key={i} className="text-gray-300 border-b border-gray-800/50 pb-0.5 mb-0.5 break-all">
+                                                            <span className="text-gray-500 mr-2">{i + 1}</span>
+                                                            {log}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="text-gray-500 italic">No logs found for this user in openvpn.log</div>
+                                            )}
+                                        </div>
+                                        <p className="text-gray-500 text-xs mt-2">
+                                            Showing last 100 lines matching "{selectedUser.username}" from /var/log/openvpn/openvpn.log
+                                        </p>
+                                    </div>
                                 )}
                             </div>
                         </div>
