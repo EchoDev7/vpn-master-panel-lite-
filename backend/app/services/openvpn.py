@@ -466,12 +466,70 @@ class OpenVPNService:
             return {"exists": True, "error": "Invalid Cert"}
             
     # Legacy Shim
-    def regenerate_pki(self):
-         # In strict mode, we prefer calling the shell script or creating a job
-         # For now, we stub this or call update.sh logic if needed.
-         # The user wants "Official Docs", which implies easy-rsa script usage.
-         logger.info("PKI Regeneration requested via API.")
-         pass 
+        """
+        Regenerate all OpenVPN certificates and keys using OpenSSL.
+        This fixes 'key values mismatch' errors by creating a fresh, matching set.
+        """
+        logger.info("Starting PKI Regeneration...")
+        try:
+            # 1. Clean old files
+            for f in [self.CA_PATH, self.SERVER_CERT, self.SERVER_KEY, self.TA_KEY, self.DH_PATH, self.CRL_PATH]:
+                if os.path.exists(f):
+                    os.remove(f)
+
+            # 2. Generate CA
+            # openssl req -new -x509 -days 3650 -nodes -out ca.crt -keyout ca.key -subj "/CN=VPN-Master-CA"
+            subprocess.run([
+                "openssl", "req", "-new", "-x509", "-days", "3650", "-nodes",
+                "-out", self.CA_PATH,
+                "-keyout", os.path.join(self.DATA_DIR, "ca.key"),
+                "-subj", "/CN=VPN-Master-CA"
+            ], check=True)
+
+            # 3. Generate Server Key & CSR
+            # openssl req -new -nodes -out server.csr -keyout server.key -subj "/CN=server"
+            server_csr = os.path.join(self.DATA_DIR, "server.csr")
+            subprocess.run([
+                "openssl", "req", "-new", "-nodes",
+                "-out", server_csr,
+                "-keyout", self.SERVER_KEY,
+                "-subj", "/CN=server"
+            ], check=True)
+
+            # 4. Sign Server CSR with CA
+            # openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 3650
+            subprocess.run([
+                "openssl", "x509", "-req",
+                "-in", server_csr,
+                "-CA", self.CA_PATH,
+                "-CAkey", os.path.join(self.DATA_DIR, "ca.key"),
+                "-CAcreateserial",
+                "-out", self.SERVER_CERT,
+                "-days", "3650"
+            ], check=True)
+
+            # 5. Generate Diffie-Hellman (DH)
+            # openssl dhparam -out dh.pem 2048
+            subprocess.run(["openssl", "dhparam", "-out", self.DH_PATH, "2048"], check=True)
+
+            # 6. Generate TLS-Auth Key (TA)
+            # openvpn --genkey secret ta.key
+            subprocess.run(["openvpn", "--genkey", "secret", self.TA_KEY], check=True)
+
+            # 7. Set Permissions (Security Fix)
+            # chmod 600 server.key ta.key ca.key
+            subprocess.run(["chmod", "600", self.SERVER_KEY, self.TA_KEY, os.path.join(self.DATA_DIR, "ca.key")], check=True)
+
+            # Cleanup CSR
+            if os.path.exists(server_csr):
+                os.remove(server_csr)
+
+            logger.info("PKI Regeneration Complete.")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"PKI Regeneration Failed: {e}")
+            raise e
 
     def _find_pam_plugin(self) -> Optional[str]:
         """Locate openvpn-plugin-auth-pam.so in common paths"""
