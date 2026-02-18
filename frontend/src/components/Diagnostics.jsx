@@ -35,16 +35,35 @@ export default function Diagnostics() {
         setRestartLoading(serviceName);
         try {
             const res = await apiService.restartService(serviceName);
+
             if (res.data.status === 'success') {
-                alert(`Success: ${res.data.message}`);
-                fetchDiagnostics(); // Refresh status
+                let msg = `✅ Success: ${res.data.message}`;
+
+                // Show verification details if available
+                if (res.data.details && res.data.details.pid) {
+                    msg += `\n\n🔍 Verification:\nPID: ${res.data.details.pid}\nActive Since: ${res.data.details.active_since}`;
+                }
+
+                alert(msg);
+
+                // Special handling for Backend restart
+                if (serviceName === 'backend') {
+                    setRestartLoading('backend-waiting'); // Keep spinner
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 5000); // Reload after 5s
+                } else {
+                    fetchDiagnostics(); // Refresh status immediately
+                }
             } else {
-                alert(`Error: ${res.data.message}`);
+                alert(`❌ Error: ${res.data.message}\nDebug: ${res.data.debug || 'No debug info'}`);
             }
         } catch (e) {
-            alert(`Failed to restart ${serviceName}: ${e.message}`);
+            alert(`❌ Failed to restart ${serviceName}: ${e.message}`);
         } finally {
-            setRestartLoading(null);
+            if (serviceName !== 'backend') {
+                setRestartLoading(null);
+            }
         }
     };
 
