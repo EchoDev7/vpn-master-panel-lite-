@@ -180,7 +180,7 @@ async def create_user(
 
     # Generate subscription token
     import secrets
-    new_user.subscription_token = secrets.token_urlsafe(16)
+    new_user.subscription_token = secrets.token_urlsafe(32)
     
     # Generate WireGuard keys if enabled
     if user_data.wireguard_enabled:
