@@ -1,6 +1,6 @@
 import socket
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,10 @@ class OpenVPNManagementService:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(3)
                 s.connect((self.host, self.port))
-                s.recv(1024)  # banner
+                
+                # Consume banner
+                s.recv(1024) 
+                
                 s.sendall(f"{cmd}\n".encode())
                 resp = b""
                 while True:
@@ -26,22 +29,26 @@ class OpenVPNManagementService:
                         break
                 s.sendall(b"quit\n")
                 return resp.decode(errors="ignore")
+        except ConnectionRefusedError:
+            # logger.warning(f"Management interface not reachable at {self.host}:{self.port}")
+            return ""
         except Exception as e:
-            logger.error(f"Management socket connection error: {e}")
+            logger.error(f"Management socket error: {e}")
             return ""
 
     def get_active_connections(self) -> List[Dict]:
         """Real-time list of connected users"""
         try:
             raw = self._send_command("status 2")
+            connections = []
             if not raw:
                 return []
                 
-            connections = []
             for line in raw.split("\n"):
                 if line.startswith("CLIENT_LIST,") and "Common Name" not in line:
                     parts = line.split(",")
                     if len(parts) >= 8:
+                        # Format: CLIENT_LIST,CommonName,RealAddress,VirtualAddress,BytesReceived,BytesSent,ConnectedSince,ConnectedSince(time_t),Username
                         connections.append({
                             "username": parts[1],
                             "real_ip": parts[2].split(":")[0],
@@ -52,14 +59,13 @@ class OpenVPNManagementService:
                         })
             return connections
         except Exception as e:
-            logger.error(f"Management socket error: {e}")
+            logger.error(f"Error parsing management status: {e}")
             return []
 
     def kill_session(self, username: str) -> bool:
         """Disconnect a specific user"""
         try:
             resp = self._send_command(f"kill {username}")
-            if not resp: return False
             return "SUCCESS" in resp
         except Exception as e:
             logger.error(f"Kill session error: {e}")
@@ -67,9 +73,10 @@ class OpenVPNManagementService:
 
     def is_available(self) -> bool:
         try:
-            resp = self._send_command("status 2")
+            resp = self._send_command("bytecount 1")
             return bool(resp)
         except:
             return False
 
+# Singleton instance
 openvpn_mgmt = OpenVPNManagementService()

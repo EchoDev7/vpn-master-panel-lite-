@@ -257,10 +257,9 @@ class OpenVPNService:
         conf.append(f"status {s.get('status_log', '/var/log/openvpn/openvpn-status.log')}")
         conf.append(f"status-version {s.get('status_version', '1')}") # v1 needed for monitoring.py
         
-        # Management Interface
-        mgmt = s.get("management")
-        if mgmt:
-             conf.append(f"management {mgmt}")
+        # Management Interface (F1 Support)
+        mgmt = s.get("management", "127.0.0.1 7505")
+        conf.append(f"management {mgmt}")
 
         # IP Pool Persistence
         conf.append("ifconfig-pool-persist /etc/openvpn/ipp.txt")

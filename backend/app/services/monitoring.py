@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db_context
 from ..models.user import User, UserStatus, ConnectionLog
 from ..services.wireguard import wireguard_service
+from ..services.openvpn_mgmt import openvpn_mgmt
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,27 @@ class TrafficMonitor:
     async def sync_traffic(self):
         """Main synchronization logic"""
         # 1. Gather stats from OpenVPN & WireGuard
-        ovpn_stats = self._parse_openvpn_status()
+        # F1: Try Management Interface first
+        ovpn_stats = {}
+        if openvpn_mgmt.is_available():
+            try:
+                mgmt_conns = openvpn_mgmt.get_active_connections()
+                for conn in mgmt_conns:
+                    # Map mgmt format to our stats format
+                    # { "username": { "rx": bytes, "tx": bytes, "ip": str } }
+                    if conn['username'] == "UNDEF": continue
+                    ovpn_stats[conn['username']] = {
+                        "rx": conn['bytes_rx'],
+                        "tx": conn['bytes_tx'],
+                        "ip": conn['real_ip']
+                    }
+            except Exception as e:
+                logger.error(f"Mgmt sync failed: {e}")
+                
+        # Fallback to Status Log if Mgmt failed or returned empty (and log exists)
+        if not ovpn_stats:
+            ovpn_stats = self._parse_openvpn_status()
+            
         wg_stats = self._parse_wireguard_stats()
         
         # 2. Update Database
