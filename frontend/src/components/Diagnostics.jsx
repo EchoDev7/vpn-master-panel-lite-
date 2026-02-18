@@ -7,6 +7,7 @@ export default function Diagnostics() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [restartLoading, setRestartLoading] = useState(null);
+    const [lastUpdated, setLastUpdated] = useState(null);
 
     const fetchDiagnostics = async () => {
         try {
