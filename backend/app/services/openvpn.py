@@ -311,6 +311,11 @@ class OpenVPNService:
             if os.path.exists(script_to_use):
                 conf.append("script-security 2")
                 conf.append(f"auth-user-pass-verify {script_to_use} via-file")
+                
+                # F7: Bandwidth Shaping Hooks
+                conf.append("client-connect /etc/openvpn/scripts/client-connect.sh")
+                conf.append("client-disconnect /etc/openvpn/scripts/client-disconnect.sh")
+                
                 conf.append("username-as-common-name")
                 conf.append("verify-client-cert none")
             elif pam_plugin:

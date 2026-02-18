@@ -356,8 +356,15 @@ fi
 # User Request: strictly copy to /etc/openvpn/scripts/auth.py and chmod 755
 mkdir -p /etc/openvpn/scripts
 cp /opt/vpn-master-panel/backend/auth.py /etc/openvpn/scripts/auth.py
+cp /opt/vpn-master-panel/backend/scripts/client-connect.sh /etc/openvpn/scripts/
+cp /opt/vpn-master-panel/backend/scripts/client-disconnect.sh /etc/openvpn/scripts/
+cp /opt/vpn-master-panel/backend/scripts/get_speed_limit.py /etc/openvpn/scripts/
+
 chmod 755 /etc/openvpn/scripts/auth.py
-chown root:root /etc/openvpn/scripts/auth.py
+chmod 755 /etc/openvpn/scripts/client-connect.sh
+chmod 755 /etc/openvpn/scripts/client-disconnect.sh
+chmod 755 /etc/openvpn/scripts/get_speed_limit.py
+chown root:root /etc/openvpn/scripts/*
 
 # Fix AppArmor (Allow OpenVPN to read keys in /opt and EXECUTE auth script)
 if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
