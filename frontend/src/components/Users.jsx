@@ -974,7 +974,7 @@ const Users = () => {
                                             onClick={() => { setActiveTab('logs'); handleFetchLogs(selectedUser.id); }}
                                             className={`pb-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'logs' ? 'text-blue-400 border-blue-400' : 'text-gray-400 border-transparent hover:text-gray-300'}`}
                                         >
-                                            Troubleshooting Logs
+                                            Connection Logs
                                         </button>
                                     </div>
                                 </div>
@@ -1134,7 +1134,7 @@ const Users = () => {
                                             )}
                                         </div>
                                         <p className="text-gray-500 text-xs mt-2">
-                                            Showing last 100 lines matching "{selectedUser.username}" from /var/log/openvpn/openvpn.log
+                                            Showing recent activity matching "{selectedUser.username}" from /var/log/openvpn/auth.log & openvpn.log
                                         </p>
                                     </div>
                                 )}
