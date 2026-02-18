@@ -150,3 +150,32 @@ def create_initial_admin():
             import logging
             logger = logging.getLogger(__name__)
             logger.info(f"✅ Initial admin user created: {settings.INITIAL_ADMIN_USERNAME}")
+
+
+# --- F10 Fix: Missing Dependencies for connections.py ---
+
+async def get_current_active_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Wrapper for get_current_user to satisfy connections.py import.
+    get_current_user already checks for is_active=True.
+    """
+    return await get_current_user(credentials, db)
+
+
+async def get_current_admin_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Wrapper for admin check to satisfy connections.py import.
+    """
+    user = await get_current_user(credentials, db)
+    if user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+    return user
