@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 from typing import Dict, Any, List
 import subprocess
 import shutil
@@ -586,11 +586,14 @@ async def get_live_logs(lines: int = 50):
 @router.post("/restart/{service}")
 async def restart_service(
     service: str,
+    background_tasks: BackgroundTasks,
     current_admin: User = Depends(get_current_admin)
 ):
     """
-    Restart a specific system service.
+    Restart a specific system service with verification and safe backend handling.
     """
+    import asyncio
+
     service_map = {
         "openvpn": "openvpn@server",
         "backend": "vpnmaster-backend",
@@ -603,15 +606,63 @@ async def restart_service(
     
     target_service = service_map[service]
     
+    # helper to check service status
+    def get_service_details(svc_name):
+        details = {"pid": "unknown", "active_since": "unknown"}
+        try:
+            # Get MainPID
+            pid_cmd = ["systemctl", "show", "--property=MainPID", "--value", svc_name]
+            pid_out = subprocess.run(pid_cmd, capture_output=True, text=True).stdout.strip()
+            if pid_out and pid_out != "0":
+                details["pid"] = pid_out
+            
+            # Get ActiveEnterTimestamp
+            time_cmd = ["systemctl", "show", "--property=ActiveEnterTimestamp", "--value", svc_name]
+            time_out = subprocess.run(time_cmd, capture_output=True, text=True).stdout.strip()
+            if time_out:
+                details["active_since"] = time_out
+        except:
+            pass
+        return details
+
     try:
-        if shutil.which("systemctl"):
-            cmd = ["systemctl", "restart", target_service]
-            proc = subprocess.run(cmd, capture_output=True, text=True)
-            if proc.returncode == 0:
-                return {"status": "success", "message": f"Service {service} restarted successfully"}
-            else:
-                return {"status": "error", "message": f"Failed to restart {service}: {proc.stderr}"}
+        systemctl_path = shutil.which("systemctl")
+        if not systemctl_path:
+             return {"status": "error", "message": "Systemctl not found (Dev Env?)"}
+
+        # Special handling for Backend Self-Restart
+        if service == "backend":
+            async def delayed_restart():
+                await asyncio.sleep(2) # Give time to return response
+                logger.warning("♻️  Restarting Backend Service via delayed task...")
+                subprocess.run([systemctl_path, "restart", target_service])
+
+            background_tasks.add_task(delayed_restart)
+            return {
+                "status": "success", 
+                "message": "Backend restart initiated. Service will reboot in 2 seconds.",
+                "details": {"action": "delayed_restart"}
+            }
+
+        # Standard Restart for other services
+        cmd = [systemctl_path, "restart", target_service]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if proc.returncode == 0:
+            # Verify new status
+            new_details = get_service_details(target_service)
+            return {
+                "status": "success", 
+                "message": f"Service {service} restarted successfully.",
+                "details": new_details
+            }
         else:
-            return {"status": "error", "message": "Systemctl not found (Dev Env?)"}
+            return {
+                "status": "error", 
+                "message": f"Failed to restart {service}",
+                "debug": proc.stderr.strip() or "Unknown error (exit code non-zero)"
+            }
+            
     except Exception as e:
+        logger.error(f"Restart exception: {e}")
         return {"status": "error", "message": f"Exception restarting {service}: {str(e)}"}
