@@ -6,9 +6,7 @@ export default function Diagnostics() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [showLiveLogs, setShowLiveLogs] = useState(false);
-    const [liveLogs, setLiveLogs] = useState({ openvpn: [], auth: [] });
-    const [lastUpdated, setLastUpdated] = useState(null);
+    const [restartLoading, setRestartLoading] = useState(null);
 
     const fetchDiagnostics = async () => {
         try {
@@ -30,28 +28,30 @@ export default function Diagnostics() {
         }
     };
 
+    const handleRestart = async (serviceName) => {
+        if (!confirm(`Are you sure you want to restart ${serviceName}? This may disconnect active users.`)) return;
+
+        setRestartLoading(serviceName);
+        try {
+            const res = await apiService.restartService(serviceName);
+            if (res.data.status === 'success') {
+                alert(`Success: ${res.data.message}`);
+                fetchDiagnostics(); // Refresh status
+            } else {
+                alert(`Error: ${res.data.message}`);
+            }
+        } catch (e) {
+            alert(`Failed to restart ${serviceName}: ${e.message}`);
+        } finally {
+            setRestartLoading(null);
+        }
+    };
+
     useEffect(() => {
         fetchDiagnostics();
         const interval = setInterval(fetchDiagnostics, 10000); // Auto-refresh every 10s
         return () => clearInterval(interval);
     }, []);
-
-    useEffect(() => {
-        let interval;
-        if (showLiveLogs) {
-            const fetchLive = async () => {
-                try {
-                    const res = await apiService.getLiveLogs(50);
-                    setLiveLogs(res.data);
-                } catch (e) {
-                    console.error("Live logs error", e);
-                }
-            };
-            fetchLive();
-            interval = setInterval(fetchLive, 2000);
-        }
-        return () => clearInterval(interval);
-    }, [showLiveLogs]);
 
     if (loading && !data) {
         return (
@@ -90,12 +90,6 @@ export default function Diagnostics() {
                     <p className="text-gray-400 mt-1">Ultimate System Diagnostics & Health Report</p>
                 </div>
                 <div className="flex items-center gap-4">
-                    <button
-                        onClick={() => setShowLiveLogs(!showLiveLogs)}
-                        className={`hidden md:flex px-4 py-2 rounded-lg font-bold items-center gap-2 transition-all ${showLiveLogs ? 'bg-red-600/20 text-red-400 border border-red-500 animate-pulse' : 'bg-gray-700 hover:bg-gray-600 text-white'}`}
-                    >
-                        {showLiveLogs ? <span className="flex items-center gap-2"><div className="w-2 h-2 bg-red-500 rounded-full animate-ping"></div> Stop Live Monitor</span> : <span className="flex items-center gap-2"><Terminal className="w-4 h-4" /> Live Debugger</span>}
-                    </button>
                     <span className="text-sm text-gray-400 font-mono hidden md:block">
                         {lastUpdated ? `Report Time: ${lastUpdated.toLocaleTimeString()}` : ''}
                     </span>
@@ -108,31 +102,42 @@ export default function Diagnostics() {
                 </div>
             </div>
 
-            {/* Live Logs Section */}
-            {showLiveLogs && (
-                <div className="bg-black rounded-xl border-2 border-cyan-500/50 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
-                    <div className="bg-gray-900/80 p-4 border-b border-gray-800 flex justify-between items-center">
-                        <h3 className="text-cyan-400 font-bold flex items-center gap-2 animate-pulse">
-                            <Activity className="w-5 h-5" /> Live Connection Monitor (Real-time)
-                        </h3>
-                        <span className="text-xs text-gray-500 font-mono">Auto-refreshing every 2s</span>
-                    </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-800 h-96">
-                        <div className="flex flex-col">
-                            <div className="p-2 bg-gray-900/50 text-xs font-bold text-gray-400 border-b border-gray-800">System Logs (OpenVPN Service)</div>
-                            <div className="flex-1 p-4 overflow-y-auto font-mono text-xs text-green-400/90 whitespace-pre-wrap">
-                                {liveLogs.openvpn?.join('\n') || "Waiting for logs..."}
-                            </div>
-                        </div>
-                        <div className="flex flex-col">
-                            <div className="p-2 bg-gray-900/50 text-xs font-bold text-gray-400 border-b border-gray-800">Authentication Logs (User Auth)</div>
-                            <div className="flex-1 p-4 overflow-y-auto font-mono text-xs text-yellow-400/90 whitespace-pre-wrap">
-                                {liveLogs.auth?.join('\n') || "No authentication attempts recorded yet."}
-                            </div>
-                        </div>
-                    </div>
+            {/* Service Controls */}
+            <div className="bg-gray-800/50 p-6 rounded-xl border border-gray-700 backdrop-blur-sm">
+                <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+                    <RefreshCw className="w-5 h-5 text-green-400" /> Service Controls
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <button
+                        onClick={() => handleRestart('openvpn')}
+                        disabled={restartLoading === 'openvpn'}
+                        className="p-3 bg-blue-600/20 border border-blue-500/50 rounded hover:bg-blue-600/40 transition-colors text-blue-200 font-bold text-sm flex items-center justify-center gap-2">
+                        {restartLoading === 'openvpn' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                        Restart OpenVPN
+                    </button>
+                    <button
+                        onClick={() => handleRestart('backend')}
+                        disabled={restartLoading === 'backend'}
+                        className="p-3 bg-purple-600/20 border border-purple-500/50 rounded hover:bg-purple-600/40 transition-colors text-purple-200 font-bold text-sm flex items-center justify-center gap-2">
+                        {restartLoading === 'backend' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                        Restart Backend
+                    </button>
+                    <button
+                        onClick={() => handleRestart('nginx')}
+                        disabled={restartLoading === 'nginx'}
+                        className="p-3 bg-green-600/20 border border-green-500/50 rounded hover:bg-green-600/40 transition-colors text-green-200 font-bold text-sm flex items-center justify-center gap-2">
+                        {restartLoading === 'nginx' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                        Restart Nginx
+                    </button>
+                    <button
+                        onClick={() => handleRestart('wireguard')}
+                        disabled={restartLoading === 'wireguard'}
+                        className="p-3 bg-orange-600/20 border border-orange-500/50 rounded hover:bg-orange-600/40 transition-colors text-orange-200 font-bold text-sm flex items-center justify-center gap-2">
+                        {restartLoading === 'wireguard' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                        Restart WireGuard
+                    </button>
                 </div>
-            )}
+            </div>
 
             {/* 1. System & OS Resources */}
             <div className="bg-gray-800/50 p-6 rounded-xl border border-gray-700 backdrop-blur-sm">
