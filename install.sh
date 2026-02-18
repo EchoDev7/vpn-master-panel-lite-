@@ -507,6 +507,28 @@ setup_firewall() {
     print_success "Firewall configured (secured)"
 }
 
+setup_apparmor() {
+    print_step "Configuring AppArmor"
+    if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
+        print_info "Updating OpenVPN AppArmor profile..."
+        # Check if we already added our rules
+        if ! grep -q "/opt/vpn-master-panel/backend/auth.py" /etc/apparmor.d/usr.sbin.openvpn; then
+            sed -i '/}/d' /etc/apparmor.d/usr.sbin.openvpn
+            echo "  /opt/vpn-master-panel/backend/data/** r," >> /etc/apparmor.d/usr.sbin.openvpn
+            echo "  /opt/vpn-master-panel/backend/auth.py Ux," >> /etc/apparmor.d/usr.sbin.openvpn
+            echo "  /opt/vpn-master-panel/backend/** r," >> /etc/apparmor.d/usr.sbin.openvpn
+            echo "}" >> /etc/apparmor.d/usr.sbin.openvpn
+            
+            systemctl reload apparmor
+            print_success "AppArmor configured (Auth Script Unconfined)"
+        else
+            print_info "AppArmor already configured"
+        fi
+    else
+        print_info "AppArmor not present, skipping"
+    fi
+}
+
 show_resource_usage() {
     print_step "Resource Usage Report"
     
@@ -602,7 +624,13 @@ main() {
     setup_nginx
     setup_pki
     setup_systemd
+    setup_apparmor
     setup_firewall
+    
+    # Ensure log file exists and is writable (Critical for auth script)
+    mkdir -p /var/log/openvpn
+    touch /var/log/openvpn/auth.log
+    chmod 666 /var/log/openvpn/auth.log
     
     show_success_message
 }
