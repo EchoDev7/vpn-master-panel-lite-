@@ -32,6 +32,10 @@ echo -e "${CYAN}📥 Updating Installation at $INSTALL_DIR...${NC}"
 cd "$INSTALL_DIR" || exit 1
 
 # Check if it's a git repo
+if [ -d ".git" ]; then
+    echo -e "${CYAN}Fetching updates...${NC}"
+    git fetch --all
+
     # Stash local changes instead of hard reset
     STASH_RESULT=$(git diff-index --quiet HEAD -- || echo "changed")
     if [ "$STASH_RESULT" = "changed" ]; then
