@@ -79,6 +79,9 @@ class User(Base):
     wireguard_ip = Column(String(50))
     wireguard_preshared_key = Column(String(255))
     
+    # Subscription
+    subscription_token = Column(String(100), unique=True, index=True, nullable=True)
+    
     # Metadata
     # These columns are moved to a new # Timestamps section below
     # created_at = Column(DateTime(timezone=True), server_default=func.now())
