@@ -164,12 +164,26 @@ class OpenVPNService:
             conf.append(f"tls-auth {self.TA_KEY} 0")
         elif tls_mode == "tls-crypt-v2":
             # Requires server key specifically
-            conf.append(f"tls-crypt-v2 {self.TA_KEY}") # Assuming simplistic path for now
+            conf.append(f"tls-crypt-v2 {self.TA_KEY}") 
+        elif tls_mode == "none":
+            # Explicitly disabled
+            pass
 
         # Auth & Ciphers
-        conf.append(f"auth {s.get('auth_digest', 'SHA256')}")
-        conf.append(f"data-ciphers {s.get('data_ciphers', 'AES-256-GCM:AES-128-GCM')}")
-        conf.append(f"data-ciphers-fallback {s.get('data_ciphers_fallback', 'AES-256-GCM')}")
+        auth_digest = s.get('auth_digest', 'SHA256')
+        if auth_digest == 'none':
+            conf.append("auth none") 
+        else:
+            conf.append(f"auth {auth_digest}")
+
+        data_ciphers = s.get('data_ciphers', 'AES-256-GCM:AES-128-GCM')
+        if data_ciphers == 'none':
+             conf.append("data-ciphers none")
+             conf.append("cipher none") # Legacy compatibility
+        else:
+            conf.append(f"data-ciphers {data_ciphers}")
+            conf.append(f"data-ciphers-fallback {s.get('data_ciphers_fallback', 'AES-256-GCM')}")
+
         conf.append(f"tls-version-min {s.get('tls_version_min', '1.2')}")
         
         if s.get("tls_ciphers"):
