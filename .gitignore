@@ -43,3 +43,30 @@ secrets/
 backup/
 *.backup
 ```
+
+# Runtime data
+backend/data/
+backend/*.db
+backend/vpnmaster_lite.db
+*.db
+*.db-shm
+*.db-wal
+
+# OpenVPN PKI files
+backend/data/openvpn/
+easy-rsa/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Logs
+*.log
+logs/
