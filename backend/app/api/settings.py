@@ -60,72 +60,90 @@ def init_default_settings(db: Session):
         # OpenVPN — Iran Anti-Censorship Defaults
         # =============================================
 
-        # Network
+        # --- Network & Server ---
         "ovpn_protocol": "tcp",
         "ovpn_port": "443",
-        "ovpn_mtu": "1400",
+        "ovpn_dev": "tun",
+        "ovpn_dev_type": "tun",
         "ovpn_topology": "subnet",
-        "ovpn_float": "1",
         "ovpn_server_subnet": "10.8.0.0",
         "ovpn_server_netmask": "255.255.255.0",
         "ovpn_max_clients": "100",
-        "ovpn_duplicate_cn": "1",
+        "ovpn_server_ip": "",                # Override public IP
 
-        # Security & Encryption
+        # --- Connectivity & Reliability ---
+        "ovpn_keepalive_interval": "10",
+        "ovpn_keepalive_timeout": "60",
+        "ovpn_float": "1",                   # Allow client IP float
+        "ovpn_comp_lzo": "no",               # Deprecated but kept for legacy
+        "ovpn_compress": "",                 # "lzo", "lz4", "lz4-v2" or empty to disable
+        "ovpn_allow_compression": "no",      # Security: disable checking compression
+        "ovpn_pers_tun": "1",
+        "ovpn_pers_key": "1",
+        "ovpn_user": "nobody",
+        "ovpn_group": "nogroup",
+
+        # --- Interaction & Timeouts ---
+        "ovpn_reneg_sec": "3600",            # TLS renegotiation
+        "ovpn_hand_window": "60",            # Handshake window
+        "ovpn_tran_window": "3600",          # Transition window
+        "ovpn_tls_timeout": "2",             # Packet retransmit timeout
+        "ovpn_connect_retry": "5",
+        "ovpn_connect_retry_max": "0",
+        "ovpn_server_poll_timeout": "10",
+        "ovpn_explicit_exit_notify": "1",    # Notify server on disconnect (UDP)
+
+        # --- Cryptography & Security ---
+        "ovpn_cipher": "AES-256-GCM",        # Main cipher (NCP)
         "ovpn_data_ciphers": "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
         "ovpn_data_ciphers_fallback": "AES-256-GCM",
         "ovpn_auth_digest": "SHA256",
         "ovpn_tls_version_min": "1.2",
+        "ovpn_tls_cert_profile": "preferred",
         "ovpn_tls_ciphers": "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
         "ovpn_tls_cipher_suites": "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
-        "ovpn_reneg_sec": "3600",
+        "ovpn_ecdh_curve": "secp384r1",      # Strong curve
+        "ovpn_dh_file": "none",              # Disable DH (use ECDH)
+        "ovpn_crl_verify": "crl.pem",        # Certificate Revocation List
 
-        # TLS Control Channel
-        "ovpn_tls_control_channel": "tls-crypt",
+        # --- TLS Control Channel Obfuscation ---
+        "ovpn_tls_control_channel": "tls-crypt", # none, tls-auth, tls-crypt, tls-crypt-v2
+        "ovpn_auth_nocache": "1",            # Don't cache passwords in memory
 
-        # Anti-Censorship
-        "ovpn_scramble": "1",
-        "ovpn_scramble_password": "vpnmaster",
-        "ovpn_fragment": "0",
-        "ovpn_port_share": "",
+        # --- Anti-Censorship & DPI Evasion ---
+        "ovpn_scramble": "1",                # XOR Scramble (Unofficial patch)
+        "ovpn_scramble_password": "vpnmaster", 
+        "ovpn_fragment": "0",                # Fragment packets
+        "ovpn_mssfix": "1360",               # Adjust based on MTU
+        "ovpn_tun_mtu": "1400",
+        "ovpn_mtu_disc": "yes",              # MTU discovery
 
-        # Routing & DNS
-        "ovpn_redirect_gateway": "1",
+        # --- Routing & DNS (Push Options) ---
+        "ovpn_redirect_gateway": "1",        # def1 bypass-dhcp
         "ovpn_dns": "1.1.1.1,8.8.8.8",
-        "ovpn_block_outside_dns": "0",
-        "ovpn_inter_client": "0",
+        "ovpn_block_outside_dns": "0",       # Windows leak protection
+        "ovpn_client_to_client": "0",
+        "ovpn_push_routes": "",              # e.g. "192.168.1.0 255.255.255.0"
+        "ovpn_push_remove_routes": "",       # Remove specific routes
 
-        # Connection
-        "ovpn_keepalive_interval": "10",
-        "ovpn_keepalive_timeout": "60",
-        "ovpn_connect_retry": "5",
-        "ovpn_connect_retry_max": "0",
-        "ovpn_server_poll_timeout": "10",
-        "ovpn_verb": "3",
-        "ovpn_compression": "none",
-
-        # Proxy
-        "ovpn_proxy_type": "none",
+        # --- Logging & Management ---
+        "ovpn_verb": "3",                    # 0-9
+        "ovpn_mute": "20",                   # Silence repeating messages
+        "ovpn_status_log": "/var/log/openvpn/openvpn-status.log",
+        "ovpn_status_version": "2",          # Status file format version
+        "ovpn_management": "127.0.0.1 7505", # Management interface
+        
+        # --- Proxy Configuration ---
+        "ovpn_proxy_type": "none",           # none / socks / http
         "ovpn_proxy_address": "",
         "ovpn_proxy_port": "",
-
-        # Multi-Remote
-        "ovpn_remote_servers": "",
-
-        # Advanced
-        "ovpn_custom_client_config": "",
-        "ovpn_custom_server_config": "",
-        "ovpn_server_ip": "",
-
-        # OpenVPN Anti-Censorship Extras
-        "ovpn_sni_spoof_enabled": "0",
-        "ovpn_sni_spoof_domain": "www.google.com",
-        "ovpn_ssh_tunnel_enabled": "0",
-        "ovpn_ssh_tunnel_host": "",
-        "ovpn_ssh_tunnel_port": "22",
-        "ovpn_cdn_routing_enabled": "0",
-        "ovpn_cdn_domain": "",
-        "ovpn_block_iran_ips": "0",
+        
+        # --- Multi-Remote (Failover) ---
+        "ovpn_remote_servers": "",           # ip:port:proto, ip:port:proto
+        
+        # --- Advanced Custom Config ---
+        "ovpn_custom_client_config": "",     # Raw text
+        "ovpn_custom_server_config": "",     # Raw text
 
         # =============================================
         # WireGuard — Iran Anti-Censorship Defaults
@@ -291,19 +309,42 @@ async def apply_server_config(
             with open(config_path, "w") as f:
                 f.write(config)
             system_written = True
+            
+            # Auto-Restart Service
+            try:
+                import subprocess
+                subprocess.run(["systemctl", "restart", "openvpn@server"], check=True)
+                restart_status = "Service restarted successfully."
+            except Exception as e:
+                restart_status = f"Service restart failed: {str(e)}"
+                
         except PermissionError:
             system_written = False
+            restart_status = "Permission denied: Cannot specific system path."
         
         return {
             "message": "Server config generated",
             "system_path": config_path if system_written else None,
             "backup_path": backup_path,
             "system_written": system_written,
-            "hint": "Run 'sudo systemctl restart openvpn@server' to apply" if system_written else 
+            "restart_status": restart_status,
+            "hint": "Configuration applied." if system_written else 
                     f"Copy manually: sudo cp {backup_path} {config_path} && sudo systemctl restart openvpn@server"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/openvpn/version")
+async def get_openvpn_version(
+    current_admin: User = Depends(get_current_admin)
+):
+    """Get OpenVPN version installed on system"""
+    import subprocess
+    try:
+        cleanup = subprocess.check_output("openvpn --version | head -n 1", shell=True).decode().strip()
+        return {"version": cleanup}
+    except:
+        return {"version": "Not Found / Not Installed"}
 
 
 # =============================================
