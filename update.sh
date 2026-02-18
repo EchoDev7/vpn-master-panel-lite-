@@ -327,16 +327,20 @@ if [ ! -c /dev/net/tun ]; then
     chmod 600 /dev/net/tun
 fi
 
-# Fix AppArmor (Allow OpenVPN to read keys in /opt)
+# Fix AppArmor (Allow OpenVPN to read keys in /opt and EXECUTE auth script)
 if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
     echo -e "${CYAN}🛡️  Updating AppArmor Profile...${NC}"
-    if ! grep -q "/opt/vpn-master-panel/" /etc/apparmor.d/usr.sbin.openvpn; then
-        # Append rule to allow read access
+        # Append rule to allow read access & UNCONFINED execution (Ux) to avoid any restriction
         sed -i '/}/d' /etc/apparmor.d/usr.sbin.openvpn
         echo "  /opt/vpn-master-panel/backend/data/** r," >> /etc/apparmor.d/usr.sbin.openvpn
+        echo "  /opt/vpn-master-panel/backend/auth.py Ux," >> /etc/apparmor.d/usr.sbin.openvpn
+        echo "  /opt/vpn-master-panel/backend/** r," >> /etc/apparmor.d/usr.sbin.openvpn
         echo "}" >> /etc/apparmor.d/usr.sbin.openvpn
+        
         systemctl reload apparmor
-        echo -e "${GREEN}✓ AppArmor Updated${NC}"
+        echo -e "${GREEN}✓ AppArmor Updated (Auth Script Unconfined)${NC}"
+    else
+         echo -e "${GREEN}✓ AppArmor already configured${NC}"
     fi
 fi
 
@@ -349,7 +353,10 @@ if [ ! -d "/var/log/openvpn" ]; then
     mkdir -p /var/log/openvpn
     touch /var/log/openvpn/openvpn.log
     touch /var/log/openvpn/openvpn-status.log
+    touch /var/log/openvpn/auth.log
     chmod 755 /var/log/openvpn
+    # Allow OpenVPN (nobody) to write to auth log
+    chmod 666 /var/log/openvpn/auth.log
 fi
 
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
