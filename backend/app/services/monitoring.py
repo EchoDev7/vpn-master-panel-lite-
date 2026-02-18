@@ -233,8 +233,8 @@ class TrafficMonitor:
             # Log to DB
             log = ConnectionLog(
                 user_id=user.id,
-                protocol=protocol,
-                ip_address=ip,
+                protocol=protocol, # openvpn, wireguard
+                client_ip=ip, # Fixed: ip_address -> client_ip
                 connected_at=datetime.utcnow()
             )
             db.add(log)
@@ -345,7 +345,7 @@ class TrafficMonitor:
             log = ConnectionLog(
                 user_id=user.id,
                 protocol="openvpn",
-                ip_address=real_ip,
+                client_ip=real_ip, # Fixed: ip_address -> client_ip
                 connected_at=datetime.utcnow()
             )
             db.add(log)
