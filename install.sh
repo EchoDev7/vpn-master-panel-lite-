@@ -509,13 +509,21 @@ setup_firewall() {
 
 setup_apparmor() {
     print_step "Configuring AppArmor"
+    
+    # Deploy Auth Script to standard location
+    mkdir -p /etc/openvpn/scripts
+    cp /opt/vpn-master-panel/backend/auth.py /etc/openvpn/scripts/auth.py
+    chmod 755 /etc/openvpn/scripts/auth.py
+    chown root:root /etc/openvpn/scripts/auth.py
+    print_success "Auth script deployed to /etc/openvpn/scripts/"
+
     if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
         print_info "Updating OpenVPN AppArmor profile..."
         # Check if we already added our rules
-        if ! grep -q "/opt/vpn-master-panel/backend/auth.py" /etc/apparmor.d/usr.sbin.openvpn; then
+        if ! grep -q "/etc/openvpn/scripts/auth.py" /etc/apparmor.d/usr.sbin.openvpn; then
             sed -i '/}/d' /etc/apparmor.d/usr.sbin.openvpn
             echo "  /opt/vpn-master-panel/backend/data/** r," >> /etc/apparmor.d/usr.sbin.openvpn
-            echo "  /opt/vpn-master-panel/backend/auth.py Ux," >> /etc/apparmor.d/usr.sbin.openvpn
+            echo "  /etc/openvpn/scripts/auth.py Ux," >> /etc/apparmor.d/usr.sbin.openvpn
             echo "  /opt/vpn-master-panel/backend/** r," >> /etc/apparmor.d/usr.sbin.openvpn
             echo "}" >> /etc/apparmor.d/usr.sbin.openvpn
             
