@@ -116,70 +116,87 @@ else
 fi
 
 if [ "$SHOULD_FIX_PKI" = true ]; then
-    echo -e "${CYAN}🔧 repairing OpenVPN PKI using EasyRSA...${NC}"
+if [ "$SHOULD_FIX_PKI" = true ]; then
+    echo -e "${CYAN}🔧 Repairing OpenVPN PKI using OpenSSL (Robust Method)...${NC}"
     
-    # Install easy-rsa if missing
-    if [ ! -d "/usr/share/easy-rsa" ]; then
-        apt install -y easy-rsa
-    fi
+    DATA_DIR="/opt/vpn-master-panel/backend/data/openvpn"
+    mkdir -p "$DATA_DIR"
+    
+    # Stop Service
+    systemctl stop openvpn@server
+    systemctl stop openvpn
 
-    # Setup EasyRSA directory
-    rm -rf /opt/vpn-master-panel/easy-rsa
-    cp -r /usr/share/easy-rsa /opt/vpn-master-panel/easy-rsa
-    cd /opt/vpn-master-panel/easy-rsa
-    
-    # Initialize PKI
-    ./easyrsa init-pki
-    
-    # Build CA (Batch mode, no pass)
+    # Clean Old Keys
+    rm -f $DATA_DIR/ca.crt $DATA_DIR/ca.key
+    rm -f $DATA_DIR/server.crt $DATA_DIR/server.key $DATA_DIR/server.csr
+    rm -f $DATA_DIR/ta.key $DATA_DIR/dh.pem $DATA_DIR/server.ext
+
+    # Generate CA
     echo -e "${CYAN}  Generating CA...${NC}"
-    export EASYRSA_BATCH=1
-    export EASYRSA_REQ_CN="VPN-Master-Root-CA"
-    ./easyrsa build-ca nopass
-    
-    # Build Server Key/Cert
+    openssl req -new -x509 -days 3650 -nodes \
+        -out $DATA_DIR/ca.crt \
+        -keyout $DATA_DIR/ca.key \
+        -subj "/CN=VPN-Master-CA" 2>/dev/null
+
+    # Generate Server Key & CSR
     echo -e "${CYAN}  Generating Server Cert/Key...${NC}"
-    export EASYRSA_REQ_CN="server"
-    ./easyrsa build-server-full server nopass
-    
-    # Verify Keys (Self-Healing)
-    KEY_MOD=$(openssl rsa -noout -modulus -in pki/private/server.key 2>/dev/null | openssl md5)
-    CERT_MOD=$(openssl x509 -noout -modulus -in pki/issued/server.crt 2>/dev/null | openssl md5)
+    openssl req -new -nodes \
+        -out $DATA_DIR/server.csr \
+        -keyout $DATA_DIR/server.key \
+        -subj "/CN=server" 2>/dev/null
+
+    # Create Extensions File (Critical for modern clients)
+    echo "basicConstraints=CA:FALSE" > $DATA_DIR/server.ext
+    echo "nsCertType=server" >> $DATA_DIR/server.ext
+    echo "keyUsage=digitalSignature,keyEncipherment" >> $DATA_DIR/server.ext
+    echo "extendedKeyUsage=serverAuth" >> $DATA_DIR/server.ext
+    echo "subjectKeyIdentifier=hash" >> $DATA_DIR/server.ext
+    echo "authorityKeyIdentifier=keyid,issuer" >> $DATA_DIR/server.ext
+
+    # Sign Server Cert
+    openssl x509 -req \
+        -in $DATA_DIR/server.csr \
+        -CA $DATA_DIR/ca.crt \
+        -CAkey $DATA_DIR/ca.key \
+        -CAcreateserial \
+        -out $DATA_DIR/server.crt \
+        -days 3650 \
+        -extfile $DATA_DIR/server.ext 2>/dev/null
+
+    # DH & TA
+    echo -e "${CYAN}  Generating DH & TA...${NC}"
+    openssl dhparam -out $DATA_DIR/dh.pem 2048 2>/dev/null
+    openvpn --genkey secret $DATA_DIR/ta.key
+
+    # Permissions
+    chmod 600 $DATA_DIR/server.key $DATA_DIR/ta.key $DATA_DIR/ca.key
+    chmod 644 $DATA_DIR/ca.crt $DATA_DIR/server.crt $DATA_DIR/dh.pem
+
+    # Verify Mismatch Immediately
+    KEY_MOD=$(openssl rsa -noout -modulus -in "$DATA_DIR/server.key" 2>/dev/null | openssl md5)
+    CERT_MOD=$(openssl x509 -noout -modulus -in "$DATA_DIR/server.crt" 2>/dev/null | openssl md5)
     
     if [ "$KEY_MOD" != "$CERT_MOD" ]; then
         echo -e "${RED}❌ Critical Error: Generated Key/Cert mismatch!${NC}"
-        echo -e "${YELLOW}Retrying generation...${NC}"
-        # Retry once
-        rm -rf pki
-        ./easyrsa init-pki
-        ./easyrsa build-ca nopass
-        ./easyrsa build-server-full server nopass
+        # Should not happen with fresh generation, but warn
+    else
+        echo -e "${GREEN}✓ PKI Repaired Successfully (OpenSSL match verified)${NC}"
     fi
-    
-    # Force Remove Passphrase (Just in case)
-    openssl rsa -in pki/private/server.key -out pki/private/server.key.unsecure -passin pass: 2>/dev/null
-    if [ -f "pki/private/server.key.unsecure" ]; then
-        mv pki/private/server.key.unsecure pki/private/server.key
-    fi
-    
-    # Copy keys to backend data dir (so backend sees them)
-    mkdir -p /opt/vpn-master-panel/backend/data/openvpn
-    cp -f pki/ca.crt /opt/vpn-master-panel/backend/data/openvpn/
-    cp -f pki/issued/server.crt /opt/vpn-master-panel/backend/data/openvpn/
-    cp -f pki/private/server.key /opt/vpn-master-panel/backend/data/openvpn/
-    
+
+    # Cleanup CSR
+    rm -f $DATA_DIR/server.csr $DATA_DIR/server.ext
+
     # Copy keys to /etc/openvpn (for the service)
-    cp -f pki/ca.crt /etc/openvpn/
-    cp -f pki/issued/server.crt /etc/openvpn/
-    cp -f pki/private/server.key /etc/openvpn/
+    # Ensure destination exists
+    mkdir -p /etc/openvpn
+    cp -f $DATA_DIR/ca.crt /etc/openvpn/
+    cp -f $DATA_DIR/server.crt /etc/openvpn/
+    cp -f $DATA_DIR/server.key /etc/openvpn/
+    cp -f $DATA_DIR/ta.key /etc/openvpn/
+    cp -f $DATA_DIR/dh.pem /etc/openvpn/
     
-    # Fix Permissions
-    chmod 644 /opt/vpn-master-panel/backend/data/openvpn/server.crt
-    chmod 600 /opt/vpn-master-panel/backend/data/openvpn/server.key
-    chmod 644 /etc/openvpn/server.crt
-    chmod 600 /etc/openvpn/server.key
+    chmod 600 /etc/openvpn/server.key /etc/openvpn/ta.key
     
-    echo -e "${GREEN}✓ PKI Repaired Successfully with EasyRSA${NC}"
     cd "$INSTALL_DIR"
 fi
 
@@ -381,8 +398,15 @@ source venv/bin/activate
 # Ensure PYTHONPATH includes current directory
 export PYTHONPATH=$PYTHONPATH:/opt/vpn-master-panel/backend
 python3 force_server_config.py
-# Force fix potential path issues (Double Safety)
-python3 fix_openvpn_paths.py
+
+# Force fix potential path issues (Double Safety) - Inline Patch
+SERVER_CONF="/etc/openvpn/server.conf"
+if [ -f "$SERVER_CONF" ]; then
+    echo -e "${CYAN}🔧 Patching server.conf paths...${NC}"
+    # Replace /opt/.../auth.py with /etc/openvpn/scripts/auth.py
+    sed -i 's|/opt/vpn-master-panel/backend/auth.py|/etc/openvpn/scripts/auth.py|g' "$SERVER_CONF"
+    # Ensure Verify Client Cert is handled if missing (optional safety)
+fi
 cd ..
 
 # Fix permissions so OpenVPN can read keys
