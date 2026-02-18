@@ -152,13 +152,44 @@ def create_initial_admin():
             logger.info(f"✅ Initial admin user created: {settings.INITIAL_ADMIN_USERNAME}")
 
 
+<<<<<<< HEAD
 
+=======
+<<<<<<< HEAD
+
+=======
+<<<<<<< HEAD
+
+=======
+<<<<<<< HEAD
+
+=======
+>>>>>>> a8e3d075c7b3f347bede6d645c9c51a035183fe1
+>>>>>>> 2ffbc5b2859383797fdd9f69e94b46288f502733
+>>>>>>> f81b1f9c14c7bda7b3ba463eb4f5e1a818c88fee
+>>>>>>> b1cc4a122363c80c189f69b2b1313185a9c5876c
 # --- F10 Fix: Missing Dependencies for connections.py ---
 
 async def get_current_active_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+    """
+    Wrapper for get_current_user to satisfy connections.py import.
+    get_current_user already checks for is_active=True.
+    """
+>>>>>>> a8e3d075c7b3f347bede6d645c9c51a035183fe1
+>>>>>>> 2ffbc5b2859383797fdd9f69e94b46288f502733
+>>>>>>> f81b1f9c14c7bda7b3ba463eb4f5e1a818c88fee
+>>>>>>> b1cc4a122363c80c189f69b2b1313185a9c5876c
     return await get_current_user(credentials, db)
 
 
@@ -166,7 +197,37 @@ async def get_current_admin_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
+<<<<<<< HEAD
     user = await get_current_user(credentials, db)
     if user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
         raise HTTPException(status_code=403, detail="Admin privileges required")
+=======
+<<<<<<< HEAD
+    user = await get_current_user(credentials, db)
+    if user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+=======
+<<<<<<< HEAD
+    user = await get_current_user(credentials, db)
+    if user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+=======
+<<<<<<< HEAD
+    user = await get_current_user(credentials, db)
+    if user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+=======
+    """
+    Wrapper for admin check to satisfy connections.py import.
+    """
+    user = await get_current_user(credentials, db)
+    if user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+>>>>>>> a8e3d075c7b3f347bede6d645c9c51a035183fe1
+>>>>>>> 2ffbc5b2859383797fdd9f69e94b46288f502733
+>>>>>>> f81b1f9c14c7bda7b3ba463eb4f5e1a818c88fee
+>>>>>>> b1cc4a122363c80c189f69b2b1313185a9c5876c
     return user
