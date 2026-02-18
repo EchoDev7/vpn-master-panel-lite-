@@ -536,3 +536,49 @@ async def get_full_diagnostics(
             "timestamp": time.time()
         }
 
+
+@router.get("/live-logs")
+async def get_live_logs(lines: int = 50):
+    """
+    Fetch live logs from OpenVPN and Auth script for real-time debugging.
+    """
+    import shutil
+    logs = {
+        "openvpn": [],
+        "auth": []
+    }
+    
+    # 1. OpenVPN Service Logs (journalctl)
+    try:
+        # Check if systemd/journalctl is available (Linux)
+        if shutil.which("journalctl"):
+            cmd = ["journalctl", "-u", "openvpn@server", "-n", str(lines), "--no-pager", "--output", "short-iso"]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode == 0:
+                logs["openvpn"] = proc.stdout.splitlines()
+            else:
+                logs["openvpn"] = [f"Error fetching OpenVPN logs: {proc.stderr}"]
+        else:
+             # Fallback for dev/mac (tail mostly)
+             # In dev we might not have logs, return mock or empty
+             logs["openvpn"] = ["Systemd not found. Logs unavailable in dev environment."]
+    except Exception as e:
+        logs["openvpn"] = [f"Exception fetching OpenVPN logs: {str(e)}"]
+
+    # 2. Auth Script Logs
+    auth_log_path = "/var/log/openvpn/auth.log"
+    if os.path.exists(auth_log_path):
+        try:
+            # Use tail to get last N lines
+            cmd = ["tail", "-n", str(lines), auth_log_path]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode == 0:
+                logs["auth"] = proc.stdout.splitlines()
+            else:
+                 logs["auth"] = [f"Error reading auth.log: {proc.stderr}"]
+        except Exception as e:
+            logs["auth"] = [f"Exception reading auth.log: {str(e)}"]
+    else:
+        logs["auth"] = ["Auth log file not found (No connection attempts yet?)"]
+
+    return logs
