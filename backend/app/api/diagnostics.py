@@ -364,13 +364,35 @@ async def get_full_diagnostics(
                 logs_to_scan += subprocess.run(cmd_back, capture_output=True, text=True).stdout or ""
             except:
                 pass
+
+            # Check if OpenVPN is currently running
+            is_ovpn_running = False
+            try:
+                is_ovpn_running = subprocess.run(["systemctl", "is-active", "openvpn@server"], capture_output=True, text=True).stdout.strip() == "active"
+            except:
+                pass
             
             logs_found = False
             # Only process if we have logs
             if logs_to_scan:
-                for line in logs_to_scan.splitlines():
+                lines = logs_to_scan.splitlines()
+                # Find index of last successful start
+                last_success_idx = -1
+                for i, line in enumerate(lines):
+                    if "Initialization Sequence Completed" in line:
+                        last_success_idx = i
+                
+                for i, line in enumerate(lines):
+                    # If we found a success message, ignore errors before it
+                    if last_success_idx != -1 and i < last_success_idx:
+                        continue
+
                     for pattern, info in error_patterns.items():
                         if pattern in line:
+                            # If service is running, ignore known "Startup Fatal" errors that might be stale
+                            if is_ovpn_running and info["level"] in ["CRITICAL", "ERROR"]:
+                                continue
+
                             issue_msg = info["msg"]
                             # Avoid duplicates
                             if not any(i['message'] == issue_msg for i in log_analysis):
@@ -431,8 +453,7 @@ async def get_full_diagnostics(
             api_base = "http://127.0.0.1:8001"
             endpoints = [
                 "/api/health", 
-                "/docs", 
-                "/api/v1/monitoring/dashboard"
+                "/docs"
             ]
             
             import asyncio
