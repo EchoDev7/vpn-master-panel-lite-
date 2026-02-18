@@ -553,3 +553,101 @@ PersistentKeepalive = 25
         "content": config_content,
         "qr_code": qr_code,
     }
+
+
+# --- Ultimate User Management (Phase 3) ---
+
+class BulkActionRequest(BaseModel):
+    user_ids: List[int]
+    action: str  # 'delete', 'enable', 'disable', 'reset_traffic'
+
+@router.post("/bulk-action", status_code=status.HTTP_200_OK)
+async def bulk_action(
+    request: BulkActionRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Perform bulk actions on users (Admin only)
+    """
+    users = db.query(User).filter(User.id.in_(request.user_ids)).all()
+    count = 0
+    
+    for user in users:
+        # Skip super admin for destructive actions
+        if user.role == UserRole.SUPER_ADMIN and request.action in ['delete', 'disable']:
+            continue
+            
+        if request.action == 'delete':
+            db.delete(user)
+        elif request.action == 'enable':
+            user.status = UserStatus.ACTIVE
+        elif request.action == 'disable':
+            user.status = UserStatus.DISABLED
+        elif request.action == 'reset_traffic':
+            user.total_upload_bytes = 0
+            user.total_download_bytes = 0
+        
+        count += 1
+    
+    db.commit()
+    
+    return {"message": f"Action '{request.action}' performed on {count} users"}
+
+
+@router.get("/{user_id}/details")
+async def get_user_details(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Get detailed user profile including stats history (Admin only)
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    from ..models.user import ConnectionLog
+    
+    # Get last 5 connections
+    recent_connections = db.query(ConnectionLog).filter(
+        ConnectionLog.user_id == user_id
+    ).order_by(ConnectionLog.connected_at.desc()).limit(5).all()
+    
+    return {
+        "user": UserResponse.model_validate(user),
+        "recent_connections": recent_connections,
+        "stats": {
+            "total_traffic_gb": user.total_traffic_gb,
+            "avg_daily_usage_gb": 0, # Placeholder for now
+            "days_until_expiry": (user.expiry_date - datetime.utcnow()).days if user.expiry_date else None
+        }
+    }
+
+
+@router.get("/{user_id}/connections")
+async def get_user_connections(
+    user_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Get paginated connection logs for a user (Admin only)
+    """
+    from ..models.user import ConnectionLog
+    
+    query = db.query(ConnectionLog).filter(ConnectionLog.user_id == user_id).order_by(ConnectionLog.connected_at.desc())
+    
+    total = query.count()
+    offset = (page - 1) * page_size
+    logs = query.offset(offset).limit(page_size).all()
+    
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "logs": logs
+    }
