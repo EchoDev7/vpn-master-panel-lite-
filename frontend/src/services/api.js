@@ -116,6 +116,15 @@ class APIService {
     return this.client.post(`/users/${userId}/reset-traffic`);
   }
 
+  // Phase 4: Diagnostics
+  async getUserLogs(userId, lines = 100) {
+    return this.client.get(`/users/${userId}/logs`, { params: { lines } });
+  }
+
+  async killUserSession(userId) {
+    return this.client.post(`/users/${userId}/kill`);
+  }
+
   // Servers
   async getServers() {
     return this.client.get('/servers/');
