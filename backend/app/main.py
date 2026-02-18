@@ -303,6 +303,10 @@ app.include_router(diagnostics.router, prefix=f"{settings.API_V1_PREFIX}/diagnos
 app.include_router(notifications.router, prefix=f"{settings.API_V1_PREFIX}", tags=["Notifications"])
 app.include_router(activity.router, prefix=f"{settings.API_V1_PREFIX}", tags=["Activity"])
 
+# Real-time Connections
+from .api import connections
+app.include_router(connections.router, prefix=f"{settings.API_V1_PREFIX}/connections", tags=["Connections"])
+
 # Subscription Router (Public Access)
 app.include_router(subscription.router, prefix="/sub", tags=["Subscription"])
 
