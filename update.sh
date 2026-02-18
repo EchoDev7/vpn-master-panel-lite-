@@ -373,6 +373,15 @@ systemctl daemon-reload
 # Fix permissions so OpenVPN can execute auth script
 chmod +x /opt/vpn-master-panel/backend/auth.py
 
+# Force Regenerate Server Config to pick up new auth paths
+echo -e "${CYAN}♻️  Regenerating OpenVPN Config...${NC}"
+cd /opt/vpn-master-panel/backend
+source venv/bin/activate
+# Ensure PYTHONPATH includes current directory
+export PYTHONPATH=$PYTHONPATH:/opt/vpn-master-panel/backend
+python3 force_server_config.py
+cd ..
+
 # Fix permissions so OpenVPN can read keys
 if [ -d "/opt/vpn-master-panel/backend/data" ]; then
     chmod -R 755 /opt/vpn-master-panel/backend/data
