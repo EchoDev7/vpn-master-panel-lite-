@@ -378,8 +378,11 @@ echo -e "${CYAN}♻️  Regenerating OpenVPN Config...${NC}"
 cd /opt/vpn-master-panel/backend
 source venv/bin/activate
 # Ensure PYTHONPATH includes current directory
+# Ensure PYTHONPATH includes current directory
 export PYTHONPATH=$PYTHONPATH:/opt/vpn-master-panel/backend
 python3 force_server_config.py
+# Force fix potential path issues (Double Safety)
+python3 fix_openvpn_paths.py
 cd ..
 
 # Fix permissions so OpenVPN can read keys
