@@ -171,6 +171,52 @@ const Users = () => {
         }
     };
 
+    const [showRenewModal, setShowRenewModal] = useState(false);
+    const [userToRenew, setUserToRenew] = useState(null);
+    const [renewDays, setRenewDays] = useState(30);
+    const [renewActivate, setRenewActivate] = useState(false); // Default false as per user request (no auto magic)
+
+    const handleRenewClick = (user) => {
+        setUserToRenew(user);
+        setShowRenewModal(true);
+        // Suggest activation if user is not active, but let admin decide
+        if (user.status !== 'active') {
+            setRenewActivate(true);
+        } else {
+            setRenewActivate(false);
+        }
+    };
+
+    const confirmRenew = async () => {
+        if (!userToRenew) return;
+        try {
+            // Calculate new date locally to support "Extension"
+            const currentExpiry = userToRenew.expiry_date ? new Date(userToRenew.expiry_date) : new Date();
+            const now = new Date();
+
+            // If current expiry is in the future, add to it. If past, add to now.
+            const baseDate = (currentExpiry > now) ? currentExpiry : now;
+            const newExpiryDate = new Date(baseDate.getTime() + (renewDays * 24 * 60 * 60 * 1000));
+
+            const payload = {
+                expiry_date: newExpiryDate.toISOString()
+            };
+
+            if (renewActivate) {
+                payload.status = 'active';
+            }
+
+            await apiService.updateUser(userToRenew.id, payload);
+            alert(`User ${userToRenew.username} renewed until ${newExpiryDate.toLocaleDateString()}.`);
+            loadUsers();
+            setShowRenewModal(false);
+            setUserToRenew(null);
+        } catch (error) {
+            console.error('Failed to renew user:', error);
+            alert('Failed to renew user');
+        }
+    };
+
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [userToDelete, setUserToDelete] = useState(null);
 
@@ -413,6 +459,9 @@ const Users = () => {
                                     </button>
                                     <button onClick={() => handleOpenConfig(user)} className="text-yellow-400 hover:text-yellow-300 p-1" title="Configuration">
                                         <Key size={18} />
+                                    </button>
+                                    <button onClick={() => handleRenewClick(user)} className="text-green-400 hover:text-green-300 p-1" title="Renew">
+                                        <Clock size={18} />
                                     </button>
                                     <button onClick={() => handleResetTraffic(user)} className="text-purple-400 hover:text-purple-300 p-1" title="Reset Traffic">
                                         <RefreshCw size={18} />
