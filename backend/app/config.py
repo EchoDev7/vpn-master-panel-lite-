@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     GRAFANA_ENABLED: bool = False
     
     # VPN Service Paths
-    OPENVPN_CONFIG_DIR: str = "/etc/openvpn/server"
+    OPENVPN_CONFIG_DIR: str = "/etc/openvpn"
     WIREGUARD_CONFIG_DIR: str = "/etc/wireguard"
     L2TP_CONFIG_DIR: str = "/etc/xl2tpd"
     CISCO_CONFIG_DIR: str = "/etc/ocserv"
