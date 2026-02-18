@@ -96,3 +96,47 @@ export const TextareaField = ({ label, value, onChange, placeholder, tip, rows =
         />
     </div>
 );
+// Multi-Select Field (Chips + Dropdown)
+export const MultiSelectField = ({ label, value, onChange, options, separator = ":", tip, iranBadge }) => {
+    const selectedValues = value ? value.split(separator).filter(Boolean) : [];
+    const availableOptions = options.filter(o => !selectedValues.includes(o.value));
+
+    const handleAdd = (val) => {
+        if (!val) return;
+        const newValues = [...selectedValues, val];
+        onChange(newValues.join(separator));
+    };
+
+    const handleRemove = (val) => {
+        const newValues = selectedValues.filter(v => v !== val);
+        onChange(newValues.join(separator));
+    };
+
+    return (
+        <div className="mb-4">
+            <label className="block text-gray-400 text-sm mb-2">
+                {label}
+                {tip && <Tip text={tip} />}
+                {iranBadge && <IranBadge />}
+            </label>
+            <div className="bg-gray-700 border border-gray-600 rounded-lg p-2 min-h-[42px] flex flex-wrap gap-2">
+                {selectedValues.map(val => (
+                    <span key={val} className="bg-blue-600/30 text-blue-200 text-xs px-2 py-1 rounded flex items-center gap-1 border border-blue-600/50">
+                        {val}
+                        <button onClick={() => handleRemove(val)} className="hover:text-white text-blue-300 font-bold ml-1">×</button>
+                    </span>
+                ))}
+                <select
+                    className="bg-transparent text-gray-300 text-sm focus:outline-none flex-1 min-w-[120px]"
+                    onChange={(e) => { handleAdd(e.target.value); e.target.value = ''; }}
+                    value=""
+                >
+                    <option value="" disabled>+ Add...</option>
+                    {availableOptions.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                </select>
+            </div>
+        </div>
+    );
+};
