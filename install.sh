@@ -371,76 +371,62 @@ EOF
 }
 
 setup_pki() {
-    print_step "Initializing OpenVPN PKI (EasyRSA)"
+    print_step "Initializing OpenVPN PKI (OpenSSL)"
     
-    # Install easy-rsa if missing (should be installed by dependencies, but double check)
-    if [ ! -d "/usr/share/easy-rsa" ]; then
-        apt install -y easy-rsa > /dev/null 2>&1
-    fi
+    DATA_DIR="/opt/vpn-master-panel/backend/data/openvpn"
+    mkdir -p "$DATA_DIR"
+    
+    # Clean old keys (if any)
+    rm -f $DATA_DIR/ca.crt $DATA_DIR/ca.key
+    rm -f $DATA_DIR/server.crt $DATA_DIR/server.key $DATA_DIR/server.csr
+    rm -f $DATA_DIR/ta.key $DATA_DIR/dh.pem $DATA_DIR/server.ext
 
-    # Setup EasyRSA directory
-    rm -rf /opt/vpn-master-panel/easy-rsa
-    cp -r /usr/share/easy-rsa /opt/vpn-master-panel/easy-rsa
-    cd /opt/vpn-master-panel/easy-rsa
-    
-    # Initialize PKI
-    ./easyrsa init-pki
-    
-    # Build CA (Batch mode, no pass)
+    # Generate CA
     print_info "Generating CA..."
-    export EASYRSA_BATCH=1
-    export EASYRSA_REQ_CN="VPN-Master-Root-CA"
-    ./easyrsa build-ca nopass
-    
-    # Build Server Key/Cert
+    openssl req -new -x509 -days 3650 -nodes \
+        -out $DATA_DIR/ca.crt \
+        -keyout $DATA_DIR/ca.key \
+        -subj "/CN=VPN-Master-CA" 2>/dev/null
+
+    # Generate Server Key & CSR
     print_info "Generating Server Cert/Key..."
-    export EASYRSA_REQ_CN="server"
-    ./easyrsa build-server-full server nopass
+    openssl req -new -nodes \
+        -out $DATA_DIR/server.csr \
+        -keyout $DATA_DIR/server.key \
+        -subj "/CN=server" 2>/dev/null
+
+    # Create Extensions File (Critical for modern clients)
+    echo "basicConstraints=CA:FALSE" > $DATA_DIR/server.ext
+    echo "nsCertType=server" >> $DATA_DIR/server.ext
+    echo "keyUsage=digitalSignature,keyEncipherment" >> $DATA_DIR/server.ext
+    echo "extendedKeyUsage=serverAuth" >> $DATA_DIR/server.ext
+    echo "subjectKeyIdentifier=hash" >> $DATA_DIR/server.ext
+    echo "authorityKeyIdentifier=keyid,issuer" >> $DATA_DIR/server.ext
+
+    # Sign Server Cert
+    openssl x509 -req \
+        -in $DATA_DIR/server.csr \
+        -CA $DATA_DIR/ca.crt \
+        -CAkey $DATA_DIR/ca.key \
+        -CAcreateserial \
+        -out $DATA_DIR/server.crt \
+        -days 3650 \
+        -extfile $DATA_DIR/server.ext 2>/dev/null
+
+    # DH & TA
+    print_info "Generating DH & TA..."
+    openssl dhparam -out $DATA_DIR/dh.pem 2048 2>/dev/null
+    openvpn --genkey secret $DATA_DIR/ta.key
+
+    # Permissions
+    chmod 600 $DATA_DIR/server.key $DATA_DIR/ta.key $DATA_DIR/ca.key
+    chmod 644 $DATA_DIR/ca.crt $DATA_DIR/server.crt $DATA_DIR/dh.pem
     
-    # Verify Keys (Self-Healing)
-    KEY_MOD=$(openssl rsa -noout -modulus -in pki/private/server.key 2>/dev/null | openssl md5)
-    CERT_MOD=$(openssl x509 -noout -modulus -in pki/issued/server.crt 2>/dev/null | openssl md5)
-    
-    if [ "$KEY_MOD" != "$CERT_MOD" ]; then
-        print_error "Critical Error: Generated Key/Cert mismatch!"
-        print_warning "Retrying generation..."
-        # Retry once
-        rm -rf pki
-        ./easyrsa init-pki
-        ./easyrsa build-ca nopass
-        ./easyrsa build-server-full server nopass
-    fi
-    
-    # Force Remove Passphrase (Just in case)
-    openssl rsa -in pki/private/server.key -out pki/private/server.key.unsecure -passin pass: 2>/dev/null
-    if [ -f "pki/private/server.key.unsecure" ]; then
-        mv pki/private/server.key.unsecure pki/private/server.key
-    fi
-    
-    # Copy keys to backend data dir (so backend sees them)
-    mkdir -p /opt/vpn-master-panel/backend/data/openvpn
-    cp -f pki/ca.crt /opt/vpn-master-panel/backend/data/openvpn/
-    cp -f pki/issued/server.crt /opt/vpn-master-panel/backend/data/openvpn/
-    cp -f pki/private/server.key /opt/vpn-master-panel/backend/data/openvpn/
+    # Cleanup CSR
+    rm -f $DATA_DIR/server.csr $DATA_DIR/server.ext
     
     # Copy keys to /etc/openvpn (for the service)
     mkdir -p /etc/openvpn
-    cp -f pki/ca.crt /etc/openvpn/
-    cp -f pki/issued/server.crt /etc/openvpn/
-    cp -f pki/private/server.key /etc/openvpn/
-    
-    # Fix Permissions
-    chmod 644 /opt/vpn-master-panel/backend/data/openvpn/server.crt
-    chmod 600 /opt/vpn-master-panel/backend/data/openvpn/server.key
-    chmod 644 /etc/openvpn/server.crt
-    chmod 600 /etc/openvpn/server.key
-    
-    # Generate TLS Auth Key (Official OpenVPN method)
-    print_info "Generating TLS Auth Key..."
-    openvpn --genkey --secret /opt/vpn-master-panel/backend/data/openvpn/ta.key
-    cp /opt/vpn-master-panel/backend/data/openvpn/ta.key /etc/openvpn/ta.key
-    chmod 600 /etc/openvpn/ta.key
-    
     print_success "PKI Initialized (Standard EasyRSA)"
 }
 
