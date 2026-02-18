@@ -53,6 +53,7 @@ class User(Base):
     # Limits
     data_limit_gb = Column(Float, default=0)  # 0 = unlimited
     connection_limit = Column(Integer, default=1)
+    speed_limit_mbps = Column(Float, default=0) # F7 Bandwidth Shaping
     expiry_date = Column(DateTime(timezone=True))
     
     # Usage Tracking
