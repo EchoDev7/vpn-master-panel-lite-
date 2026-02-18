@@ -74,13 +74,21 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(start_heartbeat())
         logger.info("✅ WebSocket heartbeat started")
 
-        # Start Traffic Monitor (User Management 2.0)
+    # Start Traffic Monitor (User Management 2.0)
         try:
             from .services.monitoring import traffic_monitor
             asyncio.create_task(traffic_monitor.start())
             logger.info("✅ Traffic Monitor started")
         except Exception as e:
             logger.error(f"❌ Traffic Monitor failed to start: {e}")
+
+        # Start Scheduler Service
+        try:
+            from .services.scheduler import scheduler_service
+            asyncio.create_task(scheduler_service.start())
+            logger.info("✅ Scheduler Service started")
+        except Exception as e:
+            logger.error(f"❌ Scheduler Service failed to start: {e}")
         
         # Initialize Telegram bot (if configured)
         try:
@@ -103,6 +111,14 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down VPN Master Panel...")
+
+    # Stop Scheduler
+    try:
+        from .services.scheduler import scheduler_service
+        await scheduler_service.stop()
+        logger.info("✅ Scheduler Service stopped")
+    except Exception as e:
+        logger.warning(f"⚠️  Scheduler stop failed: {e}")
 
     # Stop Traffic Monitor
     try:
@@ -236,11 +252,12 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     """WebSocket endpoint for real-time updates"""
     from .websocket.manager import manager
     from .websocket.handlers import WebSocketHandler
-    from .utils.security import decode_access_token
+    from .websocket.handlers import WebSocketHandler
+    from .utils.security import decode_token
     
     try:
         # Verify token
-        payload = decode_access_token(token)
+        payload = decode_token(token)
         if not payload:
             await websocket.close(code=1008, reason="Invalid token")
             return
