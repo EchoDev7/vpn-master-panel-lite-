@@ -327,13 +327,21 @@ if [ ! -c /dev/net/tun ]; then
     chmod 600 /dev/net/tun
 fi
 
+# Deploy Auth Script to standard location (Fixes permissions issues)
+mkdir -p /etc/openvpn/scripts
+cp /opt/vpn-master-panel/backend/auth.py /etc/openvpn/scripts/auth.py
+chmod 755 /etc/openvpn/scripts/auth.py
+chown root:root /etc/openvpn/scripts/auth.py
+
 # Fix AppArmor (Allow OpenVPN to read keys in /opt and EXECUTE auth script)
 if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
     echo -e "${CYAN}🛡️  Updating AppArmor Profile...${NC}"
+    # Check if we already added our rules
+    if ! grep -q "/etc/openvpn/scripts/auth.py" /etc/apparmor.d/usr.sbin.openvpn; then
         # Append rule to allow read access & UNCONFINED execution (Ux) to avoid any restriction
         sed -i '/}/d' /etc/apparmor.d/usr.sbin.openvpn
         echo "  /opt/vpn-master-panel/backend/data/** r," >> /etc/apparmor.d/usr.sbin.openvpn
-        echo "  /opt/vpn-master-panel/backend/auth.py Ux," >> /etc/apparmor.d/usr.sbin.openvpn
+        echo "  /etc/openvpn/scripts/auth.py Ux," >> /etc/apparmor.d/usr.sbin.openvpn
         echo "  /opt/vpn-master-panel/backend/** r," >> /etc/apparmor.d/usr.sbin.openvpn
         echo "}" >> /etc/apparmor.d/usr.sbin.openvpn
         
