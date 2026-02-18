@@ -10,10 +10,10 @@ from passlib.context import CryptContext
 logging.basicConfig(filename='/var/log/openvpn/auth.log', level=logging.INFO, format='%(asctime)s %(message)s')
 
 # Database Setup
-DB_PATH = "/opt/vpn-master-panel/backend/data/vpn.db"
+DB_PATH = "/opt/vpn-master-panel/backend/vpnmaster_lite.db"
 # Fallback for dev environment
 if not os.path.exists(DB_PATH):
-    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'vpn.db')
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'vpnmaster_lite.db')
 
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
@@ -45,11 +45,22 @@ def auth_user(username, password):
             return False
             
         if expiry:
-             # Simple expiry check (SQLite stores datetime as string usually, but SQLAlchemy converts)
-             # In raw SQL with SQLite, it might be a string. 
-             # Let's rely on the fact that if it's expired, the status should have been updated by the monitor.
-             # But for safety, we can check.
-             pass
+             from datetime import datetime
+             # Handle various date formats from SQLite
+             exp_dt = None
+             if isinstance(expiry, str):
+                 for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                     try:
+                         exp_dt = datetime.strptime(expiry, fmt)
+                         break
+                     except ValueError:
+                         continue
+             else:
+                 exp_dt = expiry
+
+             if exp_dt and exp_dt < datetime.utcnow():
+                 logging.warning(f"AUTH_FAILED: User {username} expired at {exp_dt}")
+                 return False
 
         if verify_password(password, hashed_pw):
             logging.info(f"AUTH_SUCCESS: User {username}")
