@@ -73,6 +73,14 @@ async def lifespan(app: FastAPI):
         from .websocket.manager import start_heartbeat
         asyncio.create_task(start_heartbeat())
         logger.info("✅ WebSocket heartbeat started")
+
+        # Start Traffic Monitor (User Management 2.0)
+        try:
+            from .services.monitoring import traffic_monitor
+            asyncio.create_task(traffic_monitor.start())
+            logger.info("✅ Traffic Monitor started")
+        except Exception as e:
+            logger.error(f"❌ Traffic Monitor failed to start: {e}")
         
         # Initialize Telegram bot (if configured)
         try:
@@ -95,6 +103,14 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down VPN Master Panel...")
+
+    # Stop Traffic Monitor
+    try:
+        from .services.monitoring import traffic_monitor
+        await traffic_monitor.stop()
+        logger.info("✅ Traffic Monitor stopped")
+    except Exception as e:
+        logger.warning(f"⚠️  Traffic Monitor shutdown failed: {e}")
     
     # Shutdown telegram bot
     try:
