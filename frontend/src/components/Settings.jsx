@@ -445,6 +445,28 @@ const Settings = () => {
                 "red"
             )} className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-400 px-4 py-3 rounded-lg text-sm font-medium border border-red-600/30 transition-colors">🔄 Regenerate All Certificates</button>
             <p className="text-xs text-gray-500">Warning: Regenerating invalidates all existing client configs.</p>
+
+            <div className="mt-6 pt-6 border-t border-gray-700">
+                <button onClick={() => confirmAction(
+                    "Generate Configuration",
+                    "Generate server.conf based on current settings?",
+                    async () => {
+                        try {
+                            const res = await apiService.applyServerConfig();
+                            const d = res.data;
+                            if (d.system_written) {
+                                showToast(`Written to: ${d.system_path}`, "success");
+                            } else {
+                                showToast(`Saved to: ${d.backup_path}`, "success");
+                            }
+                        } catch { showToast("Failed to generate config", "error"); }
+                    },
+                    "Generate & Apply",
+                    "orange"
+                )} className="w-full bg-orange-600 hover:bg-orange-700 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors">
+                    <Server className="w-4 h-4" /> Generate & Apply Config (After Regeneration)
+                </button>
+            </div>
         </div>
     );
 
