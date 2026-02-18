@@ -251,6 +251,10 @@ class APIService {
     return this.client.get('/diagnostics/live-logs', { params: { lines } });
   }
 
+  async restartService(serviceName) {
+    return this.client.post(`/diagnostics/restart/${serviceName}`);
+  }
+
   // Generic methods
   async get(url, config = {}) {
     return this.client.get(url, config);
