@@ -80,11 +80,12 @@ const Settings = () => {
     const [wgStatus, setWgStatus] = useState(null);
     const [wgObfsScript, setWgObfsScript] = useState(null);
     const [showWgObfsScript, setShowWgObfsScript] = useState(false);
+    const [ovpnVersion, setOvpnVersion] = useState(null);
 
     const [confirmation, setConfirmation] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, confirmText: 'Confirm', confirmColor: 'blue' });
     const [toast, setToast] = useState(null); // { message, type }
 
-    useEffect(() => { loadSettings(); }, []);
+    useEffect(() => { loadSettings(); loadVersions(); }, []);
 
     const loadSettings = async () => {
         try {
@@ -95,6 +96,13 @@ const Settings = () => {
         } finally {
             setLoading(false);
         }
+    };
+
+    const loadVersions = async () => {
+        try {
+            const res = await apiService.getOpenVPNVersion();
+            setOvpnVersion(res.data.version);
+        } catch (e) { console.error(e); }
     };
 
     const handleChange = useCallback((key, value) => {
@@ -158,6 +166,7 @@ const Settings = () => {
             <div className="grid grid-cols-2 gap-4">
                 <S_Check {...sp} settingKey="ovpn_float" label="Allow IP Change (Float)" tip="Essential for mobile users." />
                 <S_Check {...sp} settingKey="ovpn_duplicate_cn" label="Allow Multiple Devices" tip="Same user from multiple devices." />
+                <S_Check {...sp} settingKey="ovpn_explicit_exit_notify" label="Explicit Exit Notify" tip="Notify server on disconnect (UDP only). Faster reconnection." />
             </div>
         </div>
     );
@@ -190,7 +199,15 @@ const Settings = () => {
             </div>
             <S_Input {...sp} settingKey="ovpn_tls_ciphers" label="TLS 1.2 Cipher Suites" placeholder="TLS-ECDHE-..." mono />
             <S_Input {...sp} settingKey="ovpn_tls_cipher_suites" label="TLS 1.3 Cipher Suites" placeholder="TLS_AES_256_GCM_SHA384:..." mono />
-            <S_Input {...sp} settingKey="ovpn_reneg_sec" label="Renegotiation Interval (sec)" placeholder="3600" type="number" />
+            <div className="grid grid-cols-2 gap-4">
+                <S_Input {...sp} settingKey="ovpn_ecdh_curve" label="ECDH Curve" placeholder="secp384r1" tip="Elliptic curve for key exchange." />
+                <S_Input {...sp} settingKey="ovpn_reneg_sec" label="Renegotiation Interval (sec)" placeholder="3600" type="number" />
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+                <S_Input {...sp} settingKey="ovpn_tls_timeout" label="TLS Timeout" placeholder="2" type="number" />
+                <S_Input {...sp} settingKey="ovpn_hand_window" label="Handshake Window" placeholder="60" type="number" />
+                <S_Input {...sp} settingKey="ovpn_tran_window" label="Transition Window" placeholder="3600" type="number" />
+            </div>
         </div>
     );
 
@@ -255,6 +272,9 @@ const Settings = () => {
             <SectionTitle>DNS Settings</SectionTitle>
             <S_Input {...sp} settingKey="ovpn_dns" label="DNS Servers (comma-separated)" placeholder="1.1.1.1, 8.8.8.8" />
             <S_Check {...sp} settingKey="ovpn_block_outside_dns" label="Block Outside DNS (Prevent DNS Leaks)" iranBadge tip="Prevents DNS leaks to ISP." />
+            <SectionTitle>Push Routes</SectionTitle>
+            <S_Textarea {...sp} settingKey="ovpn_push_routes" label="Push Routes" placeholder={"192.168.1.0 255.255.255.0\n10.0.0.0 255.0.0.0"} tip="One route per line (Network Netmask). Pushed to client." rows={3} />
+            <S_Textarea {...sp} settingKey="ovpn_push_remove_routes" label="Remove Routes" placeholder={"0.0.0.0/0"} tip="Remove specific routes from client." rows={2} />
         </div>
     );
 
@@ -279,11 +299,12 @@ const Settings = () => {
                     { value: '4', label: '4 — Debug' },
                     { value: '6', label: '6 — Verbose' },
                 ]} />
-                <S_Select {...sp} settingKey="ovpn_compression" label="Compression" tip="Disabled is recommended for stealth." options={[
-                    { value: 'none', label: 'Disabled (Recommended)' },
-                    { value: 'lz4-v2', label: 'LZ4-v2' },
-                    { value: 'lzo', label: 'LZO' },
+                <S_Select {...sp} settingKey="ovpn_compress" label="Compression" tip="Disabled is recommended for stealth (VORACLE attack)." options={[
+                    { value: '', label: 'Disabled (Recommended)' },
+                    { value: 'lz4-v2', label: 'LZ4-v2 (New)' },
+                    { value: 'lzo', label: 'LZO (Legacy)' },
                 ]} />
+                <S_Check {...sp} settingKey="ovpn_allow_compression" label="Allow Compression (Asym)" tip="Allow clients to use compression even if pushed no." />
             </div>
         </div>
     );
@@ -293,6 +314,17 @@ const Settings = () => {
             <SectionTitle>Custom OpenVPN Directives</SectionTitle>
             <S_Textarea {...sp} settingKey="ovpn_custom_client_config" label="Client Config Directives" placeholder={"# Additional directives for .ovpn files"} tip="Raw directives added to client configs." rows={4} />
             <S_Textarea {...sp} settingKey="ovpn_custom_server_config" label="Server Config Directives" placeholder={"# Additional directives for server.conf"} tip="Raw directives for server config." rows={4} />
+            <SectionTitle>Daemon Management</SectionTitle>
+            <div className="grid grid-cols-2 gap-4">
+                <S_Input {...sp} settingKey="ovpn_management" label="Management Interface" placeholder="127.0.0.1 7505" tip="IP Port for telnet management." />
+                <S_Input {...sp} settingKey="ovpn_status_log" label="Status Log Path" placeholder="/var/log/openvpn/openvpn-status.log" />
+            </div>
+            <div className="grid grid-cols-4 gap-4">
+                <S_Input {...sp} settingKey="ovpn_user" label="User" placeholder="nobody" />
+                <S_Input {...sp} settingKey="ovpn_group" label="Group" placeholder="nogroup" />
+                <S_Check {...sp} settingKey="ovpn_pers_tun" label="Persist Tun" />
+                <S_Check {...sp} settingKey="ovpn_pers_key" label="Persist Key" />
+            </div>
             <SectionTitle>Server Configuration</SectionTitle>
             <div className="flex gap-3">
                 <button onClick={async () => {
@@ -694,7 +726,12 @@ const Settings = () => {
             {/* Protocol Selector */}
             <div className="flex gap-3 mb-6">
                 <button onClick={() => switchProtocol('openvpn')} className={`flex items-center gap-2.5 px-5 py-3 rounded-xl text-sm font-semibold transition-all border-2 ${protocol === 'openvpn' ? 'border-orange-500 bg-orange-500/15 text-orange-300 shadow-lg shadow-orange-500/10' : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600'}`}>
-                    <OpenVPNLogo /> OpenVPN
+                    <div className="text-left">
+                        <div className="flex items-center gap-2">
+                            <OpenVPNLogo /> OpenVPN
+                        </div>
+                        {ovpnVersion && <div className="text-[10px] font-mono text-orange-400/80 mt-1 ml-9">{ovpnVersion}</div>}
+                    </div>
                 </button>
                 <button onClick={() => switchProtocol('wireguard')} className={`flex items-center gap-2.5 px-5 py-3 rounded-xl text-sm font-semibold transition-all border-2 ${protocol === 'wireguard' ? 'border-teal-500 bg-teal-500/15 text-teal-300 shadow-lg shadow-teal-500/10' : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600'}`}>
                     <WireGuardLogo /> WireGuard
