@@ -197,6 +197,7 @@ const Settings = () => {
         { value: 'CHACHA20-POLY1305', label: 'CHACHA20-POLY1305 (Mobile Friendly)' },
         { value: 'AES-256-CBC', label: 'AES-256-CBC (Legacy)' },
         { value: 'AES-128-CBC', label: 'AES-128-CBC (Legacy)' },
+        { value: 'none', label: 'none (No Encryption - Dangerous!)' },
     ];
 
     const TLS12_CIPHERS = [
@@ -242,6 +243,7 @@ const Settings = () => {
                     { value: 'SHA256', label: 'SHA256 (Recommended)' },
                     { value: 'SHA384', label: 'SHA384' },
                     { value: 'SHA512', label: 'SHA512 (Strongest)' },
+                    { value: 'none', label: 'none (No Auth - Dangerous!)' },
                 ]} />
                 <S_Select {...sp} settingKey="ovpn_tls_version_min" label="Minimum TLS Version" options={[
                     { value: '1.2', label: 'TLS 1.2 (Recommended)' },
