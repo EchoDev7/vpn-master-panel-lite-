@@ -116,6 +116,10 @@ class APIService {
     return this.client.post(`/users/${userId}/reset-traffic`);
   }
 
+  async regenerateToken(userId) {
+    return this.client.post(`/users/${userId}/regenerate-token`);
+  }
+
   // Phase 4: Diagnostics
   async getUserLogs(userId, lines = 100) {
     return this.client.get(`/users/${userId}/logs`, { params: { lines } });
