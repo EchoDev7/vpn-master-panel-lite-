@@ -500,16 +500,16 @@ async def get_subscription_page(token: str, db: Session = Depends(get_db)):
                     </div>
                     {f'''
                     <div class="cred-box">
-                        <span class="cred-key">L2TP Secret</span>
+                        <span class="cred-key">IPsec PSK</span>
                         <span class="cred-val">{settings.L2TP_PSK}</span>
                     </div>
-                    ''' if user.l2tp_enabled else ''}
+                    ''' if user.l2tp_enabled or user.cisco_enabled else ''}
                     {f'''
                     <div class="cred-box">
-                        <span class="cred-key">L2TP Password</span>
+                        <span class="cred-key">VPN Password</span>
                         <span class="cred-val">{user.username if not user.l2tp_password else user.l2tp_password}</span>
                     </div>
-                    ''' if user.l2tp_enabled else ''}
+                    ''' if user.l2tp_enabled or user.cisco_enabled else ''}
                     <div style="font-size:12px; color:var(--text-muted); text-align:center; margin-top:10px;">
                         Use your account password for OpenVPN / SSH
                     </div>
