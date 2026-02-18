@@ -286,4 +286,3 @@ class TrafficMonitor:
             pass
 
 traffic_monitor = TrafficMonitor()
-```
