@@ -292,10 +292,17 @@ class OpenVPNService:
 
         if auth_mode == "password":
             # Use custom python script for DB auth instead of PAM
-            auth_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "auth.py")
-            if os.path.exists(auth_script):
+            # The script is now deployed to /etc/openvpn/scripts/auth.py by update.sh
+            auth_script = "/etc/openvpn/scripts/auth.py"
+            
+            # Check either location (dev fallback)
+            dev_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "auth.py")
+            
+            script_to_use = auth_script if os.path.exists(auth_script) else dev_script
+
+            if os.path.exists(script_to_use):
                 conf.append("script-security 3")
-                conf.append(f"auth-user-pass-verify {auth_script} via-file")
+                conf.append(f"auth-user-pass-verify {script_to_use} via-file")
                 conf.append("username-as-common-name")
                 conf.append("verify-client-cert none")
             elif pam_plugin:
