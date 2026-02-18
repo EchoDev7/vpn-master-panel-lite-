@@ -203,6 +203,7 @@ async def create_user(
     # Auto-Provisioning Pipeline (F5 - User Requested)
     try:
         import asyncio
+        from ..services.users import _provision_new_user
         asyncio.create_task(_provision_new_user(new_user.id))
     except Exception as e:
         # Don't fail the request if async task logic has issues (e.g. event loop)
@@ -210,103 +211,7 @@ async def create_user(
 
     return new_user
 
-async def _provision_new_user(user_id: int):
-    """Auto-provision after user creation (F5)"""
-    from ..database import get_db_context
-    from ..services.openvpn import openvpn_service
-    from ..services.wireguard import wireguard_service
-    # Service implementation for email/telegram isn't fully provided in prompt, 
-    # but we add the structure as requested.
-    
-    # Placeholder for Email/Telegram services if they don't exist yet
-    # We will just log for now to avoid ImportErrors if files missing
-    import logging
-    logger = logging.getLogger(__name__)
 
-    with get_db_context() as db:
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            return
-
-        # 1. Reload WireGuard to add new peer
-        try:
-            if user.wireguard_public_key:
-                # Assuming add_peer method exists or we use sync implementation
-                # wireguard_service.add_peer(...) 
-                # For now, we trigger a config regeneration which is safer
-                wireguard_service.generate_server_config()
-                # If we had a hot-reload method:
-                # wireguard_service.sync_conf() 
-        except Exception as e:
-            logger.error(f"WireGuard provision failed: {e}")
-
-        # 2. Send welcome email (Placeholder)
-        try:
-            if user.email:
-                # ovpn_config = openvpn_service.generate_client_config(user.username)
-                # await email_service.send_welcome_email(...)
-                logger.info(f"F5: Should send welcome email to {user.email}")
-        except Exception as e:
-            logger.error(f"Welcome email failed: {e}")
-
-        # 3. Notify admin via Telegram (Placeholder)
-        try:
-             # await telegram_service.notify_admins(...)
-             logger.info(f"F5: Should notify admin about {user.username}")
-        except Exception as e:
-            logger.error(f"Telegram notify failed: {e}")
-    db.refresh(new_user)
-    
-    # Log activity
-    log_activity(
-        db=db,
-        type="user_created",
-        description=f"User {new_user.username} created by {current_admin.username}",
-        user_id=current_admin.id,
-        ip_address=request.client.host if request.client else None,
-        metadata={"new_user_id": new_user.id}
-    )
-    
-    # Send email notification (async, non-blocking)
-    if new_user.email:
-        try:
-            from ..services.email import email_service
-            import asyncio
-            asyncio.create_task(
-                email_service.send_user_created_email(
-                    user_email=new_user.email,
-                    username=new_user.username,
-                    password=user_data.password  # Send original password
-                )
-            )
-        except Exception as e:
-            logger.warning(f"Failed to send welcome email: {e}")
-    
-    # Send WebSocket notification to admins
-    try:
-        from ..websocket.handlers import WebSocketEvents
-        import asyncio
-        asyncio.create_task(
-            WebSocketEvents.emit_user_created({
-                "id": new_user.id,
-                "username": new_user.username,
-                "email": new_user.email,
-                "role": new_user.role.value
-            })
-        )
-    except Exception as e:
-        logger.warning(f"Failed to send WebSocket notification: {e}")
-    
-    # Create notification
-    create_notification(
-        db=db,
-        type="success",
-        title="New User Created",
-        message=f"User '{new_user.username}' was successfully created",
-        user_id=None  # System-wide notification
-    )
-    
-    return new_user
 
 
 @router.get("/", response_model=UserListResponse)
