@@ -264,11 +264,35 @@ class OpenVPNService:
             if route.strip():
                 conf.append(f'push "route {route.strip()}"')
 
-        # --- Client Auth Plugin ---
+        # --- Authentication ---
         conf.append("\n# --- Authentication ---")
-        conf.append("plugin /usr/lib/openvpn/plugins/openvpn-plugin-auth-pam.so login")
-        conf.append("username-as-common-name")
-        conf.append("verify-client-cert none") # Password only
+        
+        # Resolve Authentication Mode
+        # options: 'password' (default), 'cert', '2fa'
+        auth_mode = s.get("auth_mode", "password")
+        
+        pam_plugin = self._find_pam_plugin()
+        if not pam_plugin and auth_mode in ["password", "2fa"]:
+             logger.error("PAM Plugin not found! Falling back to Certificate Authentication.")
+             auth_mode = "cert"
+
+        if auth_mode == "password":
+            if pam_plugin:
+                conf.append(f"plugin {pam_plugin} login")
+                conf.append("username-as-common-name")
+                conf.append("verify-client-cert none") # Password only (insecure without good CA, but standard for some VPN panels)
+            else:
+                conf.append("# PAM Plugin missing - Fallback to Cert Only")
+                conf.append("verify-client-cert require")
+                
+        elif auth_mode == "2fa":
+            # Cert + Password
+            if pam_plugin:
+                conf.append(f"plugin {pam_plugin} login")
+            conf.append("verify-client-cert require")
+            
+        else: # cert or none
+            conf.append("verify-client-cert require")
 
         # --- Custom Config ---
         custom = s.get("custom_server_config")
@@ -448,5 +472,23 @@ class OpenVPNService:
          # The user wants "Official Docs", which implies easy-rsa script usage.
          logger.info("PKI Regeneration requested via API.")
          pass 
+
+    def _find_pam_plugin(self) -> Optional[str]:
+        """Locate openvpn-plugin-auth-pam.so in common paths"""
+        candidates = [
+            "/usr/lib/openvpn/plugins/openvpn-plugin-auth-pam.so",
+            "/usr/lib/x86_64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so",
+            "/usr/lib64/openvpn/plugins/openvpn-plugin-auth-pam.so",
+            "/usr/local/lib/openvpn/plugins/openvpn-plugin-auth-pam.so",
+            "/usr/lib/openvpn/openvpn-plugin-auth-pam.so"
+        ]
+        
+        # Check environment override first if implemented (future)
+        # Check filesystem
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        
+        return None
 
 openvpn_service = OpenVPNService()
