@@ -102,6 +102,7 @@ class UserResponse(BaseModel):
     created_at: datetime
     last_connection: Optional[datetime] = None
     is_online: Optional[bool] = False
+    subscription_token: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -176,6 +177,10 @@ async def create_user(
         cisco_enabled=user_data.cisco_enabled,
         created_by=current_admin.id
     )
+
+    # Generate subscription token
+    import secrets
+    new_user.subscription_token = secrets.token_urlsafe(16)
     
     # Generate WireGuard keys if enabled
     if user_data.wireguard_enabled:
@@ -434,6 +439,27 @@ async def reset_user_traffic(
     user.total_upload_bytes = 0
     user.total_download_bytes = 0
     
+    db.commit()
+    db.refresh(user)
+    
+    return user
+
+
+@router.post("/{user_id}/regenerate-token", response_model=UserResponse)
+async def regenerate_token(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Regenerate subscription token for user (Admin only)
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    import secrets
+    user.subscription_token = secrets.token_urlsafe(16)
     db.commit()
     db.refresh(user)
     
