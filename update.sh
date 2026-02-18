@@ -378,11 +378,13 @@ fi
 # User Request: strictly copy to /etc/openvpn/scripts/auth.py and chmod 755
 mkdir -p /etc/openvpn/scripts
 cp /opt/vpn-master-panel/backend/auth.py /etc/openvpn/scripts/auth.py
+cp /opt/vpn-master-panel/backend/scripts/auth.sh /etc/openvpn/scripts/
 cp /opt/vpn-master-panel/backend/scripts/client-connect.sh /etc/openvpn/scripts/
 cp /opt/vpn-master-panel/backend/scripts/client-disconnect.sh /etc/openvpn/scripts/
 cp /opt/vpn-master-panel/backend/scripts/get_speed_limit.py /etc/openvpn/scripts/
 
 chmod 755 /etc/openvpn/scripts/auth.py
+chmod 755 /etc/openvpn/scripts/auth.sh
 chmod 755 /etc/openvpn/scripts/client-connect.sh
 chmod 755 /etc/openvpn/scripts/client-disconnect.sh
 chmod 755 /etc/openvpn/scripts/get_speed_limit.py
@@ -392,11 +394,13 @@ chown root:root /etc/openvpn/scripts/*
 if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
     echo -e "${CYAN}🛡️  Updating AppArmor Profile...${NC}"
     # Check if we already added our rules
-    if ! grep -q "/etc/openvpn/scripts/auth.py" /etc/apparmor.d/usr.sbin.openvpn; then
+    # We need to allow executing the wrapper AND the python script
+    if ! grep -q "/etc/openvpn/scripts/auth.sh" /etc/apparmor.d/usr.sbin.openvpn; then
         # Append rule to allow read access & UNCONFINED execution (Ux) to avoid any restriction
         sed -i '/}/d' /etc/apparmor.d/usr.sbin.openvpn
         echo "  /opt/vpn-master-panel/backend/data/** r," >> /etc/apparmor.d/usr.sbin.openvpn
-        echo "  /etc/openvpn/scripts/auth.py Ux," >> /etc/apparmor.d/usr.sbin.openvpn
+        echo "  /etc/openvpn/scripts/auth.py r," >> /etc/apparmor.d/usr.sbin.openvpn
+        echo "  /etc/openvpn/scripts/auth.sh Ux," >> /etc/apparmor.d/usr.sbin.openvpn
         echo "  /opt/vpn-master-panel/backend/** r," >> /etc/apparmor.d/usr.sbin.openvpn
         echo "}" >> /etc/apparmor.d/usr.sbin.openvpn
         
@@ -440,8 +444,10 @@ chmod +x /opt/vpn-master-panel/backend/auth.py
 SERVER_CONF="/etc/openvpn/server.conf"
 if [ -f "$SERVER_CONF" ]; then
     echo -e "${CYAN}🔧 Patching server.conf paths...${NC}"
-    # Replace /opt/.../auth.py with /etc/openvpn/scripts/auth.py
-    sed -i 's|/opt/vpn-master-panel/backend/auth.py|/etc/openvpn/scripts/auth.py|g' "$SERVER_CONF"
+    # Replace auth.py with auth.sh (Wrapper)
+    # First revert any direct auth.py ref to be sure we match
+    sed -i 's|/opt/vpn-master-panel/backend/auth.py|/etc/openvpn/scripts/auth.sh|g' "$SERVER_CONF"
+    sed -i 's|/etc/openvpn/scripts/auth.py|/etc/openvpn/scripts/auth.sh|g' "$SERVER_CONF"
     # Ensure Verify Client Cert is handled if missing (optional safety)
 fi
 cd ..
