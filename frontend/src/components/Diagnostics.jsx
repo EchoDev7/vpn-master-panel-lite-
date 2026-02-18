@@ -6,11 +6,14 @@ export default function Diagnostics() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [showLiveLogs, setShowLiveLogs] = useState(false);
+    const [liveLogs, setLiveLogs] = useState({ openvpn: [], auth: [] });
     const [lastUpdated, setLastUpdated] = useState(null);
 
     const fetchDiagnostics = async () => {
         try {
-            setLoading(true);
+            // Only set loading on first load to avoid flickering
+            if (!data) setLoading(true);
             const response = await apiService.getFullDiagnostics();
             setData(response.data);
             setLastUpdated(new Date());
@@ -32,6 +35,23 @@ export default function Diagnostics() {
         const interval = setInterval(fetchDiagnostics, 10000); // Auto-refresh every 10s
         return () => clearInterval(interval);
     }, []);
+
+    useEffect(() => {
+        let interval;
+        if (showLiveLogs) {
+            const fetchLive = async () => {
+                try {
+                    const res = await apiService.getLiveLogs(50);
+                    setLiveLogs(res.data);
+                } catch (e) {
+                    console.error("Live logs error", e);
+                }
+            };
+            fetchLive();
+            interval = setInterval(fetchLive, 2000);
+        }
+        return () => clearInterval(interval);
+    }, [showLiveLogs]);
 
     if (loading && !data) {
         return (
@@ -70,7 +90,13 @@ export default function Diagnostics() {
                     <p className="text-gray-400 mt-1">Ultimate System Diagnostics & Health Report</p>
                 </div>
                 <div className="flex items-center gap-4">
-                    <span className="text-sm text-gray-400 font-mono">
+                    <button
+                        onClick={() => setShowLiveLogs(!showLiveLogs)}
+                        className={`hidden md:flex px-4 py-2 rounded-lg font-bold items-center gap-2 transition-all ${showLiveLogs ? 'bg-red-600/20 text-red-400 border border-red-500 animate-pulse' : 'bg-gray-700 hover:bg-gray-600 text-white'}`}
+                    >
+                        {showLiveLogs ? <span className="flex items-center gap-2"><div className="w-2 h-2 bg-red-500 rounded-full animate-ping"></div> Stop Live Monitor</span> : <span className="flex items-center gap-2"><Terminal className="w-4 h-4" /> Live Debugger</span>}
+                    </button>
+                    <span className="text-sm text-gray-400 font-mono hidden md:block">
                         {lastUpdated ? `Report Time: ${lastUpdated.toLocaleTimeString()}` : ''}
                     </span>
                     <button
@@ -81,6 +107,32 @@ export default function Diagnostics() {
                     </button>
                 </div>
             </div>
+
+            {/* Live Logs Section */}
+            {showLiveLogs && (
+                <div className="bg-black rounded-xl border-2 border-cyan-500/50 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
+                    <div className="bg-gray-900/80 p-4 border-b border-gray-800 flex justify-between items-center">
+                        <h3 className="text-cyan-400 font-bold flex items-center gap-2 animate-pulse">
+                            <Activity className="w-5 h-5" /> Live Connection Monitor (Real-time)
+                        </h3>
+                        <span className="text-xs text-gray-500 font-mono">Auto-refreshing every 2s</span>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-800 h-96">
+                        <div className="flex flex-col">
+                            <div className="p-2 bg-gray-900/50 text-xs font-bold text-gray-400 border-b border-gray-800">System Logs (OpenVPN Service)</div>
+                            <div className="flex-1 p-4 overflow-y-auto font-mono text-xs text-green-400/90 whitespace-pre-wrap">
+                                {liveLogs.openvpn?.join('\n') || "Waiting for logs..."}
+                            </div>
+                        </div>
+                        <div className="flex flex-col">
+                            <div className="p-2 bg-gray-900/50 text-xs font-bold text-gray-400 border-b border-gray-800">Authentication Logs (User Auth)</div>
+                            <div className="flex-1 p-4 overflow-y-auto font-mono text-xs text-yellow-400/90 whitespace-pre-wrap">
+                                {liveLogs.auth?.join('\n') || "No authentication attempts recorded yet."}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* 1. System & OS Resources */}
             <div className="bg-gray-800/50 p-6 rounded-xl border border-gray-700 backdrop-blur-sm">
@@ -180,7 +232,7 @@ export default function Diagnostics() {
                         <div key={svc.name} className="flex items-center justify-between bg-gray-900/30 p-3 rounded border border-gray-700">
                             <span className="text-gray-300 text-sm">{svc.name}</span>
                             <span className={`px-2 py-0.5 rounded text-xs font-bold ${svc.status === 'Running' ? 'bg-green-900/50 text-green-400' :
-                                    svc.status === 'Failed' ? 'bg-red-900/50 text-red-400' : 'bg-yellow-900/50 text-yellow-400'
+                                svc.status === 'Failed' ? 'bg-red-900/50 text-red-400' : 'bg-yellow-900/50 text-yellow-400'
                                 }`}>
                                 {svc.status.toUpperCase()}
                             </span>
@@ -364,9 +416,9 @@ export default function Diagnostics() {
                         <div className="space-y-4">
                             {data.logs.map((log, index) => (
                                 <div key={index} className={`p-4 rounded-lg border ${log.level === 'CRITICAL' ? 'bg-red-900/20 border-red-700 text-red-200' :
-                                        log.level === 'ERROR' ? 'bg-orange-900/20 border-orange-700 text-orange-200' :
-                                            log.level === 'WARN' ? 'bg-yellow-900/20 border-yellow-700 text-yellow-200' :
-                                                'bg-green-900/20 border-green-700 text-green-200'
+                                    log.level === 'ERROR' ? 'bg-orange-900/20 border-orange-700 text-orange-200' :
+                                        log.level === 'WARN' ? 'bg-yellow-900/20 border-yellow-700 text-yellow-200' :
+                                            'bg-green-900/20 border-green-700 text-green-200'
                                     }`}>
                                     <div>
                                         <h4 className="font-bold">[{log.level}] {log.message}</h4>
