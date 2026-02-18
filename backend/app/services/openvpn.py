@@ -480,6 +480,7 @@ class OpenVPNService:
             return {"exists": True, "error": "Invalid Cert"}
             
     # Legacy Shim
+    def regenerate_pki(self):
         """
         Regenerate all OpenVPN certificates and keys using OpenSSL.
         This fixes 'key values mismatch' errors by creating a fresh, matching set.
