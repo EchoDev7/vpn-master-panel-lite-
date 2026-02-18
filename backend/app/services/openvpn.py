@@ -125,7 +125,8 @@ class OpenVPNService:
         conf.append(f"port {s.get('port', '443')}")
         conf.append(f"proto {s.get('protocol', 'tcp')}")
         conf.append(f"dev {s.get('dev', 'tun')}")
-        # conf.append(f"dev-type {s.get('dev_type', 'tun')}") # Redundant with dev tun
+        conf.append(f"dev {s.get('dev', 'tun')}")
+        # dev-type removed as per user request (redundant with dev tun)
         
         # Topology
         topo = s.get("topology", "subnet")
@@ -208,15 +209,20 @@ class OpenVPNService:
         if s.get("explicit_exit_notify", "0") != "0" and "udp" in s.get("protocol", ""):
              conf.append(f"explicit-exit-notify {s['explicit_exit_notify']}")
 
+        if s.get("float", "1") == "1":
+            conf.append("float")
+
+        if s.get("hand_window"):
+            conf.append(f"hand-window {s['hand_window']}")
+        if s.get("tran_window"):
+            conf.append(f"tran-window {s['tran_window']}")
+        if s.get("tls_timeout"):
+            conf.append(f"tls-timeout {s['tls_timeout']}")
+
         # Compression
-        compress = s.get("compress", "")
-        if compress:
-            conf.append(f"compress {compress}")
-        elif s.get("comp_lzo") == "yes":
-            conf.append("comp-lzo") # Legacy
-            
-        if s.get("allow_compression") == "yes":
-            conf.append("allow-compression yes")
+        conf.append("compress") # Clear compression
+        conf.append("allow-compression no") # Explicitly disable
+        # conf.append(f"verb {s.get('verb', '3')}")
 
         # --- Anti-Censorship ---
         conf.append("\n# --- Anti-Censorship ---")
@@ -390,9 +396,7 @@ class OpenVPNService:
         conf.append("remote-cert-tls server")
         conf.append(f"auth {s.get('auth_digest', 'SHA256')}")
         conf.append(f"data-ciphers {s.get('data_ciphers', 'AES-256-GCM:AES-128-GCM')}")
-        # Note: older clients might need 'cipher' directive, but we focus on modern.
-        # Adding fallback for compatibility:
-        # conf.append(f"cipher {s.get('data_ciphers_fallback', 'AES-256-GCM')}")  # Removed to avoid conflicts in 2.6+
+        # cipher directive removed as per user request to avoid conflicts in 2.5+
         
         conf.append(f"tls-version-min {s.get('tls_version_min', '1.2')}")
         
