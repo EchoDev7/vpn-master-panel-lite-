@@ -432,7 +432,7 @@ analyze_log_line() {
 echo -e "  Scanning recent system logs..."
 while read -r LINE; do
     analyze_log_line "$LINE" "System/OpenVPN"
-done < <(journalctl -u openvpn@server -n 50 --no-pager)
+done < <(journalctl -u openvpn@server -n 20 --no-pager)
 
 while read -r LINE; do
     analyze_log_line "$LINE" "Backend"
