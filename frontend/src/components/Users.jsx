@@ -547,18 +547,47 @@ const Users = () => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-gray-400 text-sm mb-1">
-                                        Password {modalMode === 'edit' && '(Leave blank to keep unchanged)'}
-                                    </label>
-                                    <input
-                                        type="text"
-                                        required={modalMode === 'create'}
-                                        minLength={6}
-                                        placeholder={modalMode === 'create' ? "Min 6 chars" : "New password"}
-                                        className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:border-blue-500"
-                                        value={formData.password}
-                                        onChange={e => setFormData({ ...formData, password: e.target.value })}
-                                    />
+                                    <div className="flex justify-between items-center mb-1">
+                                        <label className="block text-gray-400 text-sm">
+                                            Password {modalMode === 'edit' && '(Leave blank to keep unchanged)'}
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+                                                let pass = '';
+                                                for (let i = 0; i < 16; i++) pass += chars.charAt(Math.floor(Math.random() * chars.length));
+                                                setFormData({ ...formData, password: pass });
+                                            }}
+                                            className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                                        >
+                                            <RefreshCw size={12} /> Generate
+                                        </button>
+                                    </div>
+                                    <div className="relative">
+                                        <input
+                                            type="text"
+                                            required={modalMode === 'create'}
+                                            minLength={6}
+                                            placeholder={modalMode === 'create' ? "Min 6 chars" : "New password"}
+                                            className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 pr-10 text-white focus:outline-none focus:border-blue-500 font-mono text-sm"
+                                            value={formData.password}
+                                            onChange={e => setFormData({ ...formData, password: e.target.value })}
+                                        />
+                                        {formData.password && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(formData.password);
+                                                    // Optional: Toggle icon temporarily
+                                                }}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                                                title="Copy to clipboard"
+                                            >
+                                                <div className="text-xs border border-gray-600 rounded px-1.5 py-0.5 bg-gray-800">Copy</div>
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="block text-gray-400 text-sm mb-1">Email (Optional)</label>
