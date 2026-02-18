@@ -42,6 +42,12 @@ def main():
         try:
             with open(SERVER_CONF, 'r') as f:
                 content = f.read()
+            
+            print("--- Current Auth Line in Config ---")
+            for line in content.splitlines():
+                if "auth-user-pass-verify" in line:
+                    print(f"Current: {line.strip()}")
+            print("-----------------------------------")
 
             # Replace old path with new path
             # Also handle potentially other incorrect paths if needed, but this is the main one
@@ -50,16 +56,20 @@ def main():
                 "/etc/openvpn/scripts/auth.py"
             )
             
-            # Ensure via-file is present if not
-            # (Regex is better but replace is safer for simple string matching)
+            # Ensure proper directive if replacement didn't happen but line exists with wrong path?
+            # If replacement didn't happen, maybe it's already correct or missing.
             
             if content != new_content:
                 with open(SERVER_CONF, 'w') as f:
                     f.write(new_content)
                 print("✅ server.conf patched to use /etc/openvpn/scripts/auth.py")
             else:
-                 print("✅ server.conf already has correct paths (or didn't match old ones).")
-                 
+                 # Check if it is already correct
+                 if "/etc/openvpn/scripts/auth.py" in content:
+                     print("✅ server.conf already uses the correct path.")
+                 else:
+                     print("⚠️ Path replacement didn't happen and correct path not found. Check if auth-user-pass-verify is present.")
+                     
         except Exception as e:
              print(f"❌ Failed to patch server.conf: {e}")
     else:
