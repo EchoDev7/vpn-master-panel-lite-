@@ -78,6 +78,29 @@ export default function Diagnostics() {
         );
     }
 
+    if (data && data.error) {
+        return (
+            <div className="min-h-screen flex items-center justify-center text-red-400">
+                <div className="text-center max-w-lg p-6 bg-gray-800 rounded-xl border border-red-500/50">
+                    <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-red-500" />
+                    <h3 className="text-xl font-bold mb-2">Diagnostics Failed</h3>
+                    <p className="mb-4">{data.error}</p>
+                    {data.details && (
+                        <pre className="text-xs bg-gray-900 p-4 rounded text-left overflow-x-auto mb-4 text-gray-300">
+                            {data.details}
+                        </pre>
+                    )}
+                    <button
+                        onClick={fetchDiagnostics}
+                        className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 text-white"
+                    >
+                        Retry
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6 pb-12">
             {/* Header */}
