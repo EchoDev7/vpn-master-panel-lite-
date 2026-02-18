@@ -355,6 +355,9 @@ fi
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
 systemctl daemon-reload
 
+# Fix permissions so OpenVPN can execute auth script
+chmod +x /opt/vpn-master-panel/backend/auth.py
+
 # Fix permissions so OpenVPN can read keys
 if [ -d "/opt/vpn-master-panel/backend/data" ]; then
     chmod -R 755 /opt/vpn-master-panel/backend/data
