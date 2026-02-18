@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Save, Settings as SettingsIcon, Shield, Globe, Server, Lock, Wifi, Route, Clock, Wrench, FileText, AlertTriangle, Eye, Activity, RefreshCw, Terminal, Link, MessageSquare, Zap, Key } from 'lucide-react';
 import { apiService } from '../services/api';
 import { InputField, SelectField, CheckboxField, TextareaField, SectionTitle, IranBadge } from './SettingsFields';
+import ConfirmationModal from './ConfirmationModal';
+import Toast from './Toast';
 
 // ===== Protocol Logos (inline SVG) =====
 const OpenVPNLogo = () => (
@@ -79,6 +81,9 @@ const Settings = () => {
     const [wgObfsScript, setWgObfsScript] = useState(null);
     const [showWgObfsScript, setShowWgObfsScript] = useState(false);
 
+    const [confirmation, setConfirmation] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, confirmText: 'Confirm', confirmColor: 'blue' });
+    const [toast, setToast] = useState(null); // { message, type }
+
     useEffect(() => { loadSettings(); }, []);
 
     const loadSettings = async () => {
@@ -96,13 +101,20 @@ const Settings = () => {
         setSettings(prev => ({ ...prev, [key]: value }));
     }, []);
 
+    const showToast = (message, type = 'success') => setToast({ message, type });
+    const closeToast = () => setToast(null);
+
+    const confirmAction = (title, message, onConfirm, confirmText = 'Confirm', confirmColor = 'blue') => {
+        setConfirmation({ isOpen: true, title, message, onConfirm, confirmText, confirmColor });
+    };
+
     const handleSave = async () => {
         setSaving(true);
         try {
             await apiService.updateSettings(settings);
-            alert("✅ Settings saved successfully!");
+            showToast("Settings saved successfully!");
         } catch (error) {
-            alert("❌ Failed to save settings");
+            showToast("Failed to save settings", "error");
         } finally {
             setSaving(false);
         }
@@ -284,15 +296,27 @@ const Settings = () => {
             <SectionTitle>Server Configuration</SectionTitle>
             <div className="flex gap-3">
                 <button onClick={async () => {
-                    try { const res = await apiService.getServerConfigPreview(); setServerConfigPreview(res.data.content); setShowServerConfig(true); } catch { alert("Failed to load preview"); }
+                    try { const res = await apiService.getServerConfigPreview(); setServerConfigPreview(res.data.content); setShowServerConfig(true); } catch { showToast("Failed to load preview", "error"); }
                 }} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 border border-gray-600 transition-colors">
                     <Eye className="w-4 h-4" /> Preview server.conf
                 </button>
-                <button onClick={async () => {
-                    if (window.confirm("Generate server.conf based on current settings?")) {
-                        try { const res = await apiService.applyServerConfig(); const d = res.data; alert(d.system_written ? `✅ Written to: ${d.system_path}\n\nRun: sudo systemctl restart openvpn@server` : `⚠️ Saved to: ${d.backup_path}\n\n${d.hint}`); } catch { alert("❌ Failed"); }
-                    }
-                }} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors">
+                <button onClick={() => confirmAction(
+                    "Generate Configuration",
+                    "Generate server.conf based on current settings?",
+                    async () => {
+                        try {
+                            const res = await apiService.applyServerConfig();
+                            const d = res.data;
+                            if (d.system_written) {
+                                showToast(`Written to: ${d.system_path}`, "success");
+                            } else {
+                                showToast(`Saved to: ${d.backup_path}`, "success");
+                            }
+                        } catch { showToast("Failed to generate config", "error"); }
+                    },
+                    "Generate & Apply",
+                    "orange"
+                )} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors">
                     <Server className="w-4 h-4" /> Generate & Apply
                 </button>
             </div>
@@ -325,11 +349,15 @@ const Settings = () => {
             ) : (
                 <button onClick={async () => { try { const r = await apiService.getPKIInfo(); setPkiInfo(r.data); } catch { console.error('PKI load failed'); } }} className="w-full bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm border border-gray-600 transition-colors">Load CA Info</button>
             )}
-            <button onClick={async () => {
-                if (window.confirm("⚠️ WARNING: This replaces existing certificates.\nAll users must download new .ovpn files.\n\nContinue?")) {
-                    try { await apiService.regeneratePKI(); alert("✅ Certificates regenerated."); setPkiInfo(null); } catch { alert("❌ Failed."); }
-                }
-            }} className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-400 px-4 py-3 rounded-lg text-sm font-medium border border-red-600/30 transition-colors">🔄 Regenerate All Certificates</button>
+            <button onClick={() => confirmAction(
+                "Regenerate Certificates",
+                "⚠️ WARNING: This replaces existing certificates.\nAll users must download new .ovpn files.\n\nContinue?",
+                async () => {
+                    try { await apiService.regeneratePKI(); showToast("Certificates regenerated."); setPkiInfo(null); } catch { showToast("Failed to regenerate PKI", "error"); }
+                },
+                "Regenerate All",
+                "red"
+            )} className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-400 px-4 py-3 rounded-lg text-sm font-medium border border-red-600/30 transition-colors">🔄 Regenerate All Certificates</button>
             <p className="text-xs text-gray-500">Warning: Regenerating invalidates all existing client configs.</p>
         </div>
     );
@@ -383,7 +411,7 @@ const Settings = () => {
                         <S_Input {...sp} settingKey="wg_obfuscation_domain" label="Domain (wstunnel)" placeholder="your-domain.com" />
                     </div>
                     <button onClick={async () => {
-                        try { const res = await apiService.getObfuscationScript(); setWgObfsScript(res.data.content); setShowWgObfsScript(true); } catch { alert('Failed'); }
+                        try { const res = await apiService.getObfuscationScript(); setWgObfsScript(res.data.content); setShowWgObfsScript(true); } catch { showToast('Failed to load script', 'error'); }
                     }} className="w-full bg-gray-700 hover:bg-gray-600 text-white px-4 py-2.5 rounded-lg text-sm border border-gray-600 flex items-center justify-center gap-2 transition-colors">
                         <Terminal className="w-4 h-4" /> View Server Setup Script
                     </button>
@@ -441,15 +469,27 @@ const Settings = () => {
             <SectionTitle>Server Configuration</SectionTitle>
             <div className="flex gap-3">
                 <button onClick={async () => {
-                    try { const res = await apiService.getWGServerConfigPreview(); setWgServerConfigPreview(res.data.content); setShowWgServerConfig(true); } catch { alert('Failed'); }
+                    try { const res = await apiService.getWGServerConfigPreview(); setWgServerConfigPreview(res.data.content); setShowWgServerConfig(true); } catch { showToast('Failed to load preview', 'error'); }
                 }} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 border border-gray-600 transition-colors">
                     <Eye className="w-4 h-4" /> Preview wg0.conf
                 </button>
-                <button onClick={async () => {
-                    if (window.confirm('Generate and write wg0.conf?')) {
-                        try { const res = await apiService.applyWGServerConfig(); const d = res.data; alert(d.system_written ? `✅ Written to: ${d.system_path}\n\n${d.hint}` : `⚠️ Saved to: ${d.backup_path}\n\n${d.hint}`); } catch { alert('❌ Failed'); }
-                    }
-                }} className="flex-1 bg-teal-600 hover:bg-teal-700 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors">
+                <button onClick={() => confirmAction(
+                    "Generate WireGuard Config",
+                    "Generate and write wg0.conf?",
+                    async () => {
+                        try {
+                            const res = await apiService.applyWGServerConfig();
+                            const d = res.data;
+                            if (d.system_written) {
+                                showToast(`Written to: ${d.system_path}`, "success");
+                            } else {
+                                showToast(`Saved to: ${d.backup_path}`, "success");
+                            }
+                        } catch { showToast('Failed to apply config', 'error'); }
+                    },
+                    "Generate & Apply",
+                    "teal"
+                )} className="flex-1 bg-teal-600 hover:bg-teal-700 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors">
                     <Server className="w-4 h-4" /> Generate & Apply
                 </button>
             </div>
@@ -463,11 +503,15 @@ const Settings = () => {
                 </div>
             )}
             <SectionTitle>Server Keys</SectionTitle>
-            <button onClick={async () => {
-                if (window.confirm('⚠️ Regenerating invalidates ALL client configs.\nContinue?')) {
-                    try { const res = await apiService.regenerateWGKeys(); alert(`✅ New key: ${res.data.public_key}`); } catch { alert('❌ Failed'); }
-                }
-            }} className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-400 px-4 py-3 rounded-lg text-sm font-medium border border-red-600/30 transition-colors">🔄 Regenerate Server Keys</button>
+            <button onClick={() => confirmAction(
+                "Regenerate Server Keys",
+                "⚠️ Regenerating invalidates ALL client configs.\nContinue?",
+                async () => {
+                    try { const res = await apiService.regenerateWGKeys(); showToast(`New Key: ${res.data.public_key}`); } catch { showToast('Failed to regenerate keys', 'error'); }
+                },
+                "Regenerate Keys",
+                "red"
+            )} className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-400 px-4 py-3 rounded-lg text-sm font-medium border border-red-600/30 transition-colors">🔄 Regenerate Server Keys</button>
         </div>
     );
 
@@ -475,7 +519,7 @@ const Settings = () => {
         <div className="space-y-6">
             <SectionTitle>Live Status</SectionTitle>
             <button onClick={async () => {
-                try { const res = await apiService.getWGStatus(); setWgStatus(res.data); } catch { alert('Failed'); }
+                try { const res = await apiService.getWGStatus(); setWgStatus(res.data); } catch { showToast('Failed to refresh status', 'error'); }
             }} className="w-full bg-gray-700 hover:bg-gray-600 text-white px-4 py-2.5 rounded-lg text-sm border border-gray-600 flex items-center justify-center gap-2 transition-colors">
                 <Activity className="w-4 h-4" /> Refresh WireGuard Status
             </button>
@@ -685,6 +729,18 @@ const Settings = () => {
                     <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save All Settings'}
                 </button>
             </div>
+
+            <ConfirmationModal
+                isOpen={confirmation.isOpen}
+                onClose={() => setConfirmation({ ...confirmation, isOpen: false })}
+                onConfirm={confirmation.onConfirm}
+                title={confirmation.title}
+                message={confirmation.message}
+                confirmText={confirmation.confirmText}
+                confirmColor={confirmation.confirmColor}
+            />
+
+            {toast && <Toast message={toast.message} type={toast.type} onClose={closeToast} />}
         </div>
     );
 };
