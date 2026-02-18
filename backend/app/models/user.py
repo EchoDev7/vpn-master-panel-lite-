@@ -130,6 +130,14 @@ class User(Base):
         total_bytes = self.total_upload_bytes + self.total_download_bytes
         return round(total_bytes / (1024**3), 2)
 
+    @property
+    def is_online(self) -> bool:
+        """Check if user has been active in the last 3 minutes"""
+        if not self.last_connection:
+            return False
+        # Use UTC for comparison
+        return datetime.utcnow() - self.last_connection < timedelta(minutes=3)
+
 
 class TrafficLog(Base):
     """Traffic log for detailed usage tracking"""
