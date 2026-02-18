@@ -699,6 +699,70 @@ const Users = () => {
                 )
             }
 
+            {/* Renew Modal */}
+            {
+                showRenewModal && userToRenew && (
+                    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+                        <div className="bg-gray-800 rounded-xl p-6 w-full max-w-sm border border-gray-700 shadow-2xl">
+                            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                                <CalendarPlus className="text-green-500" /> Extend Expiry
+                            </h3>
+                            <p className="text-gray-300 mb-4">
+                                Extend access for <span className="font-semibold text-white">{userToRenew.username}</span>.
+                                Days will be added to the current expiry date (or now if expired).
+                            </p>
+                            <div className="mb-6">
+                                <label className="block text-gray-400 text-sm mb-2">Duration (Days)</label>
+                                <div className="flex gap-2 mb-2">
+                                    {[30, 90, 180, 365].map(days => (
+                                        <button
+                                            key={days}
+                                            onClick={() => setRenewDays(days)}
+                                            className={`px-3 py-1 rounded text-sm transition-colors ${renewDays === days ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                                        >
+                                            {days}d
+                                        </button>
+                                    ))}
+                                </div>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:border-green-500"
+                                    value={renewDays}
+                                    onChange={e => setRenewDays(parseInt(e.target.value) || 0)}
+                                />
+                                <div className="mt-4 flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        id="renewActivate"
+                                        checked={renewActivate}
+                                        onChange={e => setRenewActivate(e.target.checked)}
+                                        className="rounded bg-gray-700 border-gray-600 text-green-500 focus:ring-0 w-4 h-4 cursor-pointer"
+                                    />
+                                    <label htmlFor="renewActivate" className="text-gray-300 text-sm cursor-pointer select-none">
+                                        Activate user (Set status to Active)
+                                    </label>
+                                </div>
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setShowRenewModal(false)}
+                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={confirmRenew}
+                                    className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-medium"
+                                >
+                                    Confirm
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
             {/* Config Modal */}
             {
                 showConfigModal && selectedConfigUser && (
