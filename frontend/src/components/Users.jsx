@@ -115,6 +115,10 @@ const Users = () => {
             if (!payload.email) payload.email = null;
             if (modalMode === 'edit' && !payload.password) delete payload.password;
 
+            // Handle numeric fields allowing empty string in UI
+            payload.data_limit_gb = payload.data_limit_gb === '' ? 0 : parseFloat(payload.data_limit_gb);
+            payload.expiry_days = payload.expiry_days === '' ? 0 : parseInt(payload.expiry_days);
+
             if (modalMode === 'create') {
                 await apiService.createUser(payload);
                 showToast('User created successfully!', 'success');
@@ -375,10 +379,16 @@ const Users = () => {
             return;
         }
         const link = `${window.location.protocol}//${window.location.host}/sub/${user.subscription_token}`;
-        navigator.clipboard.writeText(link);
-
-        setCopiedUserId(user.id);
-        setTimeout(() => setCopiedUserId(null), 2000);
+        navigator.clipboard.writeText(link)
+            .then(() => {
+                showToast('لینک اشتراک کپی شد', 'success');
+                setCopiedUserId(user.id);
+                setTimeout(() => setCopiedUserId(null), 2000);
+            })
+            .catch((err) => {
+                console.error('Copy failed:', err);
+                showToast('کپی لینک ناموفق بود', 'error');
+            });
     };
 
     const handleOpenRegenerate = (user) => {
@@ -688,9 +698,8 @@ const Users = () => {
                                             className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:border-blue-500"
                                             value={formData.data_limit_gb}
                                             onChange={e => {
-                                                // Handle leading zeros or empty string cleanly
                                                 const val = e.target.value;
-                                                setFormData({ ...formData, data_limit_gb: val === '' ? 0 : parseFloat(val) })
+                                                setFormData({ ...formData, data_limit_gb: val })
                                             }}
                                         />
                                         <span className="text-xs text-gray-500">0 = Unlimited</span>
@@ -704,7 +713,7 @@ const Users = () => {
                                                     min="0"
                                                     className="w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:border-blue-500"
                                                     value={formData.expiry_days}
-                                                    onChange={e => setFormData({ ...formData, expiry_days: parseInt(e.target.value) })}
+                                                    onChange={e => setFormData({ ...formData, expiry_days: e.target.value })}
                                                 />
                                             </>
                                         )}
