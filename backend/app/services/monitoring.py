@@ -311,66 +311,76 @@ class TrafficMonitor:
             return
 
         # Regex patterns
-        # TIMESTAMP HOSTNAME/IP:PORT MULTI: Learn: VIRTUAL_IP
-        # Dec 13 10:00:00 server/1.2.3.4:1234 MULTI: Learn: 10.8.0.2
+        # DST 12-13 10:00:00 ... or Dec 13 10:00:00 ...
+        # Matching: (Timestamp) (Hostname/IP) (Event) (VirtualIP)
+        # Example: Dec 13 10:00:00 server/1.2.3.4:1234 MULTI: Learn: 10.8.0.2
         connect_pattern = re.compile(
-            r"(\w{3} \w{3} +\d+ \d+:\d+:\d+ \d+|^\w{3} \d+ \d+:\d+:\d+) " # Timestamp variations
-            r"(\S+)/(\d+\.\d+\.\d+\.\d+):\d+ " # Username/RealIP
-            r"MULTI: Learn: (\d+\.\d+\.\d+\.\d+)" # VirtualIP
-        )
-        # HOSTNAME/IP:PORT SIGTERM|SIGINT|Connection reset
-        disconnect_pattern = re.compile(
-            r"(\S+)/(\d+\.\d+\.\d+\.\d+):\d+.*"
-            r"(SIGTERM|SIGINT|Connection reset|Inactivity timeout)"
+            r"^([A-Z][a-z]{2} +\d+ \d+:\d+:\d+|\d+-\d+-\d+ \d+:\d+:\d+) " # Timestamp
+            r".*?(\S+)/(\d+\.\d+\.\d+\.\d+):\d+ " # Username / RealIP
+            r"MULTI: Learn: (\d+\.\d+\.\d+\.\d+)" # VPN IP
         )
 
         try:
-            # We ideally want to tail the log or read only new lines.
-            # Reading the whole log every 60s is inefficient for large logs.
-            # For this simplified implementation, we assume logrotate handles size 
-            # or we read last N bytes.
-            # Let's use `tail` behavior via seek if we persist offset, but we don't have persistence here.
-            # We will read file but limit processing to recent lines or rely on DB checks to avoid duplicates.
-            
+            # Efficiently read last 1000 lines to catch recent events without full scan
+            # In production, use file seeking/state persistence.
+            lines = []
             with open(self.OPENVPN_LOG, "r") as f:
-                # Basic optimization: read last 1000 lines? Or just read all if small.
-                # Assuming standard rotation, we read all.
+                # Simple tail
                 for line in f:
-                    # New Connection
-                    m = connect_pattern.search(line)
-                    if m:
-                        _, username, real_ip, vpn_ip = m.groups()
-                        # We use the existing helper which handles DB logic
-                        # But we need timestamp from log if possible, or just log now?
-                        # The log has timestamp. 
-                        # For now, let's just use it to catch missed connections
-                        # self._record_connection(username, real_ip, vpn_ip) 
-                        pass # Implementing as requested by user snippet
+                    lines.append(line)
+                lines = lines[-1000:] # Last 1000 lines
 
-                    # Disconnect
-                    m = disconnect_pattern.search(line)
-                    if m:
-                        username, real_ip = m.group(1), m.group(2)
-                        # self._record_disconnection(username)
-                        pass
+            for line in lines:
+                # New Connection
+                m = connect_pattern.search(line)
+                if m:
+                    ts_str, username, real_ip, vpn_ip = m.groups()
+                    self._record_connection(username, real_ip, vpn_ip, ts_str)
+
         except Exception as e:
             logger.error(f"Log parser error: {e}")
 
-    # Specific method requested by user
-    def _record_connection(self, username: str, real_ip: str, vpn_ip: str):
+    def _record_connection(self, username: str, real_ip: str, vpn_ip: str, ts_str: str):
+        """Record connection from log if not exists (F8)"""
+        if username == "UNDEF": return
+        
         with get_db_context() as db:
             user = db.query(User).filter(User.username == username).first()
             if not user:
                 return
-            # avoid duplicates for same session?
-            log = ConnectionLog(
-                user_id=user.id,
-                protocol="openvpn",
-                client_ip=real_ip, # Fixed: ip_address -> client_ip
-                connected_at=datetime.utcnow()
-            )
-            db.add(log)
-            db.commit()
+
+            # Parse Timestamp (Assume current year, handle rollover)
+            try:
+                # Try standard syslog format: Dec 13 10:00:00
+                dt = datetime.strptime(ts_str, "%b %d %H:%M:%S")
+                now = datetime.now()
+                dt = dt.replace(year=now.year)
+                if dt > now: # Future? Must be last year (Dec in Jan)
+                    dt = dt.replace(year=now.year - 1)
+            except ValueError:
+                # Fallback or other formats
+                dt = datetime.utcnow()
+
+            # Duplicate Check:
+            # Check if we have a log for this user within tight window (e.g. 5 sec)
+            exists = db.query(ConnectionLog).filter(
+                ConnectionLog.user_id == user.id,
+                ConnectionLog.protocol == "openvpn",
+                ConnectionLog.connected_at >= dt - timedelta(seconds=5),
+                ConnectionLog.connected_at <= dt + timedelta(seconds=5)
+            ).first()
+
+            if not exists:
+                log = ConnectionLog(
+                    user_id=user.id,
+                    protocol="openvpn",
+                    client_ip=real_ip,
+                    connected_at=dt,
+                    server_ip=vpn_ip # Using server_ip column for VPN IP temporarily or extend model
+                )
+                db.add(log)
+                user.last_connection = dt
+                db.commit()
 
     def _check_limits(self, db: Session, user: User):
         """Check Data Limit and Expiry"""
