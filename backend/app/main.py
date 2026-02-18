@@ -275,7 +275,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
 
 
 # Import and include routers
-from .api import auth, users, servers, tunnels, monitoring, notifications, activity, subscriptions, diagnostics
+from .api import auth, users, servers, tunnels, monitoring, notifications, activity, diagnostics, subscription
 
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["Authentication"])
 app.include_router(users.router, prefix=f"{settings.API_V1_PREFIX}/users", tags=["Users"])
@@ -285,7 +285,9 @@ app.include_router(monitoring.router, prefix=f"{settings.API_V1_PREFIX}/monitori
 app.include_router(diagnostics.router, prefix=f"{settings.API_V1_PREFIX}/diagnostics", tags=["Diagnostics"])
 app.include_router(notifications.router, prefix=f"{settings.API_V1_PREFIX}", tags=["Notifications"])
 app.include_router(activity.router, prefix=f"{settings.API_V1_PREFIX}", tags=["Activity"])
-app.include_router(subscriptions.router, prefix=f"{settings.API_V1_PREFIX}", tags=["Subscriptions"])
+
+# Subscription Router (Public Access)
+app.include_router(subscription.router, prefix="/sub", tags=["Subscription"])
 
 
 # Settings Router
