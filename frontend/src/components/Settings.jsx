@@ -232,6 +232,11 @@ const Settings = () => {
                 <S_Select {...sp} settingKey="ovpn_data_ciphers_fallback" label="Fallback Cipher" options={DATA_CIPHERS} tip="Cipher used if negotiation fails (older clients)." />
             </div>
             <SectionTitle>Authentication & TLS</SectionTitle>
+            <S_Select {...sp} settingKey="ovpn_auth_mode" label="Authentication Mode" iranBadge tip="Choose how clients authenticate." options={[
+                { value: 'password', label: 'Password Only (Standard)' },
+                { value: 'cert', label: 'Certificate Only (No Password)' },
+                { value: '2fa', label: 'Password + Certificate (High Security)' },
+            ]} />
             <div className="grid grid-cols-2 gap-4">
                 <S_Select {...sp} settingKey="ovpn_auth_digest" label="Auth Digest (HMAC)" options={[
                     { value: 'SHA256', label: 'SHA256 (Recommended)' },
