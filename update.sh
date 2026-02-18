@@ -32,15 +32,20 @@ echo -e "${CYAN}📥 Updating Installation at $INSTALL_DIR...${NC}"
 cd "$INSTALL_DIR" || exit 1
 
 # Check if it's a git repo
-if [ -d ".git" ]; then
-    echo -e "${CYAN}Fetching updates...${NC}"
-    git fetch --all
     # Stash local changes instead of hard reset
-    if ! git diff-index --quiet HEAD --; then
+    STASH_RESULT=$(git diff-index --quiet HEAD -- || echo "changed")
+    if [ "$STASH_RESULT" = "changed" ]; then
         echo -e "${YELLOW}⚠️ Local changes detected. Stashing them...${NC}"
         git stash
     fi
+    
     git pull origin main
+    
+    # Restore local changes if we stashed them
+    if [ "$STASH_RESULT" = "changed" ]; then
+        echo -e "${YELLOW}♻️  Restoring local changes...${NC}"
+        git stash pop
+    fi
 else
     echo -e "${YELLOW}⚠️ Not a git repository. Skipping git update.${NC}"
     echo -e "${YELLOW}To update manually, backup your config and reinstall.${NC}"
@@ -115,7 +120,6 @@ else
     fi
 fi
 
-if [ "$SHOULD_FIX_PKI" = true ]; then
 if [ "$SHOULD_FIX_PKI" = true ]; then
     echo -e "${CYAN}🔧 Repairing OpenVPN PKI using OpenSSL (Robust Method)...${NC}"
     
@@ -197,7 +201,7 @@ if [ "$SHOULD_FIX_PKI" = true ]; then
     
     chmod 600 /etc/openvpn/server.key /etc/openvpn/ta.key
     
-    cd "$INSTALL_DIR"
+    cd "$INSTALL_DIR" || exit 1
 fi
 
 # 4. Update Backend Dependencies
@@ -390,14 +394,13 @@ systemctl daemon-reload
 # Fix permissions so OpenVPN can execute auth script
 chmod +x /opt/vpn-master-panel/backend/auth.py
 
-# Force Regenerate Server Config to pick up new auth paths
-echo -e "${CYAN}♻️  Regenerating OpenVPN Config...${NC}"
-cd /opt/vpn-master-panel/backend
-source venv/bin/activate
-# Ensure PYTHONPATH includes current directory
-# Ensure PYTHONPATH includes current directory
-export PYTHONPATH=$PYTHONPATH:/opt/vpn-master-panel/backend
-python3 force_server_config.py
+# Force Regenerate Server Config - DISABLED to preserve manual changes
+# echo -e "${CYAN}♻️  Regenerating OpenVPN Config...${NC}"
+# cd /opt/vpn-master-panel/backend
+# source venv/bin/activate
+# # Ensure PYTHONPATH includes current directory
+# export PYTHONPATH=$PYTHONPATH:/opt/vpn-master-panel/backend
+# # python3 force_server_config.py # Skip this to avoid overwriting server.conf
 
 # Force fix potential path issues (Double Safety) - Inline Patch
 SERVER_CONF="/etc/openvpn/server.conf"
