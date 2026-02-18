@@ -99,6 +99,23 @@ class APIService {
     return this.client.get(`/users/${userId}/config/wireguard`);
   }
 
+  // Phase 3: Ultimate User Management
+  async bulkUserAction(action, userIds) {
+    return this.client.post('/users/bulk-action', { action, user_ids: userIds });
+  }
+
+  async getUserDetails(userId) {
+    return this.client.get(`/users/${userId}/details`);
+  }
+
+  async getUserConnections(userId, page = 1, pageSize = 20) {
+    return this.client.get(`/users/${userId}/connections`, { params: { page, page_size: pageSize } });
+  }
+
+  async resetUserTraffic(userId) {
+    return this.client.post(`/users/${userId}/reset-traffic`);
+  }
+
   // Servers
   async getServers() {
     return this.client.get('/servers/');
