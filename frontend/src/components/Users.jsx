@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { UserPlus, Trash2, RefreshCw, Key, Shield, CheckSquare, Square, MoreHorizontal, Activity, Clock, Download, Upload, X, Search, ChevronLeft, ChevronRight, Filter, Terminal, Power, CalendarPlus, Link, Copy, Check } from 'lucide-react';
 import { apiService } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import ConfirmationModal from './ConfirmationModal';
+import Toast from './Toast';
 
 const Users = () => {
     const [users, setUsers] = useState([]);
@@ -9,6 +11,15 @@ const Users = () => {
     const [showModal, setShowModal] = useState(false);
     const [modalMode, setModalMode] = useState('create'); // 'create' or 'edit'
     const [selectedUser, setSelectedUser] = useState(null);
+
+    // Globals
+    const [confirmation, setConfirmation] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, confirmText: 'Confirm', confirmColor: 'blue' });
+    const [toast, setToast] = useState(null);
+    const showToast = (message, type = 'success') => setToast({ message, type });
+    const closeToast = () => setToast(null);
+    const confirmAction = (title, message, onConfirm, confirmText = 'Confirm', confirmColor = 'blue') => {
+        setConfirmation({ isOpen: true, title, message, onConfirm, confirmText, confirmColor });
+    };
 
     // Phase 3 State
     const [selectedUserIds, setSelectedUserIds] = useState(new Set());
@@ -106,10 +117,10 @@ const Users = () => {
 
             if (modalMode === 'create') {
                 await apiService.createUser(payload);
-                alert('User created successfully!');
+                showToast('User created successfully!', 'success');
             } else {
                 await apiService.updateUser(selectedUser.id, payload);
-                alert('User updated successfully!');
+                showToast('User updated successfully!', 'success');
             }
 
             setShowModal(false);
@@ -130,7 +141,7 @@ const Users = () => {
                 errorMessage += ': ' + error.message;
             }
 
-            alert(errorMessage);
+            showToast(errorMessage, 'error');
         }
     };
 
@@ -207,40 +218,45 @@ const Users = () => {
             }
 
             await apiService.updateUser(userToRenew.id, payload);
-            alert(`User ${userToRenew.username} renewed until ${newExpiryDate.toLocaleDateString()}.`);
+            showToast(`User ${userToRenew.username} renewed until ${newExpiryDate.toLocaleDateString()}.`, 'success');
             loadUsers();
             setShowRenewModal(false);
             setUserToRenew(null);
         } catch (error) {
             console.error('Failed to renew user:', error);
-            alert('Failed to renew user');
+            showToast('Failed to renew user', 'error');
         }
     };
 
-    const [showDeleteModal, setShowDeleteModal] = useState(false);
-    const [userToDelete, setUserToDelete] = useState(null);
+    const [showDeleteModal, setShowDeleteModal] = useState(false); // Deprecated
+    // const [userToDelete, setUserToDelete] = useState(null); // Deprecated
 
-    const [showRegenerateModal, setShowRegenerateModal] = useState(false);
-    const [userToRegenerate, setUserToRegenerate] = useState(null);
+    const [showRegenerateModal, setShowRegenerateModal] = useState(false); // Deprecated
+    // const [userToRegenerate, setUserToRegenerate] = useState(null); // Deprecated
     const [copiedUserId, setCopiedUserId] = useState(null);
 
     const handleDeleteClick = (user) => {
-        setUserToDelete(user);
-        setShowDeleteModal(true);
+        confirmAction(
+            'Delete User?',
+            `Are you sure you want to delete ${user.username}? This action cannot be undone.`,
+            async () => {
+                try {
+                    await apiService.deleteUser(user.id);
+                    loadUsers();
+                    showToast('User deleted successfully', 'success');
+                } catch (error) {
+                    console.error('Failed to delete user:', error);
+                    showToast('Failed to delete user', 'error');
+                }
+            },
+            'Delete',
+            'red'
+        );
     };
 
-    const confirmDelete = async () => {
-        if (!userToDelete) return;
-        try {
-            await apiService.deleteUser(userToDelete.id);
-            loadUsers();
-            setShowDeleteModal(false);
-            setUserToDelete(null);
-        } catch (error) {
-            console.error('Failed to delete user:', error);
-            alert('Failed to delete user');
-        }
-    };
+    // confirmDelete removed - logic moved inline above
+
+    // confirmDelete removed - logic moved inline above
 
     // Phase 3: Bulk Actions & Details
     const toggleSelectUser = (id) => {
@@ -262,16 +278,23 @@ const Users = () => {
     };
 
     const handleBulkAction = async (action) => {
-        if (!window.confirm(`Are you sure you want to ${action} ${selectedUserIds.size} users?`)) return;
-        try {
-            await apiService.bulkUserAction(action, Array.from(selectedUserIds));
-            alert(`Bulk ${action} successful`);
-            setSelectedUserIds(new Set());
-            loadUsers();
-        } catch (error) {
-            console.error('Bulk action failed:', error);
-            alert('Bulk action failed');
-        }
+        confirmAction(
+            'Confirm Bulk Action',
+            `Are you sure you want to ${action} ${selectedUserIds.size} users?`,
+            async () => {
+                try {
+                    await apiService.bulkUserAction(action, Array.from(selectedUserIds));
+                    showToast(`Bulk ${action} successful`, 'success');
+                    setSelectedUserIds(new Set());
+                    loadUsers();
+                } catch (error) {
+                    console.error('Bulk action failed:', error);
+                    showToast('Bulk action failed', 'error');
+                }
+            },
+            action === 'delete' ? 'Delete' : 'Confirm',
+            action === 'delete' ? 'red' : 'blue'
+        );
     };
 
     const handleOpenDetails = async (user) => {
@@ -287,7 +310,7 @@ const Users = () => {
             setConnectionLogs(logsRes.data.logs);
         } catch (error) {
             console.error('Failed to load details:', error);
-            alert('Failed to load user details');
+            showToast('Failed to load user details', 'error');
         } finally {
             setDetailsLoading(false);
         }
@@ -307,34 +330,48 @@ const Users = () => {
     };
 
     const handleKillSession = async (user) => {
-        if (!window.confirm(`Are you sure you want to KILL the active session for ${user.username}? This will disconnect them immediately.`)) return;
-        try {
-            const response = await apiService.killUserSession(user.id);
-            const results = response.data.results.join('\n');
-            alert(`Session Kill Result:\n${results}`);
-            // Refresh details to see if online status changes (might take a minute for sync)
-            handleOpenDetails(user);
-        } catch (error) {
-            console.error('Failed to kill session:', error);
-            alert('Failed to kill session');
-        }
+        confirmAction(
+            'Kill Session?',
+            `Are you sure you want to KILL the active session for ${user.username}? This will disconnect them immediately.`,
+            async () => {
+                try {
+                    const response = await apiService.killUserSession(user.id);
+                    const results = response.data.results.join('\n');
+                    showToast('Session kill command sent', 'info');
+                    // Refresh details to see if online status changes (might take a minute for sync)
+                    handleOpenDetails(user);
+                } catch (error) {
+                    console.error('Failed to kill session:', error);
+                    showToast('Failed to kill session', 'error');
+                }
+            },
+            'Kill Session',
+            'red'
+        );
     };
 
     const handleResetTraffic = async (user) => {
-        if (!window.confirm(`Reset traffic usage for ${user.username}?`)) return;
-        try {
-            await apiService.resetUserTraffic(user.id);
-            loadUsers();
-            alert('Traffic reset successfully');
-        } catch (error) {
-            console.error('Failed to reset traffic:', error);
-            alert('Failed to reset traffic');
-        }
+        confirmAction(
+            'Reset Traffic?',
+            `Reset traffic usage for ${user.username}? This cannot be undone.`,
+            async () => {
+                try {
+                    await apiService.resetUserTraffic(user.id);
+                    loadUsers();
+                    showToast('Traffic reset successfully', 'success');
+                } catch (error) {
+                    console.error('Failed to reset traffic:', error);
+                    showToast('Failed to reset traffic', 'error');
+                }
+            },
+            'Reset',
+            'purple'
+        );
     };
 
     const handleCopySubscription = (user) => {
         if (!user.subscription_token) {
-            alert('User does not have a subscription token.');
+            showToast('User does not have a subscription token.', 'error');
             return;
         }
         const link = `${window.location.protocol}//${window.location.host}/sub/${user.subscription_token}`;
@@ -345,26 +382,28 @@ const Users = () => {
     };
 
     const handleOpenRegenerate = (user) => {
-        setUserToRegenerate(user);
-        setShowRegenerateModal(true);
+        confirmAction(
+            'Regenerate Token?',
+            `This will invalidate the old link for ${user.username}. They will need the new link to connect.`,
+            async () => {
+                try {
+                    await apiService.regenerateToken(user.id);
+                    showToast('Token regenerated successfully', 'success');
+                    loadUsers();
+                    if (showDetailsModal && selectedUser && selectedUser.id === user.id) {
+                        handleOpenDetails(user);
+                    }
+                } catch (error) {
+                    console.error('Failed to regenerate token:', error);
+                    showToast('Failed to regenerate token', 'error');
+                }
+            },
+            'Regenerate',
+            'yellow'
+        );
     };
 
-    const confirmRegenerate = async () => {
-        if (!userToRegenerate) return;
-        try {
-            await apiService.regenerateToken(userToRegenerate.id);
-            alert('Token regenerated successfully.');
-            loadUsers();
-            if (showDetailsModal && selectedUser && selectedUser.id === userToRegenerate.id) {
-                handleOpenDetails(userToRegenerate);
-            }
-            setShowRegenerateModal(false);
-            setUserToRegenerate(null);
-        } catch (error) {
-            console.error('Failed to regenerate token:', error);
-            alert('Failed to regenerate token');
-        }
-    };
+    // confirmRegenerate removed - logic moved inline above
 
     if (loading && users.length === 0) {
         return <div className="p-8 text-center text-gray-400">Loading users...</div>;
@@ -740,63 +779,27 @@ const Users = () => {
                 )
             }
 
-            {/* Delete Confirmation Modal */}
-            {
-                showDeleteModal && userToDelete && (
-                    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-                        <div className="bg-gray-800 rounded-xl p-6 w-full max-w-sm border border-gray-700 shadow-2xl text-center">
-                            <Trash2 className="mx-auto text-red-500 mb-4" size={48} />
-                            <h3 className="text-xl font-bold text-white mb-2">Delete User?</h3>
-                            <p className="text-gray-400 mb-6">
-                                Are you sure you want to delete <span className="text-white font-semibold">{userToDelete.username}</span>? This action cannot be undone.
-                            </p>
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={() => setShowDeleteModal(false)}
-                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={confirmDelete}
-                                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg font-medium"
-                                >
-                                    Delete
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
+            {/* Delete Confirmation Modal - REMOVED (Replaced by Global ConfirmationModal) */}
 
-            {/* Regenerate Token Modal */}
-            {
-                showRegenerateModal && userToRegenerate && (
-                    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-                        <div className="bg-gray-800 rounded-xl p-6 w-full max-w-sm border border-gray-700 shadow-2xl text-center">
-                            <RefreshCw className="mx-auto text-yellow-500 mb-4" size={48} />
-                            <h3 className="text-xl font-bold text-white mb-2">Regenerate Token?</h3>
-                            <p className="text-gray-400 mb-6">
-                                This will invalidate the old link for <span className="text-white font-semibold">{userToRegenerate.username}</span>. The user will need the new link to connect.
-                            </p>
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={() => setShowRegenerateModal(false)}
-                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={confirmRegenerate}
-                                    className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white py-2 rounded-lg font-medium"
-                                >
-                                    Regenerate
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
+            {/* Regenerate Token Modal - REMOVED (Replaced by Global ConfirmationModal) */}
+
+            {/* Global Components */}
+            <ConfirmationModal
+                isOpen={confirmation.isOpen}
+                title={confirmation.title}
+                message={confirmation.message}
+                onConfirm={confirmation.onConfirm}
+                onCancel={() => setConfirmation({ ...confirmation, isOpen: false })}
+                confirmText={confirmation.confirmText}
+                confirmColor={confirmation.confirmColor}
+            />
+            {toast && (
+                <Toast
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={closeToast}
+                />
+            )}
 
             {/* Renew Modal */}
             {
