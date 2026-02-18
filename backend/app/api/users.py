@@ -651,3 +651,118 @@ async def get_user_connections(
         "page_size": page_size,
         "logs": logs
     }
+
+
+# --- Phase 4: Diagnostics & Control ---
+
+@router.get("/{user_id}/logs")
+async def get_user_logs(
+    user_id: int,
+    lines: int = 100,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Get raw OpenVPN logs filtered for this user (Admin only)
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    log_file = "/var/log/openvpn/openvpn.log"
+    import os
+    if not os.path.exists(log_file):
+        return {"logs": ["Log file not found."]}
+        
+    try:
+        # Use grep to filter logs for the username
+        # preventing injection by using subprocess list args
+        import subprocess
+        cmd = ["grep", user.username, log_file]
+        
+        # We process the whole file with grep, then take tail
+        # This might be heavy for huge logs, but standard for diagnostics
+        # A better approach for production: tail first then grep, but we might miss old sessions.
+        # Let's do: grep | tail
+        
+        # Safe execution
+        ps_grep = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ps_tail = subprocess.Popen(["tail", "-n", str(lines)], stdin=ps_grep.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        
+        # Closers
+        ps_grep.stdout.close()
+        
+        output, _ = ps_tail.communicate()
+        
+        log_lines = output.splitlines()
+        if not log_lines:
+            # Fallback: Check if user is in status log
+            return {"logs": ["No specific logs found for this user in openvpn.log"]}
+            
+        return {"logs": log_lines}
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch logs: {e}")
+        return {"logs": [f"Error fetching logs: {str(e)}"]}
+
+
+@router.post("/{user_id}/kill")
+async def kill_user_session(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Kill active OpenVPN session for user (Admin only)
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    results = []
+    
+    # OpenVPN Kill via Management Interface
+    if user.openvpn_enabled:
+        try:
+            import socket
+            # Connect to OpenVPN Management Interface
+            # Default: localhost 7505
+            mgmt_host = "127.0.0.1"
+            mgmt_port = 7505
+            
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(2)
+                result = s.connect_ex((mgmt_host, mgmt_port))
+                if result == 0:
+                    # connection successful
+                    # Read banner
+                    s.recv(1024)
+                    
+                    # specific command to kill by common name
+                    # "kill <common_name>"
+                    cmd = f"kill {user.username}\n".encode()
+                    s.sendall(cmd)
+                    
+                    response = s.recv(1024).decode()
+                    if "SUCCESS" in response:
+                        results.append("OpenVPN: Session Killed")
+                    else:
+                        results.append(f"OpenVPN: {response.strip()}")
+                        
+                    s.sendall(b"quit\n")
+                else:
+                    results.append("OpenVPN: Management Interface Unreachable")
+        except Exception as e:
+            results.append(f"OpenVPN Error: {str(e)}")
+            
+    # WireGuard Kill (Reload)
+    if user.wireguard_enabled:
+        # WireGuard is stateless. Best we can do is ensure config is synced.
+        # If user is valid, 'kill' doesn't mean much unless we remove them.
+        # But if we just want to re-handshake, we can try to bounce the interface or specific peer.
+        # Realistically, 'killing' a WG session means removing the peer or changing keys.
+        # For now, we'll just log that WG is stateless.
+        results.append("WireGuard: Stateless (No active session to kill)")
+        
+    return {"status": "completed", "results": results}
+
