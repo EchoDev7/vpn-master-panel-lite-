@@ -74,6 +74,28 @@ maxretry = 3
 [sshd]
 enabled = true
 EOF
+
+    # F9: OpenVPN Brute-Force Detection
+    # Create Filter
+    cat > /etc/fail2ban/filter.d/openvpn-auth.conf << EOF
+[Definition]
+failregex = AUTH_FAILED.*from <HOST>
+ignoreregex =
+EOF
+
+    # Create Jail
+    cat > /etc/fail2ban/jail.d/openvpn.conf << EOF
+[openvpn-auth]
+enabled = true
+port = 1194
+protocol = udp
+filter = openvpn-auth
+logpath = /var/log/openvpn/auth.log
+maxretry = 3
+bantime = 3600
+action = iptables-multiport[name=OpenVPN, port=1194, protocol=udp]
+EOF
+
     systemctl restart fail2ban
     systemctl enable fail2ban
 fi
