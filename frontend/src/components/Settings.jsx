@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Save, Settings as SettingsIcon, Shield, Globe, Server, Lock, Wifi, Route, Clock, Wrench, FileText, AlertTriangle, Eye, Activity, RefreshCw, Terminal, Link, MessageSquare, Zap, Key } from 'lucide-react';
 import { apiService } from '../services/api';
-import { InputField, SelectField, CheckboxField, TextareaField, SectionTitle, IranBadge } from './SettingsFields';
+import { InputField, SelectField, CheckboxField, TextareaField, MultiSelectField, SectionTitle, IranBadge } from './SettingsFields';
 import ConfirmationModal from './ConfirmationModal';
 import Toast from './Toast';
 
@@ -171,6 +171,32 @@ const Settings = () => {
         </div>
     );
 
+    const DATA_CIPHERS = [
+        { value: 'AES-256-GCM', label: 'AES-256-GCM (Recommended)' },
+        { value: 'AES-128-GCM', label: 'AES-128-GCM' },
+        { value: 'CHACHA20-POLY1305', label: 'CHACHA20-POLY1305 (Mobile Friendly)' },
+        { value: 'AES-256-CBC', label: 'AES-256-CBC (Legacy)' },
+        { value: 'AES-128-CBC', label: 'AES-128-CBC (Legacy)' },
+    ];
+
+    const TLS12_CIPHERS = [
+        { value: 'TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384', label: 'ECDHE-ECDSA-AES-256-GCM-SHA384' },
+        { value: 'TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384', label: 'ECDHE-RSA-AES-256-GCM-SHA384' },
+        { value: 'TLS-DHE-RSA-WITH-AES-256-GCM-SHA384', label: 'DHE-RSA-AES-256-GCM-SHA384' },
+        { value: 'TLS-ECDHE-ECDSA-WITH-CHACHA20-POLY1305-SHA256', label: 'ECDHE-ECDSA-CHACHA20-POLY1305' },
+        { value: 'TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256', label: 'ECDHE-RSA-CHACHA20-POLY1305' },
+    ];
+
+    const TLS13_SUITES = [
+        { value: 'TLS_AES_256_GCM_SHA384', label: 'TLS_AES_256_GCM_SHA384' },
+        { value: 'TLS_CHACHA20_POLY1305_SHA256', label: 'TLS_CHACHA20_POLY1305_SHA256' },
+        { value: 'TLS_AES_128_GCM_SHA256', label: 'TLS_AES_128_GCM_SHA256' },
+    ];
+
+    const S_MultiSelect = ({ settings, onChange, settingKey, ...props }) => (
+        <MultiSelectField value={settings[settingKey]} onChange={(v) => onChange(settingKey, v)} {...props} />
+    );
+
     const renderOvpnSecurity = () => (
         <div className="space-y-6">
             <SectionTitle>TLS Control Channel Security</SectionTitle>
@@ -181,9 +207,9 @@ const Settings = () => {
                 { value: 'none', label: 'None (Not Recommended)' },
             ]} />
             <SectionTitle>Data Channel Encryption</SectionTitle>
-            <div className="grid grid-cols-2 gap-4">
-                <S_Input {...sp} settingKey="ovpn_data_ciphers" label="Data Ciphers" placeholder="AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305" mono tip="Colon-separated cipher list." />
-                <S_Input {...sp} settingKey="ovpn_data_ciphers_fallback" label="Fallback Cipher" placeholder="AES-256-GCM" mono />
+            <div className="grid grid-cols-1 gap-4">
+                <S_MultiSelect {...sp} settingKey="ovpn_data_ciphers" label="Data Ciphers" options={DATA_CIPHERS} tip="Allowed data channel ciphers. Client tries them in order." />
+                <S_Select {...sp} settingKey="ovpn_data_ciphers_fallback" label="Fallback Cipher" options={DATA_CIPHERS} tip="Cipher used if negotiation fails (older clients)." />
             </div>
             <SectionTitle>Authentication & TLS</SectionTitle>
             <div className="grid grid-cols-2 gap-4">
@@ -197,8 +223,8 @@ const Settings = () => {
                     { value: '1.3', label: 'TLS 1.3 (Newest)' },
                 ]} />
             </div>
-            <S_Input {...sp} settingKey="ovpn_tls_ciphers" label="TLS 1.2 Cipher Suites" placeholder="TLS-ECDHE-..." mono />
-            <S_Input {...sp} settingKey="ovpn_tls_cipher_suites" label="TLS 1.3 Cipher Suites" placeholder="TLS_AES_256_GCM_SHA384:..." mono />
+            <S_MultiSelect {...sp} settingKey="ovpn_tls_ciphers" label="TLS 1.2 Cipher Suites" options={TLS12_CIPHERS} tip="Allowed ciphers for TLS 1.2 control channel." />
+            <S_MultiSelect {...sp} settingKey="ovpn_tls_cipher_suites" label="TLS 1.3 Cipher Suites" options={TLS13_SUITES} tip="Allowed ciphers for TLS 1.3 control channel." />
             <div className="grid grid-cols-2 gap-4">
                 <S_Input {...sp} settingKey="ovpn_ecdh_curve" label="ECDH Curve" placeholder="secp384r1" tip="Elliptic curve for key exchange." />
                 <S_Input {...sp} settingKey="ovpn_reneg_sec" label="Renegotiation Interval (sec)" placeholder="3600" type="number" />
