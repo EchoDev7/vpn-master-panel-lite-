@@ -6,6 +6,8 @@ import logging
 import os
 import re
 import time
+import datetime
+import platform
 from ..utils.security import get_current_admin
 from ..models.user import User
 
@@ -91,7 +93,24 @@ async def get_full_diagnostics(
             except AttributeError:
                 load = (0, 0, 0)
             
+            try:
+                with open("/etc/os-release") as f:
+                    os_info = {}
+                    for line in f:
+                        if "=" in line:
+                            k,v = line.strip().split("=", 1)
+                            os_info[k] = v.strip('"')
+                    os_name = os_info.get("PRETTY_NAME", "Unknown Linux")
+            except:
+                os_name = "Unknown Linux"
+                
+            uptime_seconds = time.time() - psutil.boot_time()
+            uptime_str = str(datetime.timedelta(seconds=int(uptime_seconds)))
+            
             system_stats = {
+                "os": os_name,
+                "kernel": platform.release(),
+                "uptime": uptime_str,
                 "load_avg": list(load),
                 "memory": {
                     "used_mb": round(mem.used / 1024 / 1024, 2),
@@ -107,6 +126,9 @@ async def get_full_diagnostics(
         except Exception as e:
             logger.error(f"Error getting system stats: {e}")
             system_stats = {
+                "os": "Unknown",
+                "kernel": "Unknown",
+                "uptime": "Unknown",
                 "load_avg": [0, 0, 0],
                 "memory": {"used_mb": 0, "total_mb": 0, "percent": 0},
                 "disk": {"used_gb": 0, "total_gb": 0, "percent": 0}
@@ -403,6 +425,57 @@ async def get_full_diagnostics(
         except Exception as e:
             logger.error(f"Error in DB check: {e}")
             
+        # 10. API Health Check
+        api_health = []
+        try:
+            api_base = "http://127.0.0.1:8001"
+            endpoints = [
+                "/api/health", 
+                "/docs", 
+                "/api/v1/monitoring/dashboard"
+            ]
+            
+            for ep in endpoints:
+                try:
+                    # Use curl for simplicity and speed
+                    code = subprocess.run(
+                        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", f"{api_base}{ep}"], 
+                        capture_output=True, 
+                        text=True, 
+                        timeout=2
+                    ).stdout.strip()
+                    
+                    status = "Unreachable"
+                    if code in ["200", "307", "401", "403", "405"]:
+                        status = "Available" if code in ["200", "307"] else "Secure/Active"
+                        
+                    api_health.append({
+                        "endpoint": ep,
+                        "status": status,
+                        "code": code
+                    })
+                except:
+                    api_health.append({"endpoint": ep, "status": "Unreachable", "code": "000"})
+        except Exception as e:
+            logger.error(f"Error in API health check: {e}")
+
+        # 11. Raw Logs (Last 10 Lines)
+        raw_logs = {"openvpn": [], "backend": []}
+        try:
+            cmd_ovpn = ["journalctl", "-u", "openvpn@server", "-n", "10", "--no-pager"]
+            cmd_back = ["journalctl", "-u", "vpnmaster-backend", "-n", "10", "--no-pager"]
+            
+            ovpn_out = subprocess.run(cmd_ovpn, capture_output=True, text=True).stdout
+            back_out = subprocess.run(cmd_back, capture_output=True, text=True).stdout
+            
+            if ovpn_out:
+                raw_logs["openvpn"] = ovpn_out.splitlines()
+            if back_out:
+                raw_logs["backend"] = back_out.splitlines()
+                
+        except Exception as e:
+            logger.error(f"Error fetching raw logs: {e}")
+
         return {
             "system": system_stats,
             "packages": package_status,
@@ -418,6 +491,8 @@ async def get_full_diagnostics(
             "vpn_security": vpn_security,
             "logs": log_analysis,
             "database": db_health,
+            "api_health": api_health,
+            "raw_logs": raw_logs,
             "timestamp": time.time()
         }
     except Exception as e:
