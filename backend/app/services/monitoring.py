@@ -97,7 +97,7 @@ class TrafficMonitor:
 
     def _parse_openvpn_status(self) -> Dict[str, Dict]:
         """
-        Parse OpenVPN status log.
+        Parse OpenVPN status log (Supports Version 1 and 2).
         Returns: { "username": { "rx": bytes, "tx": bytes, "ip": str } }
         """
         stats = {}
@@ -108,26 +108,50 @@ class TrafficMonitor:
             with open(self.OPENVPN_STATUS_LOG, 'r') as f:
                 content = f.read()
                 
-            # Parse CLIENT_LIST
-            # Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since
-            lines = content.split('\n')
+            lines = content.splitlines()
+            
+            # Version 2 Parser (Comma separated, starts with HEADER/CLIENT_LIST)
+            # HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Bytes Received,Bytes Sent,Connected Since,Connected Since (time_t),Username,Client ID,Peer ID
+            # CLIENT_LIST,user1,1.2.3.4:1234,10.8.0.2,1000,2000,...
+            
+            is_v2 = any("CLIENT_LIST" in line for line in lines[:5])
+            
             for line in lines:
                 parts = line.split(',')
-                if len(lines) < 5 or parts[0] == "Common Name":
-                    continue
                 
-                if parts[0] == "ROUTING_TABLE":
-                    break
+                if is_v2:
+                    if line.startswith("CLIENT_LIST") and "Common Name" not in line:
+                         # parts[1]=username (Common Name), parts[2]=real_addr
+                         # parts[5]=bytes_rx, parts[6]=bytes_tx
+                         if len(parts) > 6:
+                             try:
+                                 username = parts[1]
+                                 if username == "UNDEF": continue
+                                 stats[username] = {
+                                     "rx": int(parts[5] or 0),
+                                     "tx": int(parts[6] or 0),
+                                     "ip": parts[2].split(':')[0]
+                                 }
+                             except (ValueError, IndexError):
+                                 continue
+                else:
+                    # Version 1 Parser (Comma separated, Header: Common Name,...)
+                    # Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since
+                    parts = line.split(',')
+                    if len(parts) < 5 or parts[0] == "Common Name" or parts[0] == "ROUTING_TABLE":
+                        continue
                     
-                username = parts[0]
-                try:
-                    stats[username] = {
-                        "rx": int(parts[2]),
-                        "tx": int(parts[3]),
-                        "ip": parts[1].split(':')[0] if ':' in parts[1] else parts[1]
-                    }
-                except (ValueError, IndexError):
-                    continue
+                    try:
+                        username = parts[0]
+                        if username == "UNDEF": continue
+                        stats[username] = {
+                            "rx": int(parts[2]),
+                            "tx": int(parts[3]),
+                            "ip": parts[1].split(':')[0]
+                        }
+                    except (ValueError, IndexError):
+                        continue
+                        
         except Exception as e:
             logger.error(f"Failed to parse OpenVPN status: {e}")
             
