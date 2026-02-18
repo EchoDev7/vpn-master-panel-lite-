@@ -582,3 +582,36 @@ async def get_live_logs(lines: int = 50):
         logs["auth"] = ["Auth log file not found (No connection attempts yet?)"]
 
     return logs
+
+@router.post("/restart/{service}")
+async def restart_service(
+    service: str,
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Restart a specific system service.
+    """
+    service_map = {
+        "openvpn": "openvpn@server",
+        "backend": "vpnmaster-backend",
+        "nginx": "nginx",
+        "wireguard": "wg-quick@wg0"
+    }
+    
+    if service not in service_map:
+        return {"status": "error", "message": "Invalid service name"}
+    
+    target_service = service_map[service]
+    
+    try:
+        if shutil.which("systemctl"):
+            cmd = ["systemctl", "restart", target_service]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode == 0:
+                return {"status": "success", "message": f"Service {service} restarted successfully"}
+            else:
+                return {"status": "error", "message": f"Failed to restart {service}: {proc.stderr}"}
+        else:
+            return {"status": "error", "message": "Systemctl not found (Dev Env?)"}
+    except Exception as e:
+        return {"status": "error", "message": f"Exception restarting {service}: {str(e)}"}
