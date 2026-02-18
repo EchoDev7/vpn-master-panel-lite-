@@ -88,6 +88,34 @@ def check_database():
         settings_count = cursor.fetchone()[0]
         print_status(f"Configuration Entries: {settings_count}", "ok")
         
+        # 6. Schema Migration & Backfill
+        print_status("\nSchema Verification & Migration:", "ok")
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [info[1] for info in cursor.fetchall()]
+        
+        if "subscription_token" not in columns:
+            print(f"{YELLOW}  [WARN] 'subscription_token' column missing. Adding...{NC}")
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN subscription_token VARCHAR(100)")
+                cursor.execute("CREATE UNIQUE INDEX ix_users_subscription_token ON users (subscription_token)")
+                print(f"{GREEN}  [OK] Column added successfully.{NC}")
+            except Exception as e:
+                print(f"{RED}  [FAIL] Failed to add column: {e}{NC}")
+
+        # Backfill tokens for users who don't have them
+        cursor.execute("SELECT id, username FROM users WHERE subscription_token IS NULL")
+        users_without_token = cursor.fetchall()
+        if users_without_token:
+            print(f"{YELLOW}  [INFO] Backfilling tokens for {len(users_without_token)} users...{NC}")
+            import secrets
+            for user_id, username in users_without_token:
+                token = secrets.token_urlsafe(16)
+                cursor.execute("UPDATE users SET subscription_token = ? WHERE id = ?", (token, user_id))
+            conn.commit()
+            print(f"{GREEN}  [OK] Backfill complete.{NC}")
+        else:
+            print_status("All users have subscription tokens", "ok")
+
         conn.close()
         
     except sqlite3.Error as e:
