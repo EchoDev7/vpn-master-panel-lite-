@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
@@ -73,17 +73,20 @@ class TrafficMonitor:
                     }
             except Exception as e:
                 logger.error(f"Mgmt sync failed: {e}")
-                
+
         # Fallback to Status Log if Mgmt failed or returned empty (and log exists)
         if not ovpn_stats:
             ovpn_stats = self._parse_openvpn_status()
-            
+
         wg_stats = self._parse_wireguard_stats()
-        
-        # 2. Update Database
+
+        # 2. Update Database — collect users that need session termination,
+        #    but DO NOT call terminate inside the DB context (deadlock risk).
+        users_to_terminate = []
+
         with get_db_context() as db:
             users = db.query(User).all()
-            
+
             # Set of current active sessions in this cycle (username_protocol)
             current_active_keys = set()
 
@@ -93,20 +96,28 @@ class TrafficMonitor:
                     self._update_usage(db, user, "openvpn", ovpn_stats[user.username])
                     self._handle_connection_status(db, user, "openvpn", ovpn_stats[user.username]['ip'])
                     current_active_keys.add(f"{user.username}_openvpn")
-                
+
                 # --- WireGuard Traffic ---
                 # Check by Public Key
                 if user.wireguard_public_key and user.wireguard_public_key in wg_stats:
                     wg_peer_stats = wg_stats[user.wireguard_public_key]
                     self._update_usage(db, user, "wireguard", wg_peer_stats)
-                    
+
                     # WireGuard is stateless, check latest handshake for "online" status
                     if wg_peer_stats.get('is_online'):
                          self._handle_connection_status(db, user, "wireguard", wg_peer_stats.get('ip', 'Unknown'))
                          current_active_keys.add(f"{user.username}_wireguard")
 
                 # --- Check Limits (Data & Expiry) ---
-                self._check_limits(db, user)
+                # Collect users whose limits are violated; terminate AFTER db.commit()
+                violated = self._check_limits(db, user)
+                if violated:
+                    users_to_terminate.append(
+                        {"username": user.username,
+                         "openvpn_enabled": user.openvpn_enabled,
+                         "wireguard_enabled": user.wireguard_enabled,
+                         "wireguard_public_key": user.wireguard_public_key}
+                    )
 
             # 3. Detect Disconnections
             # Any session in _active_sessions NOT in current_active_keys has disconnected
@@ -116,6 +127,10 @@ class TrafficMonitor:
                     self._log_disconnection(db, session_key)
 
             db.commit()
+
+        # 4. Terminate sessions OUTSIDE the DB context to prevent deadlocks.
+        for user_info in users_to_terminate:
+            self._terminate_user_sessions_by_info(user_info)
 
     def _parse_openvpn_status(self) -> Dict[str, Dict]:
         """
@@ -382,67 +397,78 @@ class TrafficMonitor:
                 user.last_connection = dt
                 db.commit()
 
-    def _check_limits(self, db: Session, user: User):
-        """Check Data Limit and Expiry — and terminate live sessions if violated."""
+    def _check_limits(self, db: Session, user: User) -> bool:
+        """
+        Check Data Limit and Expiry.
+        Updates user.status in the ORM but does NOT terminate sessions here.
+        Returns True if the user was just suspended/expired (caller must terminate).
+        """
         if user.status != UserStatus.ACTIVE:
-            return
+            return False
 
-        modified = False
-
-        # 1. Check Expiry
-        if user.expiry_date and datetime.utcnow() > user.expiry_date:
-            logger.info(f"User {user.username} expired. Suspending...")
-            user.status = UserStatus.EXPIRED
-            modified = True
+        # 1. Check Expiry — compare timezone-aware datetimes consistently
+        now_utc = datetime.now(timezone.utc)
+        expiry = user.expiry_date
+        if expiry is not None:
+            # Normalize: if DB returned a naive datetime, treat it as UTC
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if now_utc > expiry:
+                logger.info(f"User {user.username} expired. Suspending...")
+                user.status = UserStatus.EXPIRED
+                return True
 
         # 2. Check Data Limit (0 = unlimited)
-        if not modified and user.data_limit_gb > 0:
+        if user.data_limit_gb > 0:
             if user.data_usage_gb >= user.data_limit_gb:
                 logger.info(
                     f"User {user.username} exceeded data limit "
                     f"({user.data_usage_gb:.2f}/{user.data_limit_gb} GB). Suspending..."
                 )
                 user.status = UserStatus.SUSPENDED
-                modified = True
+                return True
 
-        if modified:
-            self._terminate_user_sessions(user)
+        return False
 
-    def _terminate_user_sessions(self, user: User):
+    def _terminate_user_sessions_by_info(self, user_info: dict):
         """
         Forcefully terminate all active sessions for a suspended/expired user.
+        Accepts a plain dict so it can be called OUTSIDE any DB context.
 
         OpenVPN: uses Management Interface (kill <common-name>).
         WireGuard: removes the peer from the live interface so new packets are dropped.
         """
+        username = user_info["username"]
+
         # ── OpenVPN kill via Management Interface ────────────────────────────
-        if user.openvpn_enabled:
+        if user_info.get("openvpn_enabled"):
             try:
                 if openvpn_mgmt.is_available():
-                    result = openvpn_mgmt.kill_session(user.username)
+                    result = openvpn_mgmt.kill_session(username)
                     if result:
-                        logger.info(f"OpenVPN session killed for {user.username}")
+                        logger.info(f"OpenVPN session killed for {username}")
                     else:
-                        logger.warning(f"OpenVPN kill returned False for {user.username}")
+                        logger.warning(f"OpenVPN kill returned False for {username}")
                 else:
                     logger.debug("OpenVPN Management Interface not available — skip kill")
             except Exception as e:
-                logger.error(f"OpenVPN kill failed for {user.username}: {e}")
+                logger.error(f"OpenVPN kill failed for {username}: {e}")
 
         # ── WireGuard peer removal ────────────────────────────────────────────
-        if user.wireguard_enabled and user.wireguard_public_key:
+        wg_key = user_info.get("wireguard_public_key")
+        if user_info.get("wireguard_enabled") and wg_key:
             try:
-                removed = wireguard_service.remove_peer(user.wireguard_public_key)
+                removed = wireguard_service.remove_peer(wg_key)
                 if removed:
-                    logger.info(f"WireGuard peer removed for {user.username}")
+                    logger.info(f"WireGuard peer removed for {username}")
                 else:
-                    logger.warning(f"WireGuard peer removal returned False for {user.username}")
+                    logger.warning(f"WireGuard peer removal returned False for {username}")
             except Exception as e:
-                logger.error(f"WireGuard peer removal failed for {user.username}: {e}")
+                logger.error(f"WireGuard peer removal failed for {username}: {e}")
 
         # Remove from local active sessions cache so no stale entries remain
         for proto in ("openvpn", "wireguard"):
-            key = f"{user.username}_{proto}"
+            key = f"{username}_{proto}"
             self._active_sessions.pop(key, None)
             self._traffic_cache.pop(key, None)
 

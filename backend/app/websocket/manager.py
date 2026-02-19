@@ -72,8 +72,8 @@ class ConnectionManager:
         if is_admin:
             self.admin_connections.discard(websocket)
         
-        # Remove metadata
-        del self.connection_metadata[websocket]
+        # Remove metadata (pop avoids KeyError on double-disconnect)
+        self.connection_metadata.pop(websocket, None)
         
         logger.info(f"WebSocket disconnected: user_id={user_id}")
         
