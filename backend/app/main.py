@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(start_heartbeat())
         logger.info("✅ WebSocket heartbeat started")
 
-    # Start Traffic Monitor (User Management 2.0)
+        # Start Traffic Monitor (User Management 2.0)
         try:
             from .services.monitoring import traffic_monitor
             asyncio.create_task(traffic_monitor.start())
@@ -108,7 +108,17 @@ async def lifespan(app: FastAPI):
                 logger.info("ℹ️  Telegram bot not configured (skipped)")
         except Exception as e:
             logger.warning(f"⚠️  Telegram bot initialization failed: {e}")
-        
+
+        # Initialize default settings
+        try:
+            from .database import get_db_context
+            from .api.settings import init_default_settings
+            with get_db_context() as db:
+                init_default_settings(db)
+            logger.info("✅ Default settings initialized")
+        except Exception as e:
+            logger.warning(f"⚠️  Default settings initialization failed: {e}")
+
         logger.info("✅ VPN Master Panel started successfully!")
         
     except Exception as e:
@@ -321,14 +331,6 @@ app.include_router(subscription.router, prefix="/sub", tags=["Subscription"])
 # Settings Router
 from .api import settings as api_settings
 app.include_router(api_settings.router, prefix=f"{settings.API_V1_PREFIX}/settings", tags=["Settings"])
-
-# Init default settings on startup
-@app.on_event("startup")
-async def startup_event():
-    from .database import get_db_context
-    from .api.settings import init_default_settings
-    with get_db_context() as db:
-        init_default_settings(db)
 
 
 if __name__ == "__main__":
