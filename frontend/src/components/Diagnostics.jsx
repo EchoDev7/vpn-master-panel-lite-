@@ -557,15 +557,15 @@ export default function Diagnostics() {
             {/* 12 & 13. Raw Logs */}
             <div className="bg-black rounded-xl border border-gray-800 overflow-hidden font-mono text-xs">
                 <div className="p-3 bg-gray-900 border-b border-gray-800 text-yellow-400 font-bold">
-                    📜 11. Recent OpenVPN Logs (Last 10 Lines)
+                    📜 12. Recent OpenVPN Logs (Last 20 Lines)
                 </div>
-                <div className="p-4 text-gray-300 overflow-x-auto whitespace-pre leading-relaxed select-text">
+                <div className="p-4 text-gray-300 overflow-x-auto overflow-y-auto max-h-64 whitespace-pre leading-relaxed select-text">
                     {data.raw_logs?.openvpn?.join('\n') || "No logs available."}
                 </div>
                 <div className="p-3 bg-gray-900 border-b border-gray-800 border-t text-yellow-400 font-bold mt-2">
-                    📜 12. Recent Backend Logs (Last 10 Lines)
+                    📜 13. Recent Backend Logs (Last 20 Lines)
                 </div>
-                <div className="p-4 text-gray-300 overflow-x-auto whitespace-pre leading-relaxed select-text">
+                <div className="p-4 text-gray-300 overflow-x-auto overflow-y-auto max-h-64 whitespace-pre leading-relaxed select-text">
                     {data.raw_logs?.backend?.join('\n') || "No logs available."}
                 </div>
             </div>
