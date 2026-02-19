@@ -240,8 +240,11 @@ class OpenVPNService:
 
         # --- Anti-Censorship ---
         conf.append("\n# --- Anti-Censorship ---")
-        if s.get("scramble") == "1" and s.get("scramble_password"):
-            conf.append(f'scramble obfuscate "{s["scramble_password"]}"')
+        
+        # Port Sharing (HTTPS Camouflage)
+        port_share = s.get("port_share")
+        if port_share:
+            conf.append(f"port-share {port_share}")
             
         if s.get("fragment", "0") != "0":
             conf.append(f"fragment {s['fragment']}")
@@ -455,13 +458,18 @@ class OpenVPNService:
         conf.append(f"verb {s.get('verb', '3')}")
         conf.append("auth-user-pass")
 
-        # Proxy
-        p_type = s.get("proxy_type", "none")
-        if p_type != "none":
-            addr = s.get("proxy_address")
-            prt = s.get("proxy_port")
-            if addr and prt:
-                conf.append(f"{p_type}-proxy {addr} {prt}")
+        # Native HTTP Proxy Payload (Domain Fronting/SNI Spoofing)
+        if s.get("http_proxy_enabled") == "1":
+            proxy_host = s.get("http_proxy_host")
+            proxy_port = s.get("http_proxy_port", "80")
+            if proxy_host:
+                conf.append(f"http-proxy {proxy_host} {proxy_port}")
+                
+            custom_header = s.get("http_proxy_custom_header")
+            if custom_header:
+                conf.append(f'http-proxy-option CUSTOM-HEADER Host {custom_header}')
+                # VERSION 1.1 is strictly required by the official OpenVPN client when injecting custom Host headers
+                conf.append("http-proxy-option VERSION 1.1")
 
         # Keys
         conf.append("\n<ca>")
