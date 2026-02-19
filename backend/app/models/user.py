@@ -6,8 +6,47 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime, timedelta
 import enum
+import base64
 
 from ..database import Base
+
+# ── Lightweight field-level encryption ──────────────────────────────────────
+# Uses Fernet (AES-128-CBC + HMAC-SHA256) from the cryptography library.
+# Key is derived from SECRET_KEY so no extra env var is needed.
+# Falls back to plaintext only when cryptography is not installed (dev).
+
+def _get_fernet():
+    """Return a Fernet cipher keyed from SECRET_KEY."""
+    try:
+        from cryptography.fernet import Fernet
+        import hashlib
+        from ..config import settings
+        key_bytes = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
+        fernet_key = base64.urlsafe_b64encode(key_bytes)
+        return Fernet(fernet_key)
+    except Exception:
+        return None
+
+def encrypt_field(value: str) -> str:
+    """Encrypt a sensitive string field before DB storage."""
+    if not value:
+        return value
+    f = _get_fernet()
+    if f is None:
+        return value  # fallback: store plain (dev without cryptography)
+    return f.encrypt(value.encode()).decode()
+
+def decrypt_field(value: str) -> str:
+    """Decrypt a sensitive string field after DB read."""
+    if not value:
+        return value
+    f = _get_fernet()
+    if f is None:
+        return value
+    try:
+        return f.decrypt(value.encode()).decode()
+    except Exception:
+        return value  # already plain (migration compat – existing rows)
 
 
 class UserRole(str, enum.Enum):
@@ -70,15 +109,48 @@ class User(Base):
     openvpn_enabled = Column(Boolean, default=True)
     wireguard_enabled = Column(Boolean, default=True)
     l2tp_enabled = Column(Boolean, default=True)
-    l2tp_password = Column(String(255))  # Separate password for L2TP
+    _l2tp_password = Column("l2tp_password", String(512))  # stored encrypted
     cisco_enabled = Column(Boolean, default=True)
-    cisco_password = Column(String(255))  # Separate password for Cisco
-    
+    _cisco_password = Column("cisco_password", String(512))  # stored encrypted
+
     # WireGuard Specific
     wireguard_public_key = Column(String(255))
-    wireguard_private_key = Column(String(255))
+    _wireguard_private_key = Column("wireguard_private_key", String(512))  # stored encrypted
     wireguard_ip = Column(String(50))
-    wireguard_preshared_key = Column(String(255))
+    _wireguard_preshared_key = Column("wireguard_preshared_key", String(512))  # stored encrypted
+
+    # ── Transparent encrypt/decrypt via Python properties ────────────────────
+    @property
+    def l2tp_password(self) -> str:
+        return decrypt_field(self._l2tp_password)
+
+    @l2tp_password.setter
+    def l2tp_password(self, value: str):
+        self._l2tp_password = encrypt_field(value)
+
+    @property
+    def cisco_password(self) -> str:
+        return decrypt_field(self._cisco_password)
+
+    @cisco_password.setter
+    def cisco_password(self, value: str):
+        self._cisco_password = encrypt_field(value)
+
+    @property
+    def wireguard_private_key(self) -> str:
+        return decrypt_field(self._wireguard_private_key)
+
+    @wireguard_private_key.setter
+    def wireguard_private_key(self, value: str):
+        self._wireguard_private_key = encrypt_field(value)
+
+    @property
+    def wireguard_preshared_key(self) -> str:
+        return decrypt_field(self._wireguard_preshared_key)
+
+    @wireguard_preshared_key.setter
+    def wireguard_preshared_key(self, value: str):
+        self._wireguard_preshared_key = encrypt_field(value)
     
     # Subscription
     subscription_token = Column(String(100), unique=True, index=True, nullable=True)

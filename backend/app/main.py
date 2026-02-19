@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
 
         # Start Scheduler Service
         try:
-            from .services.scheduler import scheduler_service
+            from .services.scheduler import scheduler as scheduler_service
             asyncio.create_task(scheduler_service.start())
             logger.info("✅ Scheduler Service started")
         except Exception as e:
@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
 
     # Stop Scheduler
     try:
-        from .services.scheduler import scheduler_service
+        from .services.scheduler import scheduler as scheduler_service
         await scheduler_service.stop()
         logger.info("✅ Scheduler Service stopped")
     except Exception as e:

@@ -383,30 +383,67 @@ class TrafficMonitor:
                 db.commit()
 
     def _check_limits(self, db: Session, user: User):
-        """Check Data Limit and Expiry"""
+        """Check Data Limit and Expiry — and terminate live sessions if violated."""
         if user.status != UserStatus.ACTIVE:
             return
 
         modified = False
-        
+
         # 1. Check Expiry
         if user.expiry_date and datetime.utcnow() > user.expiry_date:
-            logger.info(f"User {user.username} expired. Disabling...")
+            logger.info(f"User {user.username} expired. Suspending...")
             user.status = UserStatus.EXPIRED
             modified = True
-            
-        # 2. Check Data Limit
-        # data_limit_gb is float. 0 means unlimited.
-        if user.data_limit_gb > 0:
+
+        # 2. Check Data Limit (0 = unlimited)
+        if not modified and user.data_limit_gb > 0:
             if user.data_usage_gb >= user.data_limit_gb:
-                logger.info(f"User {user.username} exceeded data limit. Disabling...")
+                logger.info(
+                    f"User {user.username} exceeded data limit "
+                    f"({user.data_usage_gb:.2f}/{user.data_limit_gb} GB). Suspending..."
+                )
                 user.status = UserStatus.SUSPENDED
                 modified = True
-                
+
         if modified:
-            # Terminate connections if possible (Optional enhancement)
-            # For now, just marking as suspended will prevent new auths
-            # But existing connections might persist until re-auth.
-            pass
+            self._terminate_user_sessions(user)
+
+    def _terminate_user_sessions(self, user: User):
+        """
+        Forcefully terminate all active sessions for a suspended/expired user.
+
+        OpenVPN: uses Management Interface (kill <common-name>).
+        WireGuard: removes the peer from the live interface so new packets are dropped.
+        """
+        # ── OpenVPN kill via Management Interface ────────────────────────────
+        if user.openvpn_enabled:
+            try:
+                if openvpn_mgmt.is_available():
+                    result = openvpn_mgmt.kill_client(user.username)
+                    if result:
+                        logger.info(f"OpenVPN session killed for {user.username}")
+                    else:
+                        logger.warning(f"OpenVPN kill returned False for {user.username}")
+                else:
+                    logger.debug("OpenVPN Management Interface not available — skip kill")
+            except Exception as e:
+                logger.error(f"OpenVPN kill failed for {user.username}: {e}")
+
+        # ── WireGuard peer removal ────────────────────────────────────────────
+        if user.wireguard_enabled and user.wireguard_public_key:
+            try:
+                removed = wireguard_service.remove_peer(user.wireguard_public_key)
+                if removed:
+                    logger.info(f"WireGuard peer removed for {user.username}")
+                else:
+                    logger.warning(f"WireGuard peer removal returned False for {user.username}")
+            except Exception as e:
+                logger.error(f"WireGuard peer removal failed for {user.username}: {e}")
+
+        # Remove from local active sessions cache so no stale entries remain
+        for proto in ("openvpn", "wireguard"):
+            key = f"{user.username}_{proto}"
+            self._active_sessions.pop(key, None)
+            self._traffic_cache.pop(key, None)
 
 traffic_monitor = TrafficMonitor()

@@ -125,8 +125,6 @@ class OpenVPNService:
         conf.append(f"port {s.get('port', '443')}")
         conf.append(f"proto {s.get('protocol', 'tcp')}")
         conf.append(f"dev {s.get('dev', 'tun')}")
-        conf.append(f"dev {s.get('dev', 'tun')}")
-        # dev-type removed as per user request (redundant with dev tun)
         
         # Topology
         topo = s.get("topology", "subnet")
