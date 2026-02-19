@@ -448,6 +448,16 @@ if [ -f "$SERVER_CONF" ]; then
     # First revert any direct auth.py ref to be sure we match
     sed -i 's|/opt/vpn-master-panel/backend/auth.py|/etc/openvpn/scripts/auth.sh|g' "$SERVER_CONF"
     sed -i 's|/etc/openvpn/scripts/auth.py|/etc/openvpn/scripts/auth.sh|g' "$SERVER_CONF"
+    
+    # Force ensure the line exists if it was missing or commented out
+    if ! grep -q "auth-user-pass-verify /etc/openvpn/scripts/auth.sh via-file" "$SERVER_CONF"; then
+        echo "auth-user-pass-verify /etc/openvpn/scripts/auth.sh via-file" >> "$SERVER_CONF"
+        echo -e "${GREEN}✓ Added auth script directive to server.conf${NC}"
+    fi
+    # Ensure script-security is at least 2
+    if ! grep -q "script-security 2" "$SERVER_CONF"; then
+         echo "script-security 2" >> "$SERVER_CONF"
+    fi
     # Ensure Verify Client Cert is handled if missing (optional safety)
 fi
 cd ..
