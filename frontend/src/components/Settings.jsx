@@ -44,6 +44,7 @@ const WIREGUARD_TABS = [
 ];
 
 const GENERAL_TABS = [
+    { id: 'gen_domain_ssl', label: '🔒 Domain & SSL' },
     { id: 'gen_subscription', label: '🔗 Subscription' },
     { id: 'gen_telegram', label: '📱 Telegram Bot' },
     { id: 'gen_smartproxy', label: '🎯 Smart Proxy' },
@@ -661,6 +662,53 @@ const Settings = () => {
     );
 
     // ===== General Tabs =====
+    const renderDomainSsl = () => (
+        <div className="space-y-6">
+            <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                    <Globe className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                        <p className="text-purple-300 font-semibold text-sm">Panel Domain & SSL</p>
+                        <p className="text-gray-400 text-xs mt-1">This domain is used strictly for accessing this Admin Panel and Subscription Links. It is securely separated from your VPN connection domains.</p>
+                        <p className="text-amber-400 text-xs font-bold mt-2">⚠️ IMPORTANT: Point your domain's DNS to your server IP (Proxy ON for Cloudflare) BEFORE requesting SSL.</p>
+                    </div>
+                </div>
+            </div>
+
+            <SectionTitle>Domain Setup</SectionTitle>
+            <S_Input {...sp} settingKey="panel_domain" label="Panel & Subscription Domain" placeholder="panel.yourdomain.com" tip="The domain used to access this dashboard and user subscriptions." />
+
+            <SectionTitle>Let's Encrypt SSL (ZeroSSL / Certbot)</SectionTitle>
+            <S_Input {...sp} settingKey="ssl_email" label="Admin Email (For SSL Expiration Alerts)" placeholder="admin@yourdomain.com" />
+
+            <div className="mt-6 pt-6 border-t border-gray-700">
+                <button onClick={() => confirmAction(
+                    "Request Let's Encrypt SSL",
+                    "This will request a certificate for your Panel Domain.\n\nPrerequisites:\n1. Your domain MUST point to this server's IP.\n2. Port 80 must be open.\n\nContinue?",
+                    async () => {
+                        try {
+                            showToast("Requesting SSL... This may take a minute.", "info");
+                            // We will implement this API endpoint in the backend next
+                            const res = await apiService.requestLetsEncryptSSL({
+                                domain: settings.panel_domain,
+                                email: settings.ssl_email || 'admin@example.com'
+                            });
+                            showToast(res.data.message || "SSL issued successfully! Nginx reloaded.", "success");
+                        } catch (err) {
+                            showToast("SSL Request Failed. Check domain DNS and Port 80.", "error");
+                        }
+                    },
+                    "Request SSL Certificate",
+                    "purple"
+                )}
+                    disabled={!settings.panel_domain}
+                    className={`w-full ${settings.panel_domain ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-gray-700 text-gray-500 cursor-not-allowed'} px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors`}>
+                    <Shield className="w-4 h-4" /> Issue Let's Encrypt SSL
+                </button>
+            </div>
+        </div>
+    );
+
     const renderSubscription = () => (
         <div className="space-y-6">
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
@@ -774,6 +822,7 @@ const Settings = () => {
             case 'wg_connection': return renderWgConnection();
             case 'wg_advanced': return renderWgAdvanced();
             case 'wg_status': return renderWgStatus();
+            case 'gen_domain_ssl': return renderDomainSsl();
             case 'gen_subscription': return renderSubscription();
             case 'gen_telegram': return renderTelegram();
             case 'gen_smartproxy': return renderSmartProxy();
