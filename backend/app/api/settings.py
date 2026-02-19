@@ -436,3 +436,27 @@ async def get_obfuscation_script(
     from ..services.wireguard import wireguard_service
     script = wireguard_service.generate_obfuscation_setup_script()
     return {"content": script, "filename": "setup_obfuscation.sh"}
+
+# =============================================
+# Panel SSL Management (Certbot)
+# =============================================
+
+class SSLRequest(BaseModel):
+    domain: str
+    email: str
+
+@router.post("/ssl/request")
+async def request_letsencrypt_ssl(
+    req: SSLRequest,
+    current_admin: User = Depends(get_current_admin)
+):
+    """Trigger Certbot to issue an SSL certificate for the panel domain"""
+    from ..services.ssl_service import SSLService
+    
+    ssl_service = SSLService()
+    success, message = ssl_service.issue_letsencrypt_cert(req.domain, req.email)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+        
+    return {"message": message}
