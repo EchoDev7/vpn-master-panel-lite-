@@ -121,12 +121,27 @@ optimize_system() {
     echo "vm.swappiness=10" >> /etc/sysctl.conf
     echo "vm.vfs_cache_pressure=50" >> /etc/sysctl.conf
     
-    # Enable IP Forwarding (Critical for VPN)
-    print_info "Enabling IP Forwarding..."
-    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-    sysctl -p > /dev/null 2>&1
+    # Enable IP Forwarding and Advanced Network Tuning (Enterprise)
+    print_info "Optimizing Network Stack for VPN Throughput..."
+    cat > /etc/sysctl.d/99-vpn-master.conf << EOF
+# IP Forwarding
+net.ipv4.ip_forward=1
+net.ipv6.conf.all.forwarding=1
+
+# Network throughput optimizations
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_fastopen=3
+
+# Increase ephemeral ports
+net.ipv4.ip_local_port_range=1024 65535
+
+# Increase connection tracking table size
+net.netfilter.nf_conntrack_max=1048576
+EOF
+    sysctl --system > /dev/null 2>&1
     
-    print_success "System optimized"
+    print_success "System & Network stack optimized"
 }
 
 install_dependencies() {
@@ -284,11 +299,13 @@ setup_frontend() {
     
     cd /opt/vpn-master-panel/frontend
     
-    # Use minimal npm install
+    # Install all dependencies including dev build tools like vite
     print_info "Installing Node dependencies..."
-    npm install --production -q > /dev/null 2>&1
+    npm install -q > /dev/null 2>&1
     
     print_info "Building optimized frontend..."
+    npm run build -q > /dev/null 2>&1
+    
     # Verify Build Success
     if [ ! -f "dist/index.html" ]; then
         print_error "Frontend Build Failed! 'dist/index.html' not found."
@@ -308,7 +325,7 @@ setup_nginx() {
     cat > /etc/nginx/sites-available/vpnmaster << EOF
 # Backend API
 server {
-    listen 8000;
+    listen 0.0.0.0:8000;
     server_name _;
 
     location / {
@@ -328,7 +345,7 @@ server {
 
 # Frontend (with caching)
 server {
-    listen 3000;
+    listen 0.0.0.0:3000;
     server_name _;
 
     root /opt/vpn-master-panel/frontend/dist;
@@ -480,6 +497,35 @@ setup_firewall() {
     ufw allow 80/tcp > /dev/null 2>&1
     ufw allow 443/tcp > /dev/null 2>&1
     
+    # Configure NAT for internet routing (Enterprise Idempotent Method)
+    print_info "Configuring UFW NAT routing..."
+    # Always allow forwarding
+    sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
+    
+    MAIN_IFACE=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
+    if [ -n "$MAIN_IFACE" ]; then
+        # Remove old NAT rules if they exist to ensure idempotency
+        sed -i '/\*nat/,$d' /etc/ufw/before.rules
+        
+        # Append clean NAT rules
+        cat <<EOT >> /etc/ufw/before.rules
+
+# NAT table rules
+*nat
+:POSTROUTING ACCEPT [0:0]
+# Allow traffic from OpenVPN and WireGuard clients
+-A POSTROUTING -s 10.8.0.0/8 -o $MAIN_IFACE -j MASQUERADE
+-A POSTROUTING -s 10.9.0.0/8 -o $MAIN_IFACE -j MASQUERADE
+COMMIT
+EOT
+        # Ensure UFW routes traffic seamlessly
+        if ! grep -q "-A ufw-before-forward -s 10.8.0.0/8 -j ACCEPT" /etc/ufw/before.rules; then
+            sed -i '/\*filter/a -A ufw-before-forward -s 10.8.0.0/8 -j ACCEPT\n-A ufw-before-forward -s 10.9.0.0/8 -j ACCEPT' /etc/ufw/before.rules
+        fi
+    else
+        print_warning "Could not detect main network interface for NAT mapping."
+    fi
+    
     # Panel ports
     ufw allow 3000/tcp > /dev/null 2>&1
     ufw allow 8000/tcp > /dev/null 2>&1
@@ -494,27 +540,41 @@ setup_firewall() {
 }
 
 setup_apparmor() {
-    print_step "Configuring AppArmor"
+    print_step "Configuring AppArmor & Scripts"
     
-    # Deploy Auth Script to standard location
+    # Ensure TUN Device Exists
+    if [ ! -c /dev/net/tun ]; then
+        print_info "Creating /dev/net/tun..."
+        mkdir -p /dev/net
+        mknod /dev/net/tun c 10 200
+        chmod 600 /dev/net/tun
+    fi
+
+    # Deploy Auth Scripts to standard location
     mkdir -p /etc/openvpn/scripts
     cp /opt/vpn-master-panel/backend/auth.py /etc/openvpn/scripts/auth.py
+    cp /opt/vpn-master-panel/backend/scripts/auth.sh /etc/openvpn/scripts/ 2>/dev/null || true
+    cp /opt/vpn-master-panel/backend/scripts/client-connect.sh /etc/openvpn/scripts/ 2>/dev/null || true
+    cp /opt/vpn-master-panel/backend/scripts/client-disconnect.sh /etc/openvpn/scripts/ 2>/dev/null || true
+    cp /opt/vpn-master-panel/backend/scripts/get_speed_limit.py /etc/openvpn/scripts/ 2>/dev/null || true
+
     chmod 755 /etc/openvpn/scripts/auth.py
-    chown root:root /etc/openvpn/scripts/auth.py
-    print_success "Auth script deployed to /etc/openvpn/scripts/"
+    chmod 755 /etc/openvpn/scripts/*.sh 2>/dev/null || true
+    chmod 755 /etc/openvpn/scripts/*.py 2>/dev/null || true
+    chown root:root /etc/openvpn/scripts/* 2>/dev/null || true
+    print_success "Auth scripts deployed to /etc/openvpn/scripts/"
 
     if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
         print_info "Updating OpenVPN AppArmor profile..."
-        # Check if we already added our rules
-        if ! grep -q "/etc/openvpn/scripts/auth.py" /etc/apparmor.d/usr.sbin.openvpn; then
+        if ! grep -q "/etc/openvpn/scripts/\*\*" /etc/apparmor.d/usr.sbin.openvpn; then
             sed -i '/}/d' /etc/apparmor.d/usr.sbin.openvpn
             echo "  /opt/vpn-master-panel/backend/data/** r," >> /etc/apparmor.d/usr.sbin.openvpn
-            echo "  /etc/openvpn/scripts/auth.py Ux," >> /etc/apparmor.d/usr.sbin.openvpn
+            echo "  /etc/openvpn/scripts/** rUx," >> /etc/apparmor.d/usr.sbin.openvpn
             echo "  /opt/vpn-master-panel/backend/** r," >> /etc/apparmor.d/usr.sbin.openvpn
             echo "}" >> /etc/apparmor.d/usr.sbin.openvpn
             
             systemctl reload apparmor
-            print_success "AppArmor configured (Auth Script Unconfined)"
+            print_success "AppArmor configured (Auth Scripts Unconfined)"
         else
             print_info "AppArmor already configured"
         fi
@@ -621,10 +681,15 @@ main() {
     setup_apparmor
     setup_firewall
     
-    # Ensure log file exists and is writable (Critical for auth script)
+    # Ensure log files exist and have correct permissions
     mkdir -p /var/log/openvpn
+    touch /var/log/openvpn/openvpn.log
+    touch /var/log/openvpn/openvpn-status.log
     touch /var/log/openvpn/auth.log
+    touch /var/log/openvpn/auth_wrapper.log
+    chmod 755 /var/log/openvpn
     chmod 666 /var/log/openvpn/auth.log
+    chmod 666 /var/log/openvpn/auth_wrapper.log
     
     show_success_message
 }
