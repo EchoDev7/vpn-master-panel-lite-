@@ -502,36 +502,38 @@ class OpenVPNService:
     # ================================================================
 
     def _get_public_ip(self) -> str:
-        """Resolve public IP"""
-        import requests
-        import socket
+        """Resolve public IP natively without external dependencies"""
         
-        endpoints = [
-            'https://api.ipify.org',
-            'https://ifconfig.me/ip',
-            'https://ident.me'
-        ]
-        
+        # 1. Try public APIS via built-in urllib (safe against timeouts and missing modules)
+        endpoints = ['https://api.ipify.org', 'https://ident.me', 'https://ifconfig.me/ip']
         for url in endpoints:
             try:
-                res = requests.get(url, timeout=3)
-                if res.status_code == 200:
-                    ip = res.text.strip()
-                    # Basic IPv4 validation
+                import urllib.request
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=3) as response:
+                    ip = response.read().decode('utf-8').strip()
                     if len(ip.split('.')) == 4:
                         return ip
             except:
                 continue
                 
-        # Fallback: Try to determine IP via UDP socket routing
+        # 2. Try OS-level kernel routing check (gets primary outgoing interface IP)
         try:
+            import socket
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(1)
-            # connect() for UDP doesn't send packets, just sets default routing path
             s.connect(("8.8.8.8", 53))
             ip = s.getsockname()[0]
             s.close()
             if ip and not ip.startswith("127."):
+                return ip
+        except:
+            pass
+            
+        # 3. Try generic linux hostname
+        try:
+            import subprocess
+            ip = subprocess.check_output("hostname -I | awk '{print $1}'", shell=True).decode().strip()
+            if ip and len(ip.split('.')) == 4:
                 return ip
         except:
             pass
