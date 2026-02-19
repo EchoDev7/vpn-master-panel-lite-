@@ -416,17 +416,21 @@ fi
 # For now, we assume user wants 443 for VPN/SSL.
 
 # Ensure OpenVPN Log Directory Exists
+# Ensure OpenVPN Log Directory Exists
 if [ ! -d "/var/log/openvpn" ]; then
     mkdir -p /var/log/openvpn
-    touch /var/log/openvpn/openvpn.log
-    touch /var/log/openvpn/openvpn-status.log
-    touch /var/log/openvpn/auth.log
-    touch /var/log/openvpn/auth_wrapper.log
-    chmod 755 /var/log/openvpn
-    # Allow OpenVPN (nobody) to write to auth logs
-    chmod 666 /var/log/openvpn/auth.log
-    chmod 666 /var/log/openvpn/auth_wrapper.log
 fi
+
+# Always ensure log files exist and have correct permissions
+touch /var/log/openvpn/openvpn.log
+touch /var/log/openvpn/openvpn-status.log
+touch /var/log/openvpn/auth.log
+touch /var/log/openvpn/auth_wrapper.log
+chmod 755 /var/log/openvpn
+
+# Allow OpenVPN (nobody/nogroup) to write to auth logs
+chmod 666 /var/log/openvpn/auth.log
+chmod 666 /var/log/openvpn/auth_wrapper.log
 
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
 systemctl daemon-reload
