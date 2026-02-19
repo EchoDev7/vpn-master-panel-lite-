@@ -1,7 +1,14 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Activity, TrendingUp, Server, Shield, UserPlus, Settings as SettingsIcon, Globe, RefreshCw } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import {
+    Users, Activity, TrendingUp, Server, Shield,
+    Globe, RefreshCw, ArrowUpRight, ArrowDownRight,
+    Zap, Cpu, Map, ShieldCheck, ActivitySquare
+} from 'lucide-react';
+import {
+    AreaChart, Area, XAxis, YAxis, CartesianGrid,
+    Tooltip as RechartsTooltip, ResponsiveContainer
+} from 'recharts';
 import apiService from '../services/api';
 import ActiveConnectionsModal from './ActiveConnectionsModal';
 import SystemMetricsModal from './SystemMetricsModal';
@@ -9,9 +16,8 @@ import { SkeletonDashboard, SkeletonWidget } from './Skeletons';
 import { ApiErrorState } from './States';
 import RefreshIndicator from './RefreshIndicator';
 import NotificationCenter, { NotificationBell } from './NotificationCenter';
-import useWebSocket from '../hooks/useWebSocket'; // Import WebSocket hook
+import useWebSocket from '../hooks/useWebSocket';
 
-// Lazy load heavy components for better performance
 const ServerResourcesWidget = lazy(() => import('./ServerResourcesWidget'));
 const NetworkSpeedWidget = lazy(() => import('./NetworkSpeedWidget'));
 const ProtocolDistributionChart = lazy(() => import('./ProtocolDistributionChart'));
@@ -34,8 +40,7 @@ export const Dashboard = () => {
     const [lastUpdated, setLastUpdated] = useState(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
 
-    // WebSocket Integration
-    const { lastMessage, isConnected } = useWebSocket();
+    const { lastMessage } = useWebSocket();
 
     useEffect(() => {
         if (lastMessage) {
@@ -47,14 +52,11 @@ export const Dashboard = () => {
         if (message.type === 'dashboard_update') {
             setStats(prevStats => ({ ...prevStats, ...message.data }));
             setLastUpdated(new Date());
-        } else if (message.type === 'system_stats') {
-            // Handle system stats update if needed
         }
     };
 
     useEffect(() => {
         loadDashboardData();
-        // Fallback polling if WebSocket is disconnected (optional, or keep existing interval)
         const interval = setInterval(loadDashboardData, 30000);
         return () => clearInterval(interval);
     }, [trafficDays]);
@@ -97,228 +99,263 @@ export const Dashboard = () => {
         }
     };
 
-    const handleUsersCardClick = () => {
-        navigate('/users');
+    const CustomTooltip = ({ active, payload, label }) => {
+        if (active && payload && payload.length) {
+            return (
+                <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-md p-4 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700">
+                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">{label}</p>
+                    {payload.map((entry, index) => (
+                        <div key={index} className="flex items-center gap-2 mt-1">
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }} />
+                            <span className="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                                {entry.name}:
+                            </span>
+                            <span className="text-sm font-bold text-gray-900 dark:text-white">
+                                {entry.value} GB
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+        return null;
     };
 
-    const handleConnectionsCardClick = async () => {
-        await loadActiveConnections();
-        setShowConnectionsModal(true);
-    };
-
-    const handleTrafficCardClick = () => {
-        trafficChartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    };
-
-    const handleSystemCardClick = () => {
-        setShowSystemModal(true);
-    };
-
-    if (loading) {
-        return <SkeletonDashboard />;
-    }
+    if (loading) return <SkeletonDashboard />;
 
     if (error) {
         return (
-            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+            <div className="min-h-screen bg-transparent p-6">
                 <ApiErrorState error={error} onRetry={loadDashboardData} />
             </div>
         );
     }
 
-    // Memoized StatCard component for better performance
-    const StatCard = memo(({ title, value, icon: Icon, color, subtitle, onClick, clickable = true }) => (
+    const StatCard = memo(({ title, value, subtitle, icon: Icon, gradient, onClick, clickable = true }) => (
         <div
-            className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border-l-4 transition-all duration-300 ${clickable ? 'cursor-pointer hover:shadow-xl hover:scale-105 hover:-translate-y-1' : ''
+            className={`relative overflow-hidden bg-white dark:bg-gray-800 rounded-2xl p-6 border border-gray-100 dark:border-gray-700/50 shadow-sm transition-all duration-300 ${clickable ? 'cursor-pointer hover:shadow-2xl hover:-translate-y-1 hover:border-blue-500/30' : ''
                 }`}
-            style={{ borderColor: color }}
             onClick={onClick}
             role={clickable ? "button" : "presentation"}
             tabIndex={clickable ? 0 : -1}
         >
-            <div className="flex items-center justify-between">
+            {/* Background Glow */}
+            <div className={`absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl opacity-20 bg-gradient-to-br ${gradient}`} />
+
+            <div className="relative z-10 flex items-center justify-between">
                 <div>
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{title}</p>
-                    <p className="text-3xl font-bold text-gray-900 dark:text-white mt-2">{value}</p>
-                    {subtitle && <p className="text-sm text-gray-500 mt-1">{subtitle}</p>}
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1 tracking-wide uppercase">{title}</p>
+                    <p className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
+                        {value}
+                    </p>
+                    {subtitle && (
+                        <div className="flex items-center gap-1 mt-2 text-sm text-gray-500 dark:text-gray-400">
+                            {subtitle.includes('Up') ? <ArrowUpRight size={14} className="text-emerald-500" /> : <ActivitySquare size={14} className="text-blue-500" />}
+                            <span>{subtitle}</span>
+                        </div>
+                    )}
                 </div>
-                <div className="p-3 rounded-full transition-transform duration-300 hover:scale-110" style={{ backgroundColor: color + '20' }}>
-                    <Icon size={32} style={{ color }} />
+                <div className={`p-4 rounded-2xl bg-gradient-to-br ${gradient} shadow-lg text-white transform transition-transform duration-500 hover:rotate-12`}>
+                    <Icon size={28} strokeWidth={2.5} />
                 </div>
             </div>
         </div>
     ));
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-            {/* Header with Refresh Indicator and Notifications */}
-            <div className="mb-8 flex items-start justify-between">
+        <div className="min-h-screen p-4 md:p-8 space-y-8 animate-in fade-in duration-500">
+            {/* Header section */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/40 dark:bg-gray-800/40 backdrop-blur-xl p-6 rounded-3xl border border-white/20 shadow-sm">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-                        <Shield className="text-primary-500" size={36} />
+                    <h1 className="text-3xl md:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400 flex items-center gap-3">
+                        <ShieldCheck size={40} className="text-blue-500" />
                         VPN Master Panel
                     </h1>
-                    <p className="text-gray-600 dark:text-gray-400 mt-2">
-                        Advanced Multi-Protocol VPN Management with PersianShield™
+                    <p className="text-gray-600 dark:text-gray-400 mt-2 font-medium">
+                        Real-time Lite Edition Monitoring Overview
                     </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-4">
                     <RefreshIndicator
                         lastUpdated={lastUpdated}
                         onRefresh={handleManualRefresh}
                         isRefreshing={isRefreshing}
                     />
-                    <NotificationBell onClick={() => setShowNotifications(true)} />
+                    <div className="bg-white dark:bg-gray-700 p-2 rounded-full shadow-sm border border-gray-100 dark:border-gray-600">
+                        <NotificationBell onClick={() => setShowNotifications(true)} />
+                    </div>
                 </div>
             </div>
 
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            {/* Main Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <StatCard
                     title="Total Users"
                     value={stats?.users?.total || 0}
-                    subtitle={`${stats?.users?.active || 0} active`}
+                    subtitle={`${stats?.users?.active || 0} active accounts`}
                     icon={Users}
-                    color="#3b82f6"
-                    onClick={handleUsersCardClick}
+                    gradient="from-blue-500 to-cyan-500"
+                    onClick={() => navigate('/users')}
                 />
                 <StatCard
-                    title="Active Connections"
+                    title="Active Tunnels"
                     value={stats?.connections?.active || 0}
-                    subtitle="Real-time"
+                    subtitle="Live connections"
                     icon={Activity}
-                    color="#10b981"
-                    onClick={handleConnectionsCardClick}
+                    gradient="from-emerald-500 to-teal-500"
+                    onClick={async () => {
+                        await loadActiveConnections();
+                        setShowConnectionsModal(true);
+                    }}
                 />
                 <StatCard
                     title="Traffic (24h)"
                     value={`${stats?.traffic?.gb_24h || 0} GB`}
-                    subtitle="Upload + Download"
-                    icon={TrendingUp}
-                    color="#f59e0b"
-                    onClick={handleTrafficCardClick}
+                    subtitle="Up/Down bandwidth usage"
+                    icon={Globe}
+                    gradient="from-orange-500 to-amber-500"
+                    onClick={() => trafficChartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
                 />
                 <StatCard
                     title="System Load"
                     value={`${stats?.system?.cpu_percent || 0}%`}
-                    subtitle={`RAM: ${stats?.system?.memory_percent || 0}%`}
-                    icon={Server}
-                    color="#ef4444"
-                    onClick={handleSystemCardClick}
+                    subtitle={`RAM used: ${stats?.system?.memory_percent || 0}%`}
+                    icon={Cpu}
+                    gradient="from-rose-500 to-pink-500"
+                    onClick={() => setShowSystemModal(true)}
                 />
             </div>
 
             {/* Traffic Type Breakdown */}
             {trafficByType && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <StatCard
                         title="Direct Traffic"
                         value={`${trafficByType?.summary?.direct?.gb || 0} GB`}
-                        subtitle={`Last ${trafficDays} days`}
-                        icon={Activity}
-                        color="#3b82f6"
+                        subtitle={`Total direct in last ${trafficDays} days`}
+                        icon={Zap}
+                        gradient="from-indigo-500 to-blue-500"
                         clickable={false}
                     />
                     <StatCard
                         title="Tunnel Traffic"
                         value={`${trafficByType?.summary?.tunnel?.gb || 0} GB`}
-                        subtitle={`Last ${trafficDays} days`}
-                        icon={Globe}
-                        color="#10b981"
+                        subtitle={`Overcast mapped in last ${trafficDays} days`}
+                        icon={Map}
+                        gradient="from-fuchsia-500 to-purple-500"
                         clickable={false}
                     />
                 </div>
             )}
 
-            {/* Traffic Chart */}
-            <div ref={trafficChartRef} className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-8">
-                <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <Globe className="text-primary-500" />
-                        Traffic Overview ({trafficDays} Days)
-                    </h2>
-                    <div className="flex gap-2">
+            {/* Gorgeous Traffic Area Chart */}
+            <div ref={trafficChartRef} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur-2xl rounded-3xl shadow-xl border border-white/20 dark:border-gray-700 p-6 md:p-8">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8">
+                    <div>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+                            <TrendingUp className="text-blue-500" size={28} />
+                            Bandwidth Analytics
+                        </h2>
+                        <p className="text-sm text-gray-500 mt-1">Network throughput over the past {trafficDays} days</p>
+                    </div>
+                    <div className="flex gap-2 mt-4 sm:mt-0 bg-gray-100/50 dark:bg-gray-900/50 p-1.5 rounded-xl border border-gray-200 dark:border-gray-700">
                         {[7, 14, 30].map(days => (
                             <button
                                 key={days}
                                 onClick={() => setTrafficDays(days)}
-                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${trafficDays === days
-                                    ? 'bg-blue-500 text-white shadow-md'
-                                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                                className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all duration-300 ${trafficDays === days
+                                        ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-md transform scale-105'
+                                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-700/50'
                                     }`}
                             >
-                                {days} Days
+                                {days}D
                             </button>
                         ))}
-                        <button
-                            onClick={handleManualRefresh}
-                            disabled={isRefreshing}
-                            className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all flex items-center gap-2 disabled:opacity-50"
-                            title="Refresh"
-                        >
-                            <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
-                        </button>
                     </div>
                 </div>
-                <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={trafficData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis dataKey="date" stroke="#9ca3af" />
-                        <YAxis stroke="#9ca3af" label={{ value: 'GB', angle: -90, position: 'insideLeft' }} />
-                        <Tooltip
-                            contentStyle={{
-                                backgroundColor: '#1f2937',
-                                border: 'none',
-                                borderRadius: '8px',
-                                color: '#fff'
-                            }}
-                        />
-                        <Line
-                            type="monotone"
-                            dataKey="upload_gb"
-                            stroke="#3b82f6"
-                            strokeWidth={2}
-                            name="Upload"
-                            dot={{ r: 4 }}
-                            activeDot={{ r: 6 }}
-                        />
-                        <Line
-                            type="monotone"
-                            dataKey="download_gb"
-                            stroke="#10b981"
-                            strokeWidth={2}
-                            name="Download"
-                            dot={{ r: 4 }}
-                            activeDot={{ r: 6 }}
-                        />
-                    </LineChart>
-                </ResponsiveContainer>
+
+                <div className="h-[350px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={trafficData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                            <defs>
+                                <linearGradient id="colorUpload" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                </linearGradient>
+                                <linearGradient id="colorDownload" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#374151" opacity={0.2} />
+                            <XAxis
+                                dataKey="date"
+                                stroke="#6b7280"
+                                tickLine={false}
+                                axisLine={false}
+                                dy={10}
+                                tick={{ fontSize: 12, fontWeight: 500 }}
+                            />
+                            <YAxis
+                                stroke="#6b7280"
+                                tickLine={false}
+                                axisLine={false}
+                                dx={-10}
+                                tickFormatter={(val) => `${val}GB`}
+                                tick={{ fontSize: 12, fontWeight: 500 }}
+                            />
+                            <RechartsTooltip content={<CustomTooltip />} />
+                            <Area
+                                type="monotone"
+                                dataKey="upload_gb"
+                                stroke="#3b82f6"
+                                strokeWidth={3}
+                                fillOpacity={1}
+                                fill="url(#colorUpload)"
+                                name="Upload"
+                                animationDuration={1500}
+                                activeDot={{ r: 8, strokeWidth: 0, fill: '#3b82f6', className: 'animate-pulse' }}
+                            />
+                            <Area
+                                type="monotone"
+                                dataKey="download_gb"
+                                stroke="#10b981"
+                                strokeWidth={3}
+                                fillOpacity={1}
+                                fill="url(#colorDownload)"
+                                name="Download"
+                                animationDuration={1500}
+                                activeDot={{ r: 8, strokeWidth: 0, fill: '#10b981', className: 'animate-pulse' }}
+                            />
+                        </AreaChart>
+                    </ResponsiveContainer>
+                </div>
             </div>
 
-            {/* Quick Actions */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            {/* Quick Actions Panel */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <QuickAction
-                    title="Add New User"
-                    description="Create VPN account"
-                    color="#3b82f6"
+                    title="Add User Account"
+                    description="Provision a new VPN profile"
+                    gradient="from-blue-500 to-indigo-600"
                     onClick={() => navigate('/users')}
                 />
                 <QuickAction
-                    title="Setup Tunnel"
-                    description="Configure Iran-Foreign tunnel"
-                    color="#239F40"
+                    title="Configure Tunneling"
+                    description="Setup Iran-Foreign bridges"
+                    gradient="from-emerald-500 to-teal-600"
                     onClick={() => navigate('/tunnels')}
                 />
                 <QuickAction
-                    title="Server Management"
-                    description="Manage VPN servers"
-                    color="#DA0000"
+                    title="Server Nodes"
+                    description="Manage backend infrastructure"
+                    gradient="from-rose-500 to-orange-600"
                     onClick={() => navigate('/servers')}
                 />
             </div>
 
-            {/* Advanced Monitoring Widgets with Lazy Loading */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {/* Advanced Widgets Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4">
                 <Suspense fallback={<SkeletonWidget />}>
                     <ServerResourcesWidget />
                 </Suspense>
@@ -326,9 +363,7 @@ export const Dashboard = () => {
                     <NetworkSpeedWidget />
                 </Suspense>
             </div>
-
-            {/* Analytics Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <Suspense fallback={<SkeletonWidget />}>
                     <ProtocolDistributionChart />
                 </Suspense>
@@ -337,7 +372,7 @@ export const Dashboard = () => {
                 </Suspense>
             </div>
 
-            {/* Modals */}
+            {/* Render Modals */}
             {showConnectionsModal && (
                 <ActiveConnectionsModal
                     connections={activeConnections}
@@ -345,7 +380,6 @@ export const Dashboard = () => {
                     onRefresh={loadActiveConnections}
                 />
             )}
-
             {showSystemModal && (
                 <SystemMetricsModal
                     stats={stats}
@@ -353,7 +387,6 @@ export const Dashboard = () => {
                     onRefresh={loadDashboardData}
                 />
             )}
-
             {showNotifications && (
                 <NotificationCenter
                     isOpen={showNotifications}
@@ -364,15 +397,24 @@ export const Dashboard = () => {
     );
 };
 
-const QuickAction = memo(({ title, description, color, onClick }) => (
+const QuickAction = memo(({ title, description, gradient, onClick }) => (
     <button
         onClick={onClick}
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 text-left hover:shadow-lg transition-shadow border-l-4"
-        style={{ borderColor: color }}
+        className="group relative overflow-hidden bg-white dark:bg-gray-800 rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 p-6 text-left border border-gray-100 dark:border-gray-700"
     >
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">{description}</p>
+        <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${gradient} transform origin-left transition-transform duration-300 scale-x-0 group-hover:scale-x-100`} />
+        <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white group-hover:text-blue-500 transition-colors">
+            {title}
+        </h3>
+        <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-2">{description}</p>
+
+        <div className="absolute right-6 bottom-6 opacity-0 translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300">
+            <div className={`p-2 rounded-full bg-gradient-to-r ${gradient} text-white`}>
+                <ArrowUpRight size={18} />
+            </div>
+        </div>
     </button>
 ));
 
 export default Dashboard;
+
