@@ -503,22 +503,29 @@ setup_firewall() {
     # Always allow forwarding
     sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
     
+    # SELF HEALING: Restore UFW rules if prior script deleted the *filter block
+    if ! grep -q "^\*filter" /etc/ufw/before.rules 2>/dev/null; then
+        echo -e "${YELLOW}⚠️ Corrupted UFW before.rules detected. Restoring to defaults...${NC}"
+        if [ -f "/usr/share/ufw/before.rules" ]; then
+            cp /usr/share/ufw/before.rules /etc/ufw/before.rules
+        fi
+    fi
+    
     MAIN_IFACE=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
     if [ -n "$MAIN_IFACE" ]; then
-        # Remove old NAT rules if they exist to ensure idempotency
-        sed -i '/\*nat/,$d' /etc/ufw/before.rules
+        # Ensure *nat block exists safely without deleting existing rules
+        if ! grep -q "^\*nat" /etc/ufw/before.rules; then
+            echo -e "\n# NAT table rules\n*nat\n:POSTROUTING ACCEPT [0:0]\nCOMMIT\n" >> /etc/ufw/before.rules
+        fi
         
-        # Append clean NAT rules
-        cat <<EOT >> /etc/ufw/before.rules
-
-# NAT table rules
-*nat
-:POSTROUTING ACCEPT [0:0]
-# Allow traffic from OpenVPN and WireGuard clients
--A POSTROUTING -s 10.8.0.0/8 -o $MAIN_IFACE -j MASQUERADE
--A POSTROUTING -s 10.9.0.0/8 -o $MAIN_IFACE -j MASQUERADE
-COMMIT
-EOT
+        # Add MASQUERADE rules idempotently
+        if ! grep -q "-A POSTROUTING -s 10.8.0.0/8 -o \$MAIN_IFACE -j MASQUERADE" /etc/ufw/before.rules; then
+            sed -i "/^\*nat/a -A POSTROUTING -s 10.8.0.0/8 -o \$MAIN_IFACE -j MASQUERADE" /etc/ufw/before.rules
+        fi
+        if ! grep -q "-A POSTROUTING -s 10.9.0.0/8 -o \$MAIN_IFACE -j MASQUERADE" /etc/ufw/before.rules; then
+            sed -i "/^\*nat/a -A POSTROUTING -s 10.9.0.0/8 -o \$MAIN_IFACE -j MASQUERADE" /etc/ufw/before.rules
+        fi
+        
         # Ensure UFW routes traffic seamlessly
         if ! grep -q "-A ufw-before-forward -s 10.8.0.0/8 -j ACCEPT" /etc/ufw/before.rules; then
             sed -i '/\*filter/a -A ufw-before-forward -s 10.8.0.0/8 -j ACCEPT\n-A ufw-before-forward -s 10.9.0.0/8 -j ACCEPT' /etc/ufw/before.rules
