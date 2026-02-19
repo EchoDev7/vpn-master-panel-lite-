@@ -2,7 +2,7 @@
 import sys
 import os
 import logging
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from passlib.context import CryptContext
 
@@ -34,7 +34,7 @@ def auth_user(username, password):
         
         # Raw SQL to avoid model dependency issues in standalone script
         # Check active users who are not expired
-        query = "SELECT hashed_password, status, expiry_date FROM users WHERE username = :username"
+        query = text("SELECT hashed_password, status, expiry_date FROM users WHERE username = :username")
         result = db.execute(query, {'username': username}).fetchone()
         
         if not result:
@@ -63,7 +63,7 @@ def auth_user(username, password):
         # Connection Limit Check (F3 - User Requested via Management Socket)
         try:
              # Check limit from DB
-             limit_query = "SELECT connection_limit FROM users WHERE username = :username"
+             limit_query = text("SELECT connection_limit FROM users WHERE username = :username")
              limit_res = db.execute(limit_query, {'username': username}).fetchone()
              limit = limit_res[0] if limit_res else 0
              
