@@ -290,43 +290,24 @@ const Settings = () => {
                 <div className="flex items-start gap-3">
                     <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
                     <div>
-                        <p className="text-amber-300 font-semibold text-sm">Iran Anti-Censorship Settings</p>
-                        <p className="text-gray-400 text-xs mt-1">Settings marked with 🇮🇷 are pre-configured for Iran's DPI bypass.</p>
+                        <p className="text-amber-300 font-semibold text-sm">Official Client DPI Evasion (Native)</p>
+                        <p className="text-gray-400 text-xs mt-1">These settings are 100% supported natively by official OpenVPN Connect apps on iOS/Android/Windows, without needing 3rd-party obfuscators like Stunnel or HTTP custom apps.</p>
                     </div>
                 </div>
             </div>
-            <SectionTitle>XOR Scramble Obfuscation</SectionTitle>
-            <S_Check {...sp} settingKey="ovpn_scramble" label="Enable XOR Scramble" iranBadge tip="Modifies packet headers to evade DPI. Requires patched OpenVPN." />
-            <S_Input {...sp} settingKey="ovpn_scramble_password" label="Scramble Password" placeholder="vpnmaster" iranBadge tip="XOR key, must match server and client." />
-            <SectionTitle>Domain Fronting / SNI Spoofing</SectionTitle>
-            <S_Check {...sp} settingKey="ovpn_sni_spoof_enabled" label="Enable SNI Spoofing" iranBadge tip="Disguise TLS handshake with legitimate domain SNI (e.g. google.com). Makes traffic indistinguishable from normal HTTPS." />
-            <S_Input {...sp} settingKey="ovpn_sni_spoof_domain" label="SNI Domain" placeholder="www.google.com" iranBadge tip="Legitimate domain to spoof in TLS ClientHello. Use popular domains: google.com, microsoft.com, apple.com." />
-            <SectionTitle>SSH Tunnel (Iran June 2025)</SectionTitle>
-            <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 mb-2">
-                <p className="text-green-300 text-xs">💡 SSH was the only high-speed protocol working on some Iranian ISPs during June 2025 crackdown. Route OpenVPN through SSH tunnel for maximum resilience.</p>
-            </div>
-            <S_Check {...sp} settingKey="ovpn_ssh_tunnel_enabled" label="Enable SSH Pre-Tunnel" iranBadge tip="Wrap OpenVPN inside SSH tunnel before connecting. Most resilient against Iran DPI." />
+
+            <SectionTitle>Native HTTP Proxy Payload (Domain Fronting)</SectionTitle>
+            <S_Check {...sp} settingKey="ovpn_http_proxy_enabled" label="Enable HTTP Proxy SNI Payload" iranBadge tip="Injects a custom Host header over an HTTP proxy connection to deceive DPI." />
             <div className="grid grid-cols-2 gap-4">
-                <S_Input {...sp} settingKey="ovpn_ssh_tunnel_host" label="SSH Host" placeholder="your-server.com" />
-                <S_Input {...sp} settingKey="ovpn_ssh_tunnel_port" label="SSH Port" placeholder="22" />
+                <S_Input {...sp} settingKey="ovpn_http_proxy_host" label="Proxy IP / CDN Edge IP" placeholder="e.g. 104.16.x.x" tip="IP address of the proxy routing the traffic." />
+                <S_Input {...sp} settingKey="ovpn_http_proxy_port" label="Proxy Port" placeholder="80" type="number" />
             </div>
-            <SectionTitle>CDN Routing</SectionTitle>
-            <S_Check {...sp} settingKey="ovpn_cdn_routing_enabled" label="Enable CDN Routing" iranBadge tip="Route traffic through CDN (Fastly/Cloudflare) to bypass IP blocking." />
-            <S_Input {...sp} settingKey="ovpn_cdn_domain" label="CDN Domain" placeholder="cdn.example.com" tip="Domain fronted through CDN." />
+            <S_Input {...sp} settingKey="ovpn_http_proxy_custom_header" label="Spoofed Host Domain (SNI Payload)" placeholder="www.shaparack.ir" iranBadge tip="The domain inserted into the HTTP Host header. DPI assumes traffic is going to this local site." />
             <SectionTitle>Packet Fragmentation</SectionTitle>
-            <S_Input {...sp} settingKey="ovpn_fragment" label="Fragment Size (0 = disabled)" placeholder="0" type="number" iranBadge tip="Split packets to evade DPI. Common: 1200, 1300." />
-            <SectionTitle>Port Sharing</SectionTitle>
-            <S_Input {...sp} settingKey="ovpn_port_share" label="Port Share (e.g. 127.0.0.1 8443)" placeholder="127.0.0.1 8443" tip="Share VPN port with web server for stealth." />
-            <SectionTitle>Proxy Chaining</SectionTitle>
-            <div className="grid grid-cols-3 gap-4">
-                <S_Select {...sp} settingKey="ovpn_proxy_type" label="Proxy Type" options={[
-                    { value: 'none', label: 'None' },
-                    { value: 'socks', label: 'SOCKS5 Proxy' },
-                    { value: 'http', label: 'HTTP Proxy' },
-                ]} />
-                <S_Input {...sp} settingKey="ovpn_proxy_address" label="Proxy Address" placeholder="127.0.0.1" />
-                <S_Input {...sp} settingKey="ovpn_proxy_port" label="Proxy Port" placeholder="1080" />
-            </div>
+            <S_Input {...sp} settingKey="ovpn_fragment" label="Fragment Size (0 = disabled)" placeholder="0" type="number" tip="Split packets to evade DPI (UDP only). Common: 1200." />
+
+            <SectionTitle>HTTPS Camouflage (Port Sharing)</SectionTitle>
+            <S_Input {...sp} settingKey="ovpn_port_share" label="Port Share (Forward non-VPN to Web Server)" placeholder="127.0.0.1 8443" tip="If DPI probes your port 443 with normal HTTPS requests, OpenVPN proxies them back to a real web server (e.g. Nginx on 8443)." />
             <SectionTitle>Block Iranian IPs (Server-Side)</SectionTitle>
             <S_Check {...sp} settingKey="ovpn_block_iran_ips" label="Block outgoing connections to Iranian IPs" iranBadge tip="Prevents server from initiating connections to Iran, which DPI monitors as suspicious behavior for a foreign web server." />
             <SectionTitle>Multi-Server Failover</SectionTitle>
