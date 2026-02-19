@@ -43,8 +43,8 @@ def auth_user(username, password):
             
         hashed_pw, status, expiry = result
         
-        if status != "active":
-            logging.warning(f"AUTH_FAILED: User {username} is {status}")
+        if str(status).lower() != "active":
+            logging.warning(f"AUTH_FAILED: User {username} is {status} (Expected: active)")
             return False
             
         if expiry:
