@@ -175,11 +175,30 @@ const Settings = () => {
             </div>
             <S_Select {...sp} settingKey="ovpn_dev_type" label="Device Type" options={DEV_TYPES} tip="TUN is for IP routing (Android/iOS). TAP is for bridging." />
             <SectionTitle>Server Network</SectionTitle>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 mb-4">
                 <S_Input {...sp} settingKey="ovpn_server_subnet" label="VPN Subnet" placeholder="10.8.0.0" tip="IP range for VPN clients." />
                 <S_Input {...sp} settingKey="ovpn_server_netmask" label="Subnet Mask" placeholder="255.255.255.0" />
                 <S_Input {...sp} settingKey="ovpn_max_clients" label="Max Clients" placeholder="100" type="number" />
-                <S_Input {...sp} settingKey="ovpn_server_ip" label="Server IP (Override)" placeholder="Auto-detect" tip="Leave empty to auto-detect." />
+            </div>
+
+            <SectionTitle>Client Connection Address</SectionTitle>
+            <div className="grid grid-cols-2 gap-4">
+                <S_Select {...sp} settingKey="ovpn_remote_address_type" label="Address Type" tip="How clients will connect to the server." options={[
+                    { value: 'auto', label: 'Auto-detect Server IP' },
+                    { value: 'custom_ip', label: 'Custom Server IP' },
+                    { value: 'domain', label: 'Custom Domain (e.g., Cloudflare)' }
+                ]} />
+                {(!settings.ovpn_remote_address_type || settings.ovpn_remote_address_type === 'auto') && (
+                    <div className="flex items-center text-gray-500 text-sm mt-6 bg-gray-800/50 px-3 rounded border border-gray-700">
+                        The server's public IP will be auto-detected.
+                    </div>
+                )}
+                {settings.ovpn_remote_address_type === 'custom_ip' && (
+                    <S_Input {...sp} settingKey="ovpn_server_ip" label="Server IP Address" placeholder="1.2.3.4" />
+                )}
+                {settings.ovpn_remote_address_type === 'domain' && (
+                    <S_Input {...sp} settingKey="ovpn_remote_domain" label="Domain Name" placeholder="vpn.yourdomain.com" />
+                )}
             </div>
             <div className="grid grid-cols-1 gap-4">
                 <div className="flex gap-4">
