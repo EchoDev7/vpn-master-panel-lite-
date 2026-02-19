@@ -415,20 +415,19 @@ fi
 # Only do this if 443 is actually intended for VPN, otherwise warn.
 # For now, we assume user wants 443 for VPN/SSL.
 
-# Ensure OpenVPN Log Directory Exists
-# Ensure OpenVPN Log Directory Exists
-if [ ! -d "/var/log/openvpn" ]; then
-    mkdir -p /var/log/openvpn
-fi
-
 # Always ensure log files exist and have correct permissions
+# We do this unconditionally to fix any permission issues
+mkdir -p /var/log/openvpn
 touch /var/log/openvpn/openvpn.log
 touch /var/log/openvpn/openvpn-status.log
 touch /var/log/openvpn/auth.log
 touch /var/log/openvpn/auth_wrapper.log
+
+# Set directory permissions
 chmod 755 /var/log/openvpn
 
 # Allow OpenVPN (nobody/nogroup) to write to auth logs
+# This is CRITICAL for auth.sh and auth.py to work
 chmod 666 /var/log/openvpn/auth.log
 chmod 666 /var/log/openvpn/auth_wrapper.log
 
