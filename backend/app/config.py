@@ -47,13 +47,9 @@ class Settings(BaseSettings):
     CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
     CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "Accept", "X-Requested-With"]
     
-    # Database
-    DATABASE_URL: str = "sqlite:///./vpnmaster_lite.db"
-    DATABASE_ECHO: bool = False
-    
-    # SQLite
+    # Database (SQLite Only)
     SQLITE_URL: str = "sqlite:///./vpnmaster_lite.db"
-    USE_SQLITE: bool = True
+    DATABASE_ECHO: bool = False
     
     # Monitoring
     PROMETHEUS_ENABLED: bool = True
