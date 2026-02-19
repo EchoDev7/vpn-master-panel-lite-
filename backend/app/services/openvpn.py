@@ -503,12 +503,40 @@ class OpenVPNService:
 
     def _get_public_ip(self) -> str:
         """Resolve public IP"""
-        # (Similar logic to previous implementation, simplified)
+        import requests
+        import socket
+        
+        endpoints = [
+            'https://api.ipify.org',
+            'https://ifconfig.me/ip',
+            'https://ident.me'
+        ]
+        
+        for url in endpoints:
+            try:
+                res = requests.get(url, timeout=3)
+                if res.status_code == 200:
+                    ip = res.text.strip()
+                    # Basic IPv4 validation
+                    if len(ip.split('.')) == 4:
+                        return ip
+            except:
+                continue
+                
+        # Fallback: Try to determine IP via UDP socket routing
         try:
-             import requests
-             return requests.get('https://api.ipify.org', timeout=2).text.strip()
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(1)
+            # connect() for UDP doesn't send packets, just sets default routing path
+            s.connect(("8.8.8.8", 53))
+            ip = s.getsockname()[0]
+            s.close()
+            if ip and not ip.startswith("127."):
+                return ip
         except:
-             return "YOUR_SERVER_IP"
+            pass
+            
+        return "YOUR_SERVER_IP"
 
     def _read_file(self, path: str) -> str:
         if os.path.exists(path):
