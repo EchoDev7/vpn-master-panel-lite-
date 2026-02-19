@@ -106,7 +106,42 @@ if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
     sysctl -p
 fi
 
-# 3.5 CLEANUP: Remove Encrypted/Corrupt OpenVPN Keys (Force Regeneration)
+# 3.1 Configure Firewall NAT (UFW Masquerading) - CRITICAL FOR INTERNET ACCESS
+echo -e "${CYAN}🔥 Configuring UFW NAT...${NC}"
+
+# Set default forward policy to ACCEPT
+sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
+sed -i 's/DEFAULT_FORWARD_POLICY="REJECT"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
+
+# Detect Main Interface (e.g., eth0, ens3)
+MAIN_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
+
+# Add NAT rules to before.rules if not present
+if ! grep -q "*nat" /etc/ufw/before.rules; then
+    echo -e "${YELLOW}⚠️ Adding NAT rules to /etc/ufw/before.rules for interface $MAIN_IFACE${NC}"
+    
+    # Create temp file with NAT rules
+    cat <<EOT > /tmp/ufw_nat_rules
+# NAT table rules
+*nat
+:POSTROUTING ACCEPT [0:0]
+# Allow traffic from OpenVPN client to interface '$MAIN_IFACE'
+-A POSTROUTING -s 10.8.0.0/8 -o $MAIN_IFACE -j MASQUERADE
+COMMIT
+
+EOT
+    # Prepend NAT rules to before.rules
+    cat /etc/ufw/before.rules >> /tmp/ufw_nat_rules # content after header
+    # actually, we need to append it after header or put it at top. 
+    # Standard way: put it at the very top of the file
+    cat /tmp/ufw_nat_rules /etc/ufw/before.rules > /tmp/ufw_before_new
+    mv /tmp/ufw_before_new /etc/ufw/before.rules
+    rm /tmp/ufw_nat_rules
+else
+    echo -e "${GREEN}✓ UFW NAT rules check passed${NC}"
+fi
+
+# Ensure Tun Device Exists (Common VPS Issue)
 # 3.5 CLEANUP: Remove Encrypted/Corrupt OpenVPN Keys (Force Regeneration)
 KEY_FILE="/opt/vpn-master-panel/backend/data/openvpn/server.key"
 if [ -f "$KEY_FILE" ]; then
