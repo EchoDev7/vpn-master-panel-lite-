@@ -114,8 +114,8 @@ def init_default_settings(db: Session):
         "ovpn_scramble": "1",                # XOR Scramble (Unofficial patch)
         "ovpn_scramble_password": "vpnmaster", 
         "ovpn_fragment": "0",                # Fragment packets
-        "ovpn_mssfix": "1360",               # Adjust based on MTU
-        "ovpn_tun_mtu": "1400",
+        "ovpn_mssfix": "1380",               # Adjust based on MTU
+        "ovpn_tun_mtu": "1420",
         "ovpn_mtu_disc": "yes",              # MTU discovery
 
         # --- Routing & DNS (Push Options) ---
