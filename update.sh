@@ -421,9 +421,11 @@ if [ ! -d "/var/log/openvpn" ]; then
     touch /var/log/openvpn/openvpn.log
     touch /var/log/openvpn/openvpn-status.log
     touch /var/log/openvpn/auth.log
+    touch /var/log/openvpn/auth_wrapper.log
     chmod 755 /var/log/openvpn
-    # Allow OpenVPN (nobody) to write to auth log
+    # Allow OpenVPN (nobody) to write to auth logs
     chmod 666 /var/log/openvpn/auth.log
+    chmod 666 /var/log/openvpn/auth_wrapper.log
 fi
 
 echo -e "${CYAN}🔄 Restarting Services...${NC}"
