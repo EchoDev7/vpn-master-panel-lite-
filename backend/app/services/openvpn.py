@@ -226,9 +226,9 @@ class OpenVPNService:
         if s.get("tls_timeout"):
             conf.append(f"tls-timeout {s['tls_timeout']}")
 
-        # Compression
-        conf.append("comp-lzo no")
-        conf.append("allow-compression no")
+        # Compression - fix mismatch (User requested stub-v2)
+        conf.append("compress stub-v2")
+        conf.append('push "compress stub-v2"')
         # conf.append(f"verb {s.get('verb', '3')}")
 
         # --- Anti-Censorship ---
@@ -424,8 +424,9 @@ class OpenVPNService:
         conf.append(f"tls-client")
         conf.append(f"tls-version-min {s.get('tls_version_min', '1.2')}")
         
-        conf.append("comp-lzo no")
-        conf.append("allow-compression no")
+        # Compression - Match Server
+        conf.append("compress stub-v2") 
+        # conf.append("allow-compression no")
         
         # System
         conf.append("persist-key")
