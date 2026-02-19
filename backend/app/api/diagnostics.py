@@ -538,9 +538,13 @@ async def get_full_diagnostics(
 
 
 @router.get("/live-logs")
-async def get_live_logs(lines: int = 50):
+async def get_live_logs(
+    lines: int = 50,
+    current_admin: User = Depends(get_current_admin)
+):
     """
     Fetch live logs from OpenVPN and Auth script for real-time debugging.
+    Requires admin authentication — log data must not be publicly accessible.
     """
     import shutil
     logs = {
