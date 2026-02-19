@@ -220,8 +220,9 @@ class OpenVPNService:
             conf.append(f"tls-timeout {s['tls_timeout']}")
 
         # Compression
-        conf.append("compress") # Clear compression
-        conf.append("allow-compression no") # Explicitly disable
+        # conf.append("compress") # Clear compression
+        # conf.append("allow-compression no") # Explicitly disable
+        conf.append("comp-lzo no")
         # conf.append(f"verb {s.get('verb', '3')}")
 
         # --- Anti-Censorship ---
