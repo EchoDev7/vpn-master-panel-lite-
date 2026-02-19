@@ -94,6 +94,7 @@ echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-openvpn.conf
 sysctl -p /etc/sysctl.d/99-openvpn.conf
 
 echo "✅ Starting Firewall..."
+ufw default allow routed
 ufw --force enable
 ufw reload
 
