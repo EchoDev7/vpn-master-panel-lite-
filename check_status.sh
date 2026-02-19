@@ -276,22 +276,20 @@ if [ -f "/etc/openvpn/server.conf" ]; then
     # Check config file setting
     CONFIG_PORT=$(grep '^port ' /etc/openvpn/server.conf | awk '{print $2}')
     
-    # Check ACTUAL running port
-    if command -v netstat >/dev/null; then
-        RUNNING_PORT=$(netstat -tulnp | grep 'openvpn' | head -n 1 | awk '{print $4}' | awk -F':' '{print $NF}')
+# Check if OpenVPN is listening on configured port (default 1194 UDP)
+# We now also have Management Interface on 7505, so we must be specific
+if netstat -ulnp | grep -q ":1194 "; then
+    echo -e "${GREEN}[  OK  ] OpenVPN Running (UDP Port 1194)${NC}"
+elif netstat -tlnp | grep -q ":1194 "; then
+    echo -e "${GREEN}[  OK  ] OpenVPN Running (TCP Port 1194)${NC}"
+else
+    # Fallback check for process
+    if pgrep -x "openvpn" > /dev/null; then
+        echo -e "${YELLOW}[ WARN ] OpenVPN Process Running but Port 1194 not detected (Check config)${NC}"
     else
-        RUNNING_PORT=$(ss -tulnp | grep 'openvpn' | head -n 1 | awk '{print $5}' | awk -F':' '{print $NF}')
+        echo -e "${RED}[ FAIL ] OpenVPN is NOT running${NC}"
     fi
-    
-    if [ -n "$RUNNING_PORT" ]; then
-        if [ "$RUNNING_PORT" == "$CONFIG_PORT" ]; then
-            print_status "OpenVPN Running (Port $RUNNING_PORT)" "ok"
-        else
-            print_status "OpenVPN Running (Port $RUNNING_PORT) - Config Mismatch ($CONFIG_PORT)" "warn"
-        fi
-    else
-        print_status "OpenVPN Stopped (Config Port $CONFIG_PORT)" "fail"
-    fi
+fi
     
     # Check Cert Expiry
     if [ -f "/etc/openvpn/server.crt" ]; then
