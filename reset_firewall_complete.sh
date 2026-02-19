@@ -35,8 +35,9 @@ cat <<EOF > /etc/ufw/before.rules
 *nat
 :POSTROUTING ACCEPT [0:0]
 
-# Forward traffic from OpenVPN subnet (10.8.0.0/24) to the internet interface ($MAIN_IFACE)
--A POSTROUTING -s 10.8.0.0/24 -o $MAIN_IFACE -j MASQUERADE
+# Forward traffic from ANY source to the internet interface ($MAIN_IFACE)
+# User requested 0.0.0.0/0 (General NAT) for stability
+-A POSTROUTING -o $MAIN_IFACE -j MASQUERADE
 COMMIT
 
 # =========================================================
