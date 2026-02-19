@@ -44,10 +44,12 @@ async def get_dashboard_stats(
         except:
             traffic_24h = 0
         
-        # System stats
+        # System stats (Non-blocking)
         try:
             import psutil
-            cpu_percent = psutil.cpu_percent(interval=0.1)  # Reduced interval
+            # Using interval=None is non-blocking. It compares with the last call.
+            # If it's the first call it returns 0.0, but subsequent calls are instant and accurate.
+            cpu_percent = psutil.cpu_percent(interval=None)
             memory_percent = psutil.virtual_memory().percent
             disk_percent = psutil.disk_usage('/').percent
         except Exception as e:
@@ -364,97 +366,81 @@ async def get_traffic_by_type(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
-    """Get traffic statistics separated by type (direct vs tunnel)"""
+    """Get traffic statistics separated by type (direct vs tunnel) with guaranteed SQLite compatibility"""
     try:
         from ..models.user import TrafficType
         from sqlalchemy import cast, Date
         
         start_date = datetime.utcnow() - timedelta(days=days)
         
-        # Direct traffic
-        direct_traffic = db.query(
-            func.sum(TrafficLog.upload_bytes + TrafficLog.download_bytes)
-        ).filter(
-            TrafficLog.traffic_type == TrafficType.DIRECT,
-            TrafficLog.recorded_at >= start_date
-        ).scalar() or 0
+        # In SQLite, complex GROUP BY with Enums and Dates often crashes depending on the driver.
+        # For the Lite Edition, querying the raw logs in the time window and aggregating in Python
+        # guarantees stability and is extremely fast for standard panel usage.
+        logs = db.query(
+            TrafficLog.recorded_at, 
+            TrafficLog.traffic_type, 
+            TrafficLog.upload_bytes, 
+            TrafficLog.download_bytes
+        ).filter(TrafficLog.recorded_at >= start_date).all()
         
-        # Tunnel traffic
-        tunnel_traffic = db.query(
-            func.sum(TrafficLog.upload_bytes + TrafficLog.download_bytes)
-        ).filter(
-            TrafficLog.traffic_type == TrafficType.TUNNEL,
-            TrafficLog.recorded_at >= start_date
-        ).scalar() or 0
-        
-        # Daily breakdown using SQLite-compatible func.date()
-        daily_direct = db.query(
-            func.date(TrafficLog.recorded_at).label('date'),
-            func.sum(TrafficLog.upload_bytes).label('upload'),
-            func.sum(TrafficLog.download_bytes).label('download')
-        ).filter(
-            TrafficLog.traffic_type == TrafficType.DIRECT,
-            TrafficLog.recorded_at >= start_date
-        ).group_by(
-            func.date(TrafficLog.recorded_at)
-        ).all()
-        
-        daily_tunnel = db.query(
-            func.date(TrafficLog.recorded_at).label('date'),
-            func.sum(TrafficLog.upload_bytes).label('upload'),
-            func.sum(TrafficLog.download_bytes).label('download')
-        ).filter(
-            TrafficLog.traffic_type == TrafficType.TUNNEL,
-            TrafficLog.recorded_at >= start_date
-        ).group_by(
-            func.date(TrafficLog.recorded_at)
-        ).all()
-        
-        # Combine daily data
+        direct_bytes = 0
+        tunnel_bytes = 0
         daily_combined = {}
-        for day in daily_direct:
-            date_str = day.date if isinstance(day.date, str) else str(day.date)
-            daily_combined[date_str] = {
-                "date": date_str,
-                "direct_gb": round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2),
+
+        # Pre-fill dates to ensure empty days are represented
+        for i in range(days + 1):
+            day_str = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+            daily_combined[day_str] = {
+                "date": day_str,
+                "direct_gb": 0,
                 "tunnel_gb": 0
             }
-        
-        for day in daily_tunnel:
-            date_str = day.date if isinstance(day.date, str) else str(day.date)
-            if date_str in daily_combined:
-                daily_combined[date_str]["tunnel_gb"] = round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2)
-            else:
-                daily_combined[date_str] = {
-                    "date": date_str,
-                    "direct_gb": 0,
-                    "tunnel_gb": round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2)
-                }
-        
+
+        for log in logs:
+            total = (log.upload_bytes or 0) + (log.download_bytes or 0)
+            date_str = log.recorded_at.strftime("%Y-%m-%d") if log.recorded_at else ""
+            
+            # Defensive initialization just in case of TZ mismatches extending bounds
+            if date_str and date_str not in daily_combined:
+                daily_combined[date_str] = {"date": date_str, "direct_gb": 0, "tunnel_gb": 0}
+
+            if str(log.traffic_type) == str(TrafficType.DIRECT) or log.traffic_type == "direct":
+                direct_bytes += total
+                if date_str: daily_combined[date_str]["direct_gb"] += total
+            elif str(log.traffic_type) == str(TrafficType.TUNNEL) or log.traffic_type == "tunnel":
+                tunnel_bytes += total
+                if date_str: daily_combined[date_str]["tunnel_gb"] += total
+
+        # Convert daily bytes to GB
+        for day in daily_combined.values():
+            day["direct_gb"] = round(day["direct_gb"] / (1024**3), 2)
+            day["tunnel_gb"] = round(day["tunnel_gb"] / (1024**3), 2)
+
+        # Sort combined results chronologically
+        daily_sorted = [daily_combined[k] for k in sorted(daily_combined.keys())]
+
         return {
             "summary": {
                 "direct": {
-                    "bytes": direct_traffic,
-                    "gb": round(direct_traffic / (1024**3), 2)
+                    "bytes": direct_bytes,
+                    "gb": round(direct_bytes / (1024**3), 2)
                 },
                 "tunnel": {
-                    "bytes": tunnel_traffic,
-                    "gb": round(tunnel_traffic / (1024**3), 2)
+                    "bytes": tunnel_bytes,
+                    "gb": round(tunnel_bytes / (1024**3), 2)
                 },
                 "total": {
-                    "bytes": direct_traffic + tunnel_traffic,
-                    "gb": round((direct_traffic + tunnel_traffic) / (1024**3), 2)
+                    "bytes": direct_bytes + tunnel_bytes,
+                    "gb": round((direct_bytes + tunnel_bytes) / (1024**3), 2)
                 }
             },
-            "daily": list(daily_combined.values())
+            "daily": daily_sorted
         }
     except Exception as e:
-        # If traffic_type column doesn't exist or has issues, return empty data
         import logging
         logger = logging.getLogger(__name__)
-        logger.warning(f"Error in traffic-by-type endpoint: {e}")
+        logger.error(f"Error in traffic-by-type endpoint: {e}", exc_info=True)
         
-        # Return empty but valid structure
         return {
             "summary": {
                 "direct": {"bytes": 0, "gb": 0},
