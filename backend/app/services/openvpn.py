@@ -381,7 +381,16 @@ class OpenVPNService:
         conf = []
 
         # Resolving Connection Details
-        remote_ip = server_ip_override or s.get("server_ip") or self._get_public_ip()
+        addr_type = s.get("remote_address_type", "auto")
+        
+        if server_ip_override:
+            remote_ip = server_ip_override
+        elif addr_type == "domain" and s.get("remote_domain"):
+            remote_ip = s.get("remote_domain")
+        elif addr_type == "custom_ip" and s.get("server_ip"):
+            remote_ip = s.get("server_ip")
+        else:
+            remote_ip = self._get_public_ip()
         remote_port = str(port_override) if port_override else s.get("port", "443")
         remote_proto = protocol_override or s.get("protocol", "tcp")
         # Client config uses 'tcp-client' or 'udp' typically, but 'tcp' alias works
