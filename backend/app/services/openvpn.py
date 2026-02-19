@@ -203,6 +203,9 @@ class OpenVPNService:
         conf.append("\n# --- Reliability ---")
         conf.append(f"keepalive {s.get('keepalive_interval', '10')} {s.get('keepalive_timeout', '60')}")
         
+        # Explicit Topology
+        conf.append("topology subnet")
+        
         if s.get("duplicate_cn") == "1":
             conf.append("duplicate-cn")
             
@@ -212,6 +215,10 @@ class OpenVPNService:
         if s.get("float", "1") == "1":
             conf.append("float")
 
+        # Optimization for VPS/Cloud (Fixes packet drops)
+        conf.append("tun-mtu 1420") 
+        conf.append("mssfix 1300") # Leave room for headers
+        
         if s.get("hand_window"):
             conf.append(f"hand-window {s['hand_window']}")
         if s.get("tran_window"):
