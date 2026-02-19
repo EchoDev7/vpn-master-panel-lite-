@@ -44,7 +44,7 @@ const ProtocolDistributionChart = () => {
         if (active && payload && payload.length) {
             const data = payload[0];
             const total = payload[0].payload.total || data.value;
-            const percentage = ((data.value / total) * 100).toFixed(1);
+            const percentage = total > 0 ? ((data.value / total) * 100).toFixed(1) : 0;
 
             return (
                 <div className="bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg">
