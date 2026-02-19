@@ -27,7 +27,7 @@ async def kill_connection(
     """
     Force kill a client connection (Admin only)
     """
-    success = openvpn_mgmt.kill_client(common_name)
+    success = openvpn_mgmt.kill_session(common_name)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to kill connection or user not found")
     return {"status": "success", "message": f"Connection {common_name} killed"}
