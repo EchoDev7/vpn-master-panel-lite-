@@ -120,25 +120,19 @@ MAIN_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
 if ! grep -q "*nat" /etc/ufw/before.rules; then
     echo -e "${YELLOW}⚠️ Adding NAT rules to /etc/ufw/before.rules for interface $MAIN_IFACE${NC}"
     
-    # Create temp file with NAT rules
-    cat <<EOT > /tmp/ufw_nat_rules
+    # Append NAT table rules to the end of the file
+    cat <<EOT >> /etc/ufw/before.rules
+
 # NAT table rules
 *nat
 :POSTROUTING ACCEPT [0:0]
 # Allow traffic from OpenVPN client to interface '$MAIN_IFACE'
 -A POSTROUTING -s 10.8.0.0/8 -o $MAIN_IFACE -j MASQUERADE
 COMMIT
-
 EOT
-    # Prepend NAT rules to before.rules
-    cat /etc/ufw/before.rules >> /tmp/ufw_nat_rules # content after header
-    # actually, we need to append it after header or put it at top. 
-    # Standard way: put it at the very top of the file
-    cat /tmp/ufw_nat_rules /etc/ufw/before.rules > /tmp/ufw_before_new
-    mv /tmp/ufw_before_new /etc/ufw/before.rules
-    rm /tmp/ufw_nat_rules
+    echo -e "${GREEN}✓ UFW NAT rules added${NC}"
 else
-    echo -e "${GREEN}✓ UFW NAT rules check passed${NC}"
+    echo -e "${GREEN}✓ UFW NAT rules already present${NC}"
 fi
 
 # Ensure Tun Device Exists (Common VPS Issue)
