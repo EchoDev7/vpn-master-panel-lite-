@@ -255,6 +255,11 @@ class APIService {
     return this.client.post(`/diagnostics/restart/${serviceName}`);
   }
 
+  // Domain & SSL Management
+  async requestLetsEncryptSSL(data) {
+    return this.client.post('/settings/ssl/request', data);
+  }
+
   // Generic methods
   async get(url, config = {}) {
     return this.client.get(url, config);
