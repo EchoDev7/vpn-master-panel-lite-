@@ -1,7 +1,7 @@
 """
 Authentication and Security Utilities
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -94,9 +94,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode = data.copy()
 
     if expires_delta:
-        expire_dt = datetime.utcnow() + expires_delta
+        expire_dt = datetime.now(timezone.utc) + expires_delta
     else:
-        expire_dt = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire_dt = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
     # Store exp as Unix timestamp (int) — required by RFC 7519
     to_encode.update({"exp": calendar.timegm(expire_dt.utctimetuple())})
@@ -109,7 +109,7 @@ def create_refresh_token(data: dict) -> str:
     """Create JWT refresh token with Unix timestamp exp claim."""
     import calendar
     to_encode = data.copy()
-    expire_dt = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expire_dt = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({
         "exp": calendar.timegm(expire_dt.utctimetuple()),
         "type": "refresh",
