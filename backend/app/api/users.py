@@ -694,12 +694,39 @@ async def get_user_logs(
     if auth_logs:
         logs.extend([f"--- Auth Logs for {user.username} ---"] + auth_logs)
         
-    # 2. Check System Log (Context)
-    # This is noisier, maybe only if auth logs are empty or requested?
-    # Let's include it but limit it.
-    sys_logs = grep_file("/var/log/openvpn/openvpn.log", user.username, 20)
+    # 2. Check Syslog (Catch-all for "ovpn" + username)
+    # The user specifically requested: tail -f /var/log/syslog | grep ovpn
+    # We filter by both 'ovpn' AND username to minimize noise, or just 'ovpn' if relevant context needed?
+    # Context usually implies username match.
+    syslog_path = "/var/log/syslog" 
+    if not os.path.exists(syslog_path):
+        syslog_path = "/var/log/messages" # CentOS/RHEL fallback
+        
+    sys_logs = []
+    if os.path.exists(syslog_path):
+        # We start by grepping 'ovpn' AND username to be specific
+        # cmd: grep 'ovpn' /var/log/syslog | grep 'username' | tail -n lines
+        import subprocess
+        try:
+             p1 = subprocess.Popen(["grep", "ovpn", syslog_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+             p2 = subprocess.Popen(["grep", user.username], stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+             p3 = subprocess.Popen(["tail", "-n", str(lines)], stdin=p2.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+             p1.stdout.close()
+             p2.stdout.close()
+             output, _ = p3.communicate()
+             if output:
+                 sys_logs = output.splitlines()
+        except Exception as e:
+             sys_logs = [f"Error reading syslog: {e}"]
+
     if sys_logs:
-         logs.extend([f"\n--- System Logs for {user.username} ---"] + sys_logs)
+         logs.extend([f"\n--- Syslog (OpenVPN) for {user.username} ---"] + sys_logs)
+
+    # 3. Check specific openvpn.log (Context)
+    # This is noisier, maybe only if auth logs are empty or requested?
+    ovpn_log = grep_file("/var/log/openvpn/openvpn.log", user.username, 20)
+    if ovpn_log:
+         logs.extend([f"\n--- OpenVPN Log for {user.username} ---"] + ovpn_log)
          
     if not logs:
         logs = ["No recent connection attempts found in logs."]
