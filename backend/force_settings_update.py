@@ -10,9 +10,20 @@ from app.database import Base
 from app.models.setting import Setting
 
 # Database setup
-SQLALCHEMY_DATABASE_URL = "sqlite:///./vpnmaster_lite.db"
-if os.path.exists("./backend/vpnmaster_lite.db"):
-    SQLALCHEMY_DATABASE_URL = "sqlite:///./backend/vpnmaster_lite.db"
+# Determine absolute path to database relative to this script
+script_dir = os.path.dirname(os.path.abspath(__file__))
+db_path = os.path.join(script_dir, "vpnmaster_lite.db")
+
+print(f"Connecting to database at: {db_path}")
+
+if not os.path.exists(db_path):
+    print(f"WARNING: Database file not found at {db_path}")
+    # Fallback check
+    if os.path.exists("./vpnmaster_lite.db"):
+        db_path = "./vpnmaster_lite.db"
+        print(f"Found at relative path: {db_path}")
+
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{db_path}"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
