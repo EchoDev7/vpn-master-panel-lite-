@@ -210,7 +210,7 @@ export const Dashboard = () => {
                 />
                 <StatCard
                     title="Traffic (24h)"
-                    value={`${stats?.traffic?.gb_24h || 0} GB`}
+                    value={`${stats?.traffic?.gb_24h ?? 0} GB`}
                     subtitle="Up/Down bandwidth usage"
                     icon={Globe}
                     gradient="from-orange-500 to-amber-500"
@@ -218,8 +218,8 @@ export const Dashboard = () => {
                 />
                 <StatCard
                     title="System Load"
-                    value={`${stats?.system?.cpu_percent || 0}%`}
-                    subtitle={`RAM used: ${stats?.system?.memory_percent || 0}%`}
+                    value={`${stats?.system?.cpu_percent ?? 0}%`}
+                    subtitle={`RAM used: ${stats?.system?.memory_percent ?? 0}%`}
                     icon={Cpu}
                     gradient="from-rose-500 to-pink-500"
                     onClick={() => setShowSystemModal(true)}
@@ -227,11 +227,11 @@ export const Dashboard = () => {
             </div>
 
             {/* Traffic Type Breakdown */}
-            {trafficByType && (
+            {trafficByType && trafficByType.summary && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <StatCard
                         title="Direct Traffic"
-                        value={`${trafficByType?.summary?.direct?.gb || 0} GB`}
+                        value={`${trafficByType.summary.direct?.gb ?? 0} GB`}
                         subtitle={`Total direct in last ${trafficDays} days`}
                         icon={Zap}
                         gradient="from-indigo-500 to-blue-500"
@@ -239,7 +239,7 @@ export const Dashboard = () => {
                     />
                     <StatCard
                         title="Tunnel Traffic"
-                        value={`${trafficByType?.summary?.tunnel?.gb || 0} GB`}
+                        value={`${trafficByType.summary.tunnel?.gb ?? 0} GB`}
                         subtitle={`Overcast mapped in last ${trafficDays} days`}
                         icon={Map}
                         gradient="from-fuchsia-500 to-purple-500"
@@ -264,8 +264,8 @@ export const Dashboard = () => {
                                 key={days}
                                 onClick={() => setTrafficDays(days)}
                                 className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all duration-300 ${trafficDays === days
-                                        ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-md transform scale-105'
-                                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-700/50'
+                                    ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-md transform scale-105'
+                                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-700/50'
                                     }`}
                             >
                                 {days}D
