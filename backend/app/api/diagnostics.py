@@ -491,11 +491,11 @@ async def get_full_diagnostics(
         except Exception as e:
             logger.error(f"Error in API health check: {e}")
 
-        # 11. Raw Logs (Last 20 Lines)
+        # 11. Raw Logs (Last 40 Lines)
         raw_logs = {"openvpn": [], "backend": []}
         try:
-            cmd_ovpn = ["journalctl", "-u", "openvpn@server", "-n", "20", "--no-pager"]
-            cmd_back = ["journalctl", "-u", "vpnmaster-backend", "-n", "20", "--no-pager"]
+            cmd_ovpn = ["journalctl", "-u", "openvpn@server", "-n", "40", "--no-pager"]
+            cmd_back = ["journalctl", "-u", "vpnmaster-backend", "-n", "40", "--no-pager"]
             
             ovpn_out = subprocess.run(cmd_ovpn, capture_output=True, text=True).stdout
             back_out = subprocess.run(cmd_back, capture_output=True, text=True).stdout
