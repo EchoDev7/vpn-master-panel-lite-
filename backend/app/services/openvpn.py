@@ -322,7 +322,7 @@ class OpenVPNService:
                 except: pass
                 logger.warning(f"Auth script missing at {script_to_use}. Config might be invalid until update.sh runs.")
 
-            if os.path.exists(script_to_use) or True: # Force add it, let update.sh fix it
+            if os.path.exists(script_to_use):
                 conf.append("script-security 2")
                 conf.append(f"auth-user-pass-verify {script_to_use} via-file")
                 
