@@ -78,7 +78,7 @@ EOF
 echo "🔧 Configuring UFW Defaults..."
 sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
 sed -i 's/DEFAULT_FORWARD_POLICY="REJECT"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
-sed -i 's/IPV6=yes/IPV6=no/g' /etc/default/ufw # Disable IPv6 to reduce complexity if needed
+sed -i 's/IPV6=no/IPV6=yes/g' /etc/default/ufw # Re-enable IPv6 as server has v6 address
 
 echo "🔓 Opening Ports..."
 ufw allow 22/tcp
