@@ -1,6 +1,80 @@
-import { useState, useEffect } from 'react';
-import { Activity, Shield, Server, Box, AlertTriangle, CheckCircle, RefreshCw, Terminal, GitBranch, Globe, Database, Link, Clock } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Activity, Shield, Server, Box, AlertTriangle, CheckCircle, RefreshCw, Terminal, GitBranch, Globe, Database, Link, Clock, Play, Pause } from 'lucide-react';
 import apiService from '../services/api';
+
+const LiveLogMonitor = () => {
+    const [logs, setLogs] = useState({ openvpn: [], auth: [] });
+    const [isLive, setIsLive] = useState(true);
+    const [lastFetch, setLastFetch] = useState(null);
+    const scrollRef = useRef(null);
+
+    const fetchLogs = async () => {
+        try {
+            const res = await apiService.getLiveLogs(50);
+            setLogs(res.data);
+            setLastFetch(new Date());
+            // Auto-scroll if near bottom
+            if (scrollRef.current) {
+                const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+                if (scrollHeight - scrollTop === clientHeight) {
+                    setTimeout(() => scrollRef.current.scrollTop = scrollRef.current.scrollHeight, 100);
+                }
+            }
+        } catch (e) {
+            console.error("Live log error:", e);
+        }
+    };
+
+    useEffect(() => {
+        fetchLogs();
+        let interval;
+        if (isLive) {
+            interval = setInterval(fetchLogs, 3000);
+        }
+        return () => clearInterval(interval);
+    }, [isLive]);
+
+    return (
+        <div className="bg-black rounded-xl border border-gray-800 overflow-hidden font-mono text-xs mb-6">
+            <div className="p-3 bg-gray-900 border-b border-gray-800 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-green-400" />
+                    <span className="text-green-400 font-bold">Live Auth Monitor (auth.log)</span>
+                    {isLive && <span className="flex h-2 w-2 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>}
+                </div>
+                <div className="flex items-center gap-3">
+                    <span className="text-gray-500 hidden md:inline">{lastFetch ? lastFetch.toLocaleTimeString() : ''}</span>
+                    <button
+                        onClick={() => setIsLive(!isLive)}
+                        className={`p-1.5 rounded ${isLive ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50' : 'bg-green-900/30 text-green-400 hover:bg-green-900/50'}`}
+                    >
+                        {isLive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                    </button>
+                </div>
+            </div>
+            <div
+                ref={scrollRef}
+                className="p-4 text-gray-300 overflow-y-auto max-h-64 whitespace-pre-wrap leading-relaxed space-y-1"
+            >
+                {logs.auth && logs.auth.length > 0 ? (
+                    logs.auth.map((line, i) => {
+                        let color = "text-gray-300";
+                        if (line.includes("AUTH_FAILED")) color = "text-red-400 font-bold bg-red-900/10";
+                        if (line.includes("AUTH_SUCCESS")) color = "text-green-400 font-bold bg-green-900/10";
+                        if (line.includes("connection limit")) color = "text-yellow-400";
+
+                        return <div key={i} className={`${color} p-0.5 rounded px-1`}>{line}</div>
+                    })
+                ) : (
+                    <div className="text-gray-600 italic">Waiting for connection logs...</div>
+                )}
+            </div>
+        </div>
+    );
+};
 
 export default function Diagnostics() {
     const [data, setData] = useState(null);
@@ -477,7 +551,10 @@ export default function Diagnostics() {
                 </div>
             </div>
 
-            {/* 11 & 12. Raw Logs */}
+            {/* 11. Real-time Log Monitor */}
+            <LiveLogMonitor />
+
+            {/* 12 & 13. Raw Logs */}
             <div className="bg-black rounded-xl border border-gray-800 overflow-hidden font-mono text-xs">
                 <div className="p-3 bg-gray-900 border-b border-gray-800 text-yellow-400 font-bold">
                     📜 11. Recent OpenVPN Logs (Last 10 Lines)
