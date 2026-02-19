@@ -217,7 +217,11 @@ class OpenVPNService:
 
         # Optimization for VPS/Cloud (Fixes packet drops)
         conf.append("tun-mtu 1420") 
-        conf.append("mssfix 1300") # Leave room for headers
+        conf.append("mssfix 1380") # Leave room for headers
+        
+        # Buffer Optimization (Requested)
+        conf.append("sndbuf 0")
+        conf.append("rcvbuf 0")
         
         if s.get("hand_window"):
             conf.append(f"hand-window {s['hand_window']}")
