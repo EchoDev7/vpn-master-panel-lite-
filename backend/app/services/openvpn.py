@@ -214,8 +214,8 @@ class OpenVPNService:
             conf.append("float")
 
         # Optimization for VPS/Cloud (Fixes packet drops)
-        conf.append("tun-mtu 1420") 
-        conf.append("mssfix 1380") # Leave room for headers
+        conf.append(f"tun-mtu {s.get('tun_mtu', '1420')}") 
+        conf.append(f"mssfix {s.get('mssfix', '1380')}") # Leave room for headers
         
         # Buffer Optimization (Requested)
         conf.append("sndbuf 0")
@@ -228,10 +228,15 @@ class OpenVPNService:
         if s.get("tls_timeout"):
             conf.append(f"tls-timeout {s['tls_timeout']}")
 
-        # Compression - fix mismatch (User requested stub-v2)
-        conf.append("compress stub-v2")
-        conf.append('push "compress stub-v2"')
-        # conf.append(f"verb {s.get('verb', '3')}")
+        # Compression
+        comp = s.get("compress", "")
+        if comp and comp != "none":
+            conf.append(f"compress {comp}")
+            conf.append(f'push "compress {comp}"')
+        
+        if s.get("allow_compression", "0") == "1":
+             conf.append("allow-compression yes")
+             conf.append('push "allow-compression yes"')
 
         # --- Anti-Censorship ---
         conf.append("\n# --- Anti-Censorship ---")
@@ -420,14 +425,21 @@ class OpenVPNService:
              
         conf.append(f"auth {s.get('auth_digest', 'SHA256')}")
         
-        comp = s.get("compress", "stub-v2")
+        data_ciphers = s.get('data_ciphers', 'AES-256-GCM:AES-128-GCM')
+        if data_ciphers != 'none':
+            conf.append(f"data-ciphers {data_ciphers}")
+
+        if s.get('tls_version_min'):
+            conf.append(f"tls-version-min {s.get('tls_version_min')}")
+
+        comp = s.get("compress", "")
         if comp and comp != "none":
             conf.append(f"compress {comp}")
             
         if s.get("redirect_gateway", "1") == "1":
             conf.append("redirect-gateway def1")
         
-        # MTU / MSSFIX - Enforce Golden Values
+        # MTU / MSSFIX
         conf.append(f"tun-mtu {s.get('tun_mtu', '1420')}")
         conf.append(f"mssfix {s.get('mssfix', '1380')}")
         
