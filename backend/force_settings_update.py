@@ -10,9 +10,9 @@ from app.database import Base
 from app.models.setting import Setting
 
 # Database setup
-SQLALCHEMY_DATABASE_URL = "sqlite:///./app.db"
-if os.path.exists("./backend/app.db"):
-    SQLALCHEMY_DATABASE_URL = "sqlite:///./backend/app.db"
+SQLALCHEMY_DATABASE_URL = "sqlite:///./vpnmaster_lite.db"
+if os.path.exists("./backend/vpnmaster_lite.db"):
+    SQLALCHEMY_DATABASE_URL = "sqlite:///./backend/vpnmaster_lite.db"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
