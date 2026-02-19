@@ -4,7 +4,6 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
 from ..models.user import User, UserStatus
-from ..services.monitoring import MonitoringService
 
 logger = logging.getLogger(__name__)
 
@@ -13,11 +12,10 @@ class LightweightScheduler:
     A simple in-memory scheduler for periodic tasks.
     Replaces Celery Beat for the Lite edition.
     """
-    
+
     def __init__(self):
         self._check_interval = 60  # seconds
         self._is_running = False
-        self._monitoring_service = MonitoringService()
 
     async def start(self):
         """Start the scheduler loop"""

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
@@ -82,7 +82,7 @@ class TrafficMonitor:
         
         # 2. Update Database
         with get_db_context() as db:
-            users = db.query(User).filter(User.status != UserStatus.DELETED).all()
+            users = db.query(User).all()
             
             # Set of current active sessions in this cycle (username_protocol)
             current_active_keys = set()
@@ -419,7 +419,7 @@ class TrafficMonitor:
         if user.openvpn_enabled:
             try:
                 if openvpn_mgmt.is_available():
-                    result = openvpn_mgmt.kill_client(user.username)
+                    result = openvpn_mgmt.kill_session(user.username)
                     if result:
                         logger.info(f"OpenVPN session killed for {user.username}")
                     else:
