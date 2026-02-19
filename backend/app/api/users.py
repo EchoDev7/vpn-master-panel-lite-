@@ -423,7 +423,7 @@ async def regenerate_token(
         raise HTTPException(status_code=404, detail="User not found")
         
     import secrets
-    user.subscription_token = secrets.token_urlsafe(16)
+    user.subscription_token = secrets.token_urlsafe(32)
     db.commit()
     db.refresh(user)
     
