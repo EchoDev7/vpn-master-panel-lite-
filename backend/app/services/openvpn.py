@@ -227,9 +227,8 @@ class OpenVPNService:
             conf.append(f"tls-timeout {s['tls_timeout']}")
 
         # Compression
-        # conf.append("compress") # Clear compression
-        # conf.append("allow-compression no") # Explicitly disable
         conf.append("comp-lzo no")
+        conf.append("allow-compression no")
         # conf.append(f"verb {s.get('verb', '3')}")
 
         # --- Anti-Censorship ---
@@ -425,8 +424,7 @@ class OpenVPNService:
         conf.append(f"tls-client")
         conf.append(f"tls-version-min {s.get('tls_version_min', '1.2')}")
         
-        # Compression - strictly disabled on server, so disable on client
-        # conf.append("comp-lzo") # REMOVED: Caused mismatch warning
+        conf.append("comp-lzo no")
         conf.append("allow-compression no")
         
         # System
