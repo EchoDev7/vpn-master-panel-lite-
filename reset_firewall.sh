@@ -20,10 +20,17 @@ sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/
 sed -i 's/DEFAULT_FORWARD_POLICY="REJECT"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
 sysctl -w net.ipv4.ip_forward=1
 
-echo "Applying NAT Rules..."
-MAIN_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
-echo "Main Interface: $MAIN_IFACE"
+# Allow VPN Interface Traffic
+echo "Allowing tun0 traffic..."
+ufw allow in on tun0
+ufw allow out on tun0
 
+# Allow Forwarding (Explicitly)
+echo "Allowing Forwarding..."
+ufw route allow in on tun0 out on $MAIN_IFACE
+ufw route allow in on $MAIN_IFACE out on tun0
+
+echo "Applying NAT Rules..."
 # Append NAT rules to before.rules if missing
 if ! grep -q "*nat" /etc/ufw/before.rules; then
     cat <<EOT >> /etc/ufw/before.rules
@@ -31,12 +38,14 @@ if ! grep -q "*nat" /etc/ufw/before.rules; then
 # NAT table rules
 *nat
 :POSTROUTING ACCEPT [0:0]
--A POSTROUTING -s 10.8.0.0/8 -o $MAIN_IFACE -j MASQUERADE
+# Use /24 for the default OpenVPN subnet
+-A POSTROUTING -s 10.8.0.0/24 -o $MAIN_IFACE -j MASQUERADE
 COMMIT
 EOT
     echo "NAT rules appended."
 else
     echo "NAT rules already exist."
+    # Fix potential CIDR issues in existing rules if necessary (optional)
 fi
 
 echo "Enabling UFW..."
