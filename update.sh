@@ -34,7 +34,37 @@ cd "$INSTALL_DIR" || exit 1
 # Check if it's a git repo
 if [ -d ".git" ]; then
     echo -e "${CYAN}Fetching updates...${NC}"
-    git fetch --all
+    
+    # Try standard fetch first
+    if ! git fetch origin; then
+        echo -e "${YELLOW}⚠️ Connection to GitHub failed (likely due to regional blocking).${NC}"
+        echo -e "${CYAN}🔄 Attempting to use GitHub Proxy mirror (gh-proxy.com)...${NC}"
+        
+        # Determine the current remote URL
+        CURRENT_REMOTE=$(git remote get-url origin)
+        
+        # If it's already a proxied URL, we don't double proxy. But usually it's the standard github URL.
+        # Ensure we have the base repo name. We know it's EchoDev7/vpn-master-panel-lite.git
+        if [[ "$CURRENT_REMOTE" != *"gh-proxy "* && "$CURRENT_REMOTE" != *"ghproxy"* ]]; then
+            # Temporarily set to mirror
+            git remote set-url origin "https://gh-proxy.com/https://github.com/EchoDev7/vpn-master-panel-lite.git"
+            
+            # Fetch using proxy
+            if ! git fetch origin; then
+                echo -e "${RED}❌ Failed to fetch from proxy as well. Check server internet connection.${NC}"
+                # Restore original remote
+                git remote set-url origin "$CURRENT_REMOTE"
+                echo -e "${YELLOW}⚠️ Skipping remote update. Attempting to continue with local changes only...${NC}"
+            else
+                echo -e "${GREEN}✓ Successfully connected via proxy.${NC}"
+            fi
+            
+            # Restore original remote so next time it defaults cleanly
+            git remote set-url origin "$CURRENT_REMOTE"
+        else
+            echo -e "${RED}❌ Fetch failed even with proxy. Skipping remote update.${NC}"
+        fi
+    fi
 
     # Stash local changes instead of hard reset
     STASH_RESULT=$(git diff-index --quiet HEAD -- || echo "changed")
@@ -43,12 +73,18 @@ if [ -d ".git" ]; then
         git stash
     fi
     
-    git pull origin main
+    # Attempt to pull. If standard fetch worked, pull origin main works.
+    # If standard fetch failed but proxy fetched, `git pull origin main` might fail again if it tries to connect.
+    # We should specify standard merge if fetch already pulled the objects.
+    # git merge origin/main handles it without network calls if fetch succeeded.
+    git merge origin/main --no-edit || git pull origin main
     
     # Restore local changes if we stashed them
     if [ "$STASH_RESULT" = "changed" ]; then
         echo -e "${YELLOW}♻️  Restoring local changes...${NC}"
-        git stash pop
+        if ! git stash pop; then
+            echo -e "${RED}❌ Merge conflict during stash pop! Please resolve manually in $INSTALL_DIR${NC}"
+        fi
     fi
 else
     echo -e "${YELLOW}⚠️ Not a git repository. Skipping git update.${NC}"
