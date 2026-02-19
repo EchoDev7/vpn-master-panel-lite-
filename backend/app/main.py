@@ -29,8 +29,16 @@ async def lifespan(app: FastAPI):
     Lifespan events - startup and shutdown
     """
     # Startup
-    logger.info("Starting VPN Master Panel (Lite Edition)...") # Modified log message
-    
+    logger.info("Starting VPN Master Panel (Lite Edition)...")
+
+    # Security sanity check
+    if settings.is_default_secret:
+        logger.warning(
+            "⚠️  WARNING: Using default SECRET_KEY! "
+            "Set a strong SECRET_KEY env variable before deploying to production. "
+            "Run: openssl rand -hex 32"
+        )
+
     try:
         # Initialize database FIRST (Critical: Creates tables)
         init_db()
@@ -251,7 +259,6 @@ async def general_exception_handler(request, exc):
 async def websocket_endpoint(websocket: WebSocket, token: str):
     """WebSocket endpoint for real-time updates"""
     from .websocket.manager import manager
-    from .websocket.handlers import WebSocketHandler
     from .websocket.handlers import WebSocketHandler
     from .utils.security import decode_token
     

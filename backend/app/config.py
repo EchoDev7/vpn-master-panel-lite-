@@ -38,10 +38,14 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # CORS
+    # In production set CORS_ORIGINS to your actual domain(s), e.g.:
+    #   CORS_ORIGINS=["https://panel.yourdomain.com"]
+    # Default keeps "*" so development works out-of-the-box, but a warning
+    # is logged at startup when the default secret key is also detected.
     CORS_ORIGINS: List[str] = ["*"]
     CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: List[str] = ["*"]
-    CORS_ALLOW_HEADERS: List[str] = ["*"]
+    CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "Accept", "X-Requested-With"]
     
     # Database
     DATABASE_URL: str = "sqlite:///./vpnmaster_lite.db"

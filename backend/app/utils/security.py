@@ -5,9 +5,11 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+import time
+import threading
 
 from ..config import settings
 from ..database import get_db
@@ -18,6 +20,62 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT Bearer token
 security = HTTPBearer()
+
+# ─── Token Blacklist (in-memory, thread-safe) ───────────────────────────────
+_blacklist_lock = threading.Lock()
+_token_blacklist: dict[str, float] = {}  # token_jti -> expiry_timestamp
+
+def _cleanup_blacklist():
+    """Remove expired tokens from blacklist."""
+    now = time.time()
+    with _blacklist_lock:
+        expired = [k for k, v in _token_blacklist.items() if v < now]
+        for k in expired:
+            del _token_blacklist[k]
+
+def blacklist_token(token: str):
+    """Add a token to the blacklist until it expires."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        exp = payload.get("exp", 0)
+        jti = payload.get("jti") or token[-32:]  # use last 32 chars as fallback id
+        _cleanup_blacklist()
+        with _blacklist_lock:
+            _token_blacklist[jti] = float(exp)
+    except Exception:
+        pass
+
+def is_token_blacklisted(token: str) -> bool:
+    """Check if a token has been blacklisted."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        jti = payload.get("jti") or token[-32:]
+        with _blacklist_lock:
+            return jti in _token_blacklist
+    except Exception:
+        return False
+
+# ─── Rate Limiter (in-memory, per-IP) ────────────────────────────────────────
+_rate_lock = threading.Lock()
+_login_attempts: dict[str, list[float]] = {}  # ip -> [timestamps]
+
+RATE_LIMIT_WINDOW = 60   # seconds
+RATE_LIMIT_MAX    = 10   # max attempts per window
+
+def check_rate_limit(ip: str):
+    """Raise 429 if IP exceeded login attempts."""
+    now = time.time()
+    window_start = now - RATE_LIMIT_WINDOW
+    with _rate_lock:
+        attempts = [t for t in _login_attempts.get(ip, []) if t > window_start]
+        attempts.append(now)
+        _login_attempts[ip] = attempts
+        if len(attempts) > RATE_LIMIT_MAX:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many login attempts. Try again in {RATE_LIMIT_WINDOW} seconds.",
+                headers={"Retry-After": str(RATE_LIMIT_WINDOW)},
+            )
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -74,8 +132,17 @@ async def get_current_user(
 ) -> User:
     """Get current authenticated user from JWT token"""
     token = credentials.credentials
+
+    # Reject blacklisted (logged-out) tokens
+    if is_token_blacklisted(token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     payload = decode_token(token)
-    
+
     username: str = payload.get("sub")
     if username is None:
         raise HTTPException(
@@ -83,7 +150,7 @@ async def get_current_user(
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     user = db.query(User).filter(User.username == username).first()
     if user is None:
         raise HTTPException(
@@ -91,13 +158,13 @@ async def get_current_user(
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive or expired"
         )
-    
+
     return user
 
 
