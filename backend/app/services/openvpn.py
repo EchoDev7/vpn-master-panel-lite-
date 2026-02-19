@@ -390,7 +390,6 @@ class OpenVPNService:
         has_remotes = False
         for r in remotes:
             if r.strip():
-                # Format: ip:port:proto
                 parts = r.strip().split(":")
                 if len(parts) >= 2:
                      ip, port = parts[0], parts[1]
@@ -398,46 +397,39 @@ class OpenVPNService:
                      conf.append(f"remote {ip} {port} {proto}")
                      has_remotes = True
         
-        # Add primary remote
         conf.append(f"remote {remote_ip} {remote_port}")
         
         if has_remotes:
             conf.append("remote-random")
+
+        # Golden Config Directives (Dynamic)
+        conf.append(f"resolv-retry {s.get('resolv_retry', 'infinite')}")
+        
+        if s.get("bind", "0") == "0":
+            conf.append("nobind")
             
-        conf.append("resolv-retry infinite")
-
-        conf.append("nobind")
-        
-        # Security
-        conf.append("remote-cert-tls server")
-        conf.append(f"auth {s.get('auth_digest', 'SHA256')}")
-        conf.append(f"data-ciphers {s.get('data_ciphers', 'AES-256-GCM:AES-128-GCM')}")
-        conf.append(f"data-ciphers-fallback {s.get('data_ciphers_fallback', 'AES-256-GCM')}")
-        
-        # Explicitly match server defaults to avoid warnings
+        if s.get("pers_key", "1") == "1":
+            conf.append("persist-key")
+        if s.get("pers_tun", "1") == "1":
+            conf.append("persist-tun")
+            
+        if s.get("remote_cert_tls", "server") == "server":
+             conf.append("remote-cert-tls server")
+             
         conf.append(f"auth {s.get('auth_digest', 'SHA256')}")
         
-        # Keysize is often implied by cipher, but explicitly setting it avoids mismatches in older clients
-        if "256" in s.get("data_ciphers", "AES-256-GCM"):
-             conf.append("keysize 256")
+        comp = s.get("compress", "stub-v2")
+        if comp and comp != "none":
+            conf.append(f"compress {comp}")
+            
+        if s.get("redirect_gateway", "1") == "1":
+            conf.append("redirect-gateway def1")
         
-        conf.append(f"tls-client")
-        conf.append(f"tls-version-min {s.get('tls_version_min', '1.2')}")
+        # MTU / MSSFIX - Enforce Golden Values
+        conf.append(f"tun-mtu {s.get('tun_mtu', '1420')}")
+        conf.append(f"mssfix {s.get('mssfix', '1380')}")
         
-        # Compression - Match Server
-        conf.append("compress stub-v2") 
-        # conf.append("allow-compression no")
-        
-        # System
-        conf.append("persist-key")
-        conf.append("persist-tun")
         conf.append(f"verb {s.get('verb', '3')}")
-
-        # MTU - Explicitly match server default if not set
-        # Server often pushes this, but setting it avoids initial mismatch
-        # conf.append("link-mtu 1550") 
-        
-        # Auth
         conf.append("auth-user-pass")
 
         # Proxy
