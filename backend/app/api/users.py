@@ -667,22 +667,21 @@ async def get_user_logs(
         if not os.path.exists(filepath):
             return []
         try:
-            # We use a shell pipeline: grep "pattern" file | tail -n lines
-            # Use specific list arguments for security where possible, but pipeline needs checks
-            # Simplest: use grep's own max count? No, we want latest.
             import subprocess
-            
-            # 1. Grep all matches
-            cmd_grep = ["grep", pattern, filepath]
+
+            # Use -F (fixed string) so username regex chars are treated literally,
+            # preventing unexpected regex injection via crafted usernames.
+            # shell=False is already enforced by passing a list to Popen.
+            cmd_grep = ["grep", "-F", "--", pattern, filepath]
             p1 = subprocess.Popen(cmd_grep, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            
-            # 2. Tail the last N
+
+            # Tail the last N lines of grep output
             cmd_tail = ["tail", "-n", str(n_lines)]
             p2 = subprocess.Popen(cmd_tail, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            
-            p1.stdout.close() # Allow p1 to receive SIGPIPE if p2 exits.
+
+            p1.stdout.close()  # Allow p1 to receive SIGPIPE if p2 exits.
             output, _ = p2.communicate()
-            
+
             return output.splitlines()
         except Exception as e:
             return [f"Error reading {os.path.basename(filepath)}: {str(e)}"]
