@@ -1143,7 +1143,7 @@ const Users = () => {
                                     <div className="h-full flex flex-col">
                                         <div className="flex justify-between items-center mb-4">
                                             <h4 className="text-lg font-bold text-white flex items-center gap-2">
-                                                <Terminal size={20} className="text-gray-400" /> System Logs (OpenVPN)
+                                                <Terminal size={20} className="text-gray-400" /> Connection Logs (Syslog & OpenVPN)
                                             </h4>
                                             <button
                                                 onClick={() => handleFetchLogs(selectedUser.id)}
@@ -1169,7 +1169,8 @@ const Users = () => {
                                             )}
                                         </div>
                                         <p className="text-gray-500 text-xs mt-2">
-                                            Showing recent activity matching "{selectedUser.username}" from /var/log/openvpn/auth.log & openvpn.log
+                                            Showing recent activity matching "{selectedUser.username}" from Syslog, Auth, & OpenVPN logs
+
                                         </p>
                                     </div>
                                 )}
