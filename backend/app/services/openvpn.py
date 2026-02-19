@@ -405,33 +405,34 @@ class OpenVPNService:
         conf.append("remote-cert-tls server")
         conf.append(f"auth {s.get('auth_digest', 'SHA256')}")
         conf.append(f"data-ciphers {s.get('data_ciphers', 'AES-256-GCM:AES-128-GCM')}")
-        # cipher directive removed as per user request to avoid conflicts in 2.5+
+        conf.append(f"data-ciphers-fallback {s.get('data_ciphers_fallback', 'AES-256-GCM')}")
         
+        # Explicitly match server defaults to avoid warnings
+        conf.append(f"auth {s.get('auth_digest', 'SHA256')}")
+        
+        # Keysize is often implied by cipher, but explicitly setting it avoids mismatches in older clients
+        if "256" in s.get("data_ciphers", "AES-256-GCM"):
+             conf.append("keysize 256")
+        
+        conf.append(f"tls-client")
         conf.append(f"tls-version-min {s.get('tls_version_min', '1.2')}")
         
-        # Compression - security risk, disable
+        # Compression - strictly disabled on server, so disable on client
+        # conf.append("comp-lzo") # REMOVED: Caused mismatch warning
         conf.append("allow-compression no")
-        # conf.append(f"verb {s.get('verb', '3')}")
         
         # System
         conf.append("persist-key")
         conf.append("persist-tun")
         conf.append(f"verb {s.get('verb', '3')}")
 
-        # Anti-Censorship
-        if s.get("scramble") == "1" and s.get("scramble_password"):
-             conf.append(f'scramble obfuscate "{s["scramble_password"]}"')
+        # MTU - Explicitly match server default if not set
+        # Server often pushes this, but setting it avoids initial mismatch
+        # conf.append("link-mtu 1550") 
         
-        if s.get("fragment", "0") != "0":
-            conf.append(f"fragment {s['fragment']}")
-            conf.append(f"mssfix {s['fragment']}")
-        else:
-            if s.get("mssfix"):
-                conf.append(f"mssfix {s['mssfix']}")
-
         # Auth
         conf.append("auth-user-pass")
-        
+
         # Proxy
         p_type = s.get("proxy_type", "none")
         if p_type != "none":
