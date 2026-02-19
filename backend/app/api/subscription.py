@@ -286,8 +286,13 @@ async def get_subscription_page(token: str, db: Session = Depends(get_db)):
          except:
              pass
 
-    # Inject JSON into template (simple hydration)
-    html = HTML_TEMPLATE.replace("{{DATA_JSON}}", json.dumps(context))
+    # Inject JSON into template (simple hydration).
+    # json.dumps() is used with ensure_ascii=False for Persian text support.
+    # We escape </script> sequences to prevent XSS via script tag injection.
+    safe_json = json.dumps(context, ensure_ascii=False).replace(
+        "</", "<\\/"
+    )
+    html = HTML_TEMPLATE.replace("{{DATA_JSON}}", safe_json)
     return html
 
 @router.get("/{token}/openvpn", response_class=PlainTextResponse)
