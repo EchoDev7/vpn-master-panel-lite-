@@ -100,39 +100,57 @@ EOF
     systemctl enable fail2ban
 fi
 
-# 3. Enable IP Forwarding (Ensure it persists)
-if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
-    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-    sysctl -p
-fi
+# 3. Enable IP Forwarding and Tuning (Enterprise)
+echo -e "${CYAN}📈 Optimizing Network Stack...${NC}"
+cat > /etc/sysctl.d/99-vpn-master.conf << EOF
+# IP Forwarding
+net.ipv4.ip_forward=1
+net.ipv6.conf.all.forwarding=1
 
-# 3.1 Configure Firewall NAT (UFW Masquerading) - CRITICAL FOR INTERNET ACCESS
+# Network throughput optimizations
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_fastopen=3
+
+# Increase ephemeral ports
+net.ipv4.ip_local_port_range=1024 65535
+
+# Increase connection tracking table size
+net.netfilter.nf_conntrack_max=1048576
+EOF
+sysctl --system > /dev/null 2>&1
+
+# 3.1 Configure Firewall NAT (UFW Masquerading) - Enterprise Idempotent Method
 echo -e "${CYAN}🔥 Configuring UFW NAT...${NC}"
 
 # Set default forward policy to ACCEPT
 sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
-sed -i 's/DEFAULT_FORWARD_POLICY="REJECT"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
 
 # Detect Main Interface (e.g., eth0, ens3)
-MAIN_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
+MAIN_IFACE=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
 
-# Add NAT rules to before.rules if not present
-if ! grep -q "*nat" /etc/ufw/before.rules; then
-    echo -e "${YELLOW}⚠️ Adding NAT rules to /etc/ufw/before.rules for interface $MAIN_IFACE${NC}"
+if [ -n "$MAIN_IFACE" ]; then
+    # Remove old NAT rules if they exist to ensure idempotency
+    sed -i '/\*nat/,$d' /etc/ufw/before.rules
     
-    # Append NAT table rules to the end of the file
+    # Append clean NAT rules
     cat <<EOT >> /etc/ufw/before.rules
 
 # NAT table rules
 *nat
 :POSTROUTING ACCEPT [0:0]
-# Allow traffic from OpenVPN client to interface '$MAIN_IFACE'
+# Allow traffic from OpenVPN and WireGuard clients
 -A POSTROUTING -s 10.8.0.0/8 -o $MAIN_IFACE -j MASQUERADE
+-A POSTROUTING -s 10.9.0.0/8 -o $MAIN_IFACE -j MASQUERADE
 COMMIT
 EOT
-    echo -e "${GREEN}✓ UFW NAT rules added${NC}"
+    # Ensure UFW routes traffic seamlessly
+    if ! grep -q "-A ufw-before-forward -s 10.8.0.0/8 -j ACCEPT" /etc/ufw/before.rules; then
+        sed -i '/\*filter/a -A ufw-before-forward -s 10.8.0.0/8 -j ACCEPT\n-A ufw-before-forward -s 10.9.0.0/8 -j ACCEPT' /etc/ufw/before.rules
+    fi
+    echo -e "${GREEN}✓ UFW NAT rules added/updated${NC}"
 else
-    echo -e "${GREEN}✓ UFW NAT rules already present${NC}"
+    echo -e "${YELLOW}⚠️ Could not detect main network interface for NAT mapping.${NC}"
 fi
 
 # Ensure Tun Device Exists (Common VPS Issue)
@@ -319,6 +337,10 @@ ExecStart=/opt/vpn-master-panel/backend/venv/bin/uvicorn app.main:app --host 127
 Restart=always
 RestartSec=10
 
+# Memory limits (Lite Edition)
+MemoryMax=300M
+MemoryHigh=250M
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -422,19 +444,15 @@ chown root:root /etc/openvpn/scripts/*
 # Fix AppArmor (Allow OpenVPN to read keys in /opt and EXECUTE auth script)
 if [ -f "/etc/apparmor.d/usr.sbin.openvpn" ]; then
     echo -e "${CYAN}🛡️  Updating AppArmor Profile...${NC}"
-    # Check if we already added our rules
-    # We need to allow executing the wrapper AND the python script
-    if ! grep -q "/etc/openvpn/scripts/auth.sh" /etc/apparmor.d/usr.sbin.openvpn; then
-        # Append rule to allow read access & UNCONFINED execution (Ux) to avoid any restriction
+    if ! grep -q "/etc/openvpn/scripts/\*\*" /etc/apparmor.d/usr.sbin.openvpn; then
         sed -i '/}/d' /etc/apparmor.d/usr.sbin.openvpn
         echo "  /opt/vpn-master-panel/backend/data/** r," >> /etc/apparmor.d/usr.sbin.openvpn
-        echo "  /etc/openvpn/scripts/auth.py r," >> /etc/apparmor.d/usr.sbin.openvpn
-        echo "  /etc/openvpn/scripts/auth.sh Ux," >> /etc/apparmor.d/usr.sbin.openvpn
+        echo "  /etc/openvpn/scripts/** rUx," >> /etc/apparmor.d/usr.sbin.openvpn
         echo "  /opt/vpn-master-panel/backend/** r," >> /etc/apparmor.d/usr.sbin.openvpn
         echo "}" >> /etc/apparmor.d/usr.sbin.openvpn
         
         systemctl reload apparmor
-        echo -e "${GREEN}✓ AppArmor Updated (Auth Script Unconfined)${NC}"
+        echo -e "${GREEN}✓ AppArmor Updated (Auth Scripts Unconfined)${NC}"
     else
          echo -e "${GREEN}✓ AppArmor already configured${NC}"
     fi
