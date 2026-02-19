@@ -383,6 +383,7 @@ server {
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
         expires 30d;
         add_header Cache-Control "public, immutable";
+        try_files $uri =404;
     }
 
     location / {
