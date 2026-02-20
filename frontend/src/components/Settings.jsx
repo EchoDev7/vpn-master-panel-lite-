@@ -84,6 +84,7 @@ const Settings = () => {
     const [ovpnVersion, setOvpnVersion] = useState(null);
 
     const [confirmation, setConfirmation] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, confirmText: 'Confirm', confirmColor: 'blue' });
+    const [sslStream, setSslStream] = useState({ isOpen: false, logs: '', loading: false });
     const [toast, setToast] = useState(null); // { message, type }
 
     useEffect(() => { loadSettings(); loadVersions(); }, []);
@@ -686,16 +687,39 @@ const Settings = () => {
                     "Request Let's Encrypt SSL",
                     "This will request a certificate for your Panel Domain.\n\nPrerequisites:\n1. Your domain MUST point to this server's IP.\n2. Port 80 must be open.\n\nContinue?",
                     async () => {
+                        setConfirmation(prev => ({ ...prev, isOpen: false }));
+                        setSslStream({ isOpen: true, logs: 'Initializing Let\'s Encrypt client...\n', loading: true });
                         try {
-                            showToast("Requesting SSL... This may take a minute.", "info");
-                            // We will implement this API endpoint in the backend next
-                            const res = await apiService.requestLetsEncryptSSL({
-                                domain: settings.panel_domain,
-                                email: settings.ssl_email || 'admin@example.com'
+                            const token = localStorage.getItem('access_token');
+                            const baseURL = (import.meta.env.VITE_API_URL || '') + '/api/v1/settings/ssl/request';
+
+                            const response = await fetch(baseURL, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({
+                                    domain: settings.panel_domain,
+                                    email: settings.ssl_email || 'admin@example.com'
+                                })
                             });
-                            showToast(res.data.message || "SSL issued successfully! Nginx reloaded.", "success");
+
+                            if (!response.body) throw new Error('ReadableStream not supported by browser');
+
+                            const reader = response.body.getReader();
+                            const decoder = new TextDecoder('utf-8');
+
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                const chunk = decoder.decode(value, { stream: true });
+                                setSslStream(prev => ({ ...prev, logs: prev.logs + chunk }));
+                            }
                         } catch (err) {
-                            showToast("SSL Request Failed. Check domain DNS and Port 80.", "error");
+                            setSslStream(prev => ({ ...prev, logs: prev.logs + `\nHTTP ERROR: ${err.message}` }));
+                        } finally {
+                            setSslStream(prev => ({ ...prev, loading: false }));
                         }
                     },
                     "Request SSL Certificate",
@@ -901,6 +925,53 @@ const Settings = () => {
                 confirmText={confirmation.confirmText}
                 confirmColor={confirmation.confirmColor}
             />
+
+            {/* SSL Streaming Logs Modal */}
+            {sslStream.isOpen && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+                    <div className="bg-gray-900 rounded-xl border border-purple-500/30 p-6 w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-xl font-bold text-gray-100 flex items-center gap-2">
+                                <Shield className="w-5 h-5 text-purple-400" />
+                                Let's Encrypt SSL Issuance Log
+                            </h3>
+                            {!sslStream.loading && (
+                                <button onClick={() => setSslStream({ isOpen: false, logs: '', loading: false })} className="text-gray-400 hover:text-white transition-colors">
+                                    <X className="w-6 h-6" />
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="flex-1 bg-black rounded-lg border border-gray-700 p-4 font-mono text-xs md:text-sm overflow-y-auto whitespace-pre-wrap flex flex-col">
+                            {sslStream.logs.split('\n').filter(l => l.trim()).map((line, i) => {
+                                let color = "text-gray-300";
+                                if (line.startsWith("ERROR") || line.startsWith("FATAL")) color = "text-red-400 font-bold";
+                                else if (line.startsWith("SUCCESS") || line.startsWith("DONE")) color = "text-green-400 font-bold";
+                                else if (line.startsWith("EXEC")) color = "text-blue-400";
+                                else if (line.startsWith("WARN")) color = "text-amber-400";
+                                else if (line.startsWith("CERTBOT")) color = "text-gray-500";
+                                else if (line.startsWith("INFO")) color = "text-purple-400";
+
+                                return <div key={i} className={color}>{line}</div>
+                            })}
+
+                            {sslStream.loading && (
+                                <div className="text-purple-400 mt-2 flex items-center gap-2 animate-pulse font-sans font-medium text-sm">
+                                    <span className="w-2 h-2 rounded-full bg-purple-400"></span> Communicating with Let's Encrypt CA...
+                                </div>
+                            )}
+                        </div>
+
+                        {!sslStream.loading && (
+                            <div className="mt-4 flex justify-end">
+                                <button onClick={() => setSslStream({ isOpen: false, logs: '', loading: false })} className="bg-gray-700 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-medium transition-colors">
+                                    Close Logs
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {toast && <Toast message={toast.message} type={toast.type} onClose={closeToast} />}
         </div>
