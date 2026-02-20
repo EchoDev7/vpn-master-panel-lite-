@@ -111,8 +111,8 @@ class OpenVPNService:
             "keepalive_interval": "10",
             "keepalive_timeout":  "60",
             "float":              "1",
-            "tun_mtu":            "1500",
-            "mssfix":             "1450",
+            "tun_mtu":            "1420",
+            "mssfix":             "1380",
             # Logging & management
             "verb":           "3",
             "mute":           "20",
@@ -144,8 +144,10 @@ class OpenVPNService:
             "remote_servers":           "",
             # Connection retry (client-side, written to client config)
             "connect_retry":            "5",
+            "connect_retry_max_interval":"30",
             "connect_retry_max":        "0",
             "server_poll_timeout":      "10",
+            "remote_random_hostname":   "1",
             # Push routes
             "push_routes":              "",
             "push_remove_routes":       "",
@@ -170,6 +172,12 @@ class OpenVPNService:
             from ..database import get_db_context
             with get_db_context() as session:
                 _apply(session)
+
+        # Backward compatibility with legacy key naming used in older UI builds.
+        if not defaults.get("dev") and defaults.get("dev_type"):
+            defaults["dev"] = defaults["dev_type"]
+        if defaults.get("dev_type") and defaults.get("dev") != defaults.get("dev_type"):
+            defaults["dev"] = defaults["dev_type"]
 
         return defaults
 
@@ -246,7 +254,7 @@ class OpenVPNService:
         proto = s.get("protocol", "tcp")
         conf.append(f"proto {proto}")
         conf.append(f"port {s.get('port', '443')}")
-        conf.append(f"dev {s.get('dev', 'tun')}")
+        conf.append(f"dev {s.get('dev') or s.get('dev_type', 'tun')}")
         conf.append(f"topology {s.get('topology', 'subnet')}")
         conf.append(
             f"server {s.get('server_subnet','10.8.0.0')} "
@@ -340,9 +348,9 @@ class OpenVPNService:
             conf.append(f"explicit-exit-notify {s['explicit_exit_notify']}")
 
         # MTU tuning
-        # TCP/443: use 1500 byte MTU (Ethernet standard); mssfix handles TCP inside TCP
-        tun_mtu = s.get("tun_mtu", "1500")
-        mssfix  = s.get("mssfix", "1450")
+        # Conservative defaults improve compatibility behind Iranian mobile/ISP paths.
+        tun_mtu = s.get("tun_mtu", "1420")
+        mssfix  = s.get("mssfix", "1380")
         conf.append(f"tun-mtu {tun_mtu}")
         conf.append(f"mssfix {mssfix}")
 
@@ -376,9 +384,8 @@ class OpenVPNService:
             conf.append("compress")
             conf.append("allow-compression asym")
         else:
-            # Fully disable — client also told to not compress
-            conf.append("compress")
-            conf.append("push \"compress\"")
+            # Fully disable compression for security and lower DPI fingerprinting.
+            conf.append("allow-compression no")
 
         # ── Anti-Censorship (Iran DPI bypass techniques) ─────────────
         conf += ["", "# ── Anti-Censorship ──────────────────────────────"]
@@ -599,7 +606,7 @@ class OpenVPNService:
             "# Compatible: Android (OpenVPN for Android / Connect), iOS, Windows, macOS",
             "",
             "client",
-            "dev tun",
+            f"dev {s.get('dev') or s.get('dev_type', 'tun')}",
             f"proto {remote_proto}",
         ]
 
@@ -622,6 +629,8 @@ class OpenVPNService:
         conf.append(f"remote {remote_ip} {remote_port} {remote_proto}")
         if has_extra:
             conf.append("remote-random")
+        if s.get("remote_random_hostname", "1") == "1" and any(c.isalpha() for c in str(remote_ip)):
+            conf.append("remote-random-hostname")
 
         # ── Connection behaviour ──────────────────────────────────────
         conf += [
@@ -632,6 +641,7 @@ class OpenVPNService:
             "persist-key",
             "persist-tun",         # critical for Android/iOS reconnect
             "remote-cert-tls server",
+            "auth-retry interact",
         ]
 
         # float: allow server IP to change (not needed client-side usually, but harmless)
@@ -646,6 +656,8 @@ class OpenVPNService:
         data_ciphers = s.get("data_ciphers", "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305")
         conf.append(f"data-ciphers {data_ciphers}")
         conf.append(f"data-ciphers-fallback {s.get('data_ciphers_fallback','AES-256-GCM')}")
+        # Legacy fallback for older OpenVPN clients that don't support data-ciphers.
+        conf.append(f"cipher {s.get('data_ciphers_fallback','AES-256-GCM')}")
         conf.append(f"auth {s.get('auth_digest','SHA256')}")
 
         tls_min = s.get("tls_version_min", "1.2")
@@ -663,18 +675,22 @@ class OpenVPNService:
         compress_val = s.get("compress", "")
         if compress_val and compress_val not in ("", "none"):
             conf.append(f"compress {compress_val}")
+            conf.append("allow-compression yes")
+        elif s.get("allow_compression", "0") == "1":
+            conf.append("compress stub-v2")
+            conf.append("allow-compression asym")
         else:
-            conf.append("compress")   # negotiate off; server will push "compress" too
+            conf.append("allow-compression no")
 
         # ── MTU / MSS ─────────────────────────────────────────────────
         # These must match server-side values to avoid asymmetric MSS clamping.
-        # TCP/443: tun-mtu 1500, mssfix 1450 (room for OpenVPN+TLS+TCP headers)
-        # UDP: tun-mtu 1500, mssfix 1420 is safer for restrictive ISPs
+        # Conservative defaults tuned for mixed Iranian ISP/mobile/NAT paths.
+        # Admin can increase MTU/MSS if link quality allows.
         conf += [
             "",
             "# ── MTU / MSS (must match server) ───────────────────────",
-            f"tun-mtu {s.get('tun_mtu','1500')}",
-            f"mssfix  {s.get('mssfix','1450')}",
+            f"tun-mtu {s.get('tun_mtu','1420')}",
+            f"mssfix  {s.get('mssfix','1380')}",
         ]
         fragment = s.get("fragment", "0")
         if fragment and fragment != "0":
@@ -729,7 +745,7 @@ class OpenVPNService:
             # client-initiated renegotiation being rejected.
             f"reneg-sec {s.get('reneg_sec', '3600')}",
             # connect-retry: initial wait, max wait between reconnect attempts
-            f"connect-retry {s.get('connect_retry', '5')} 30",
+            f"connect-retry {s.get('connect_retry', '5')} {s.get('connect_retry_max_interval', '30')}",
             # connect-retry-max: 0 = retry forever (recommended for Iran — connection drops are common)
             f"connect-retry-max {s.get('connect_retry_max', '0')}",
             # server-poll-timeout: give up on one remote and try next after N sec
@@ -740,8 +756,13 @@ class OpenVPNService:
         conf += [
             "",
             "# ── Platform-specific ───────────────────────────────────",
-            # Windows 10+ DNS leak fix; safely ignored by Android/iOS/macOS
-            "block-outside-dns",
+            # Legacy compatibility: older clients may not understand NCP keys.
+            "ignore-unknown-option data-ciphers",
+            "ignore-unknown-option data-ciphers-fallback",
+            # Prevent unknown-option errors on clients that don't support this flag.
+            "ignore-unknown-option block-outside-dns",
+            # Helps OpenVPN 2.x clients parse option consistently.
+            "setenv opt block-outside-dns",
             # auth-nocache: don't keep credentials in memory
             "auth-nocache",
             "",
@@ -751,6 +772,10 @@ class OpenVPNService:
             "# ── Credentials ─────────────────────────────────────────",
             "auth-user-pass",       # prompt for username/password on connect
         ]
+
+        if s.get("block_outside_dns", "1") == "1":
+            # Windows DNS leak fix (ignored safely on non-Windows due to ignore-unknown-option)
+            conf.insert(conf.index("# ── Logging ─────────────────────────────────────────────") - 1, "block-outside-dns")
 
         # ── HTTP proxy (domain fronting / Iran bypass) ────────────────
         if s.get("http_proxy_enabled") == "1":
