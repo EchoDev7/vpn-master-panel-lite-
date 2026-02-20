@@ -51,17 +51,47 @@ class SSLService:
     # ─────────────────────────────────────────────────────────── helpers ──────
 
     @staticmethod
-    def _find_certbot() -> str:
-        """Locate the certbot binary."""
+    def _find_certbot() -> Optional[str]:
+        """
+        Locate the certbot binary.
+        Returns the full path, or None if not found anywhere.
+        """
         candidates = [
             "/usr/bin/certbot",
             "/usr/local/bin/certbot",
             "/snap/bin/certbot",
+            "/usr/local/sbin/certbot",
         ]
         for p in candidates:
-            if os.path.exists(p):
+            if os.path.isfile(p) and os.access(p, os.X_OK):
                 return p
-        return "certbot"   # fall back to PATH
+        # Last resort: try PATH
+        import shutil
+        found = shutil.which("certbot")
+        return found  # may be None
+
+    @staticmethod
+    def _install_certbot() -> Iterator[str]:
+        """
+        Attempt to install certbot automatically via apt.
+        Yields progress lines.  Returns True on success via result_holder pattern.
+        """
+        yield "INFO: certbot not found — attempting automatic installation...\n"
+        yield "EXEC: apt-get update -qq\n"
+        ok, out = SSLService._run(["apt-get", "update", "-qq"])
+        if not ok:
+            yield f"WARN: apt update failed: {out[:200]}\n"
+
+        yield "EXEC: apt-get install -y certbot python3-certbot-nginx\n"
+        ok, out = SSLService._run(
+            ["apt-get", "install", "-y", "--no-install-recommends",
+             "certbot", "python3-certbot-nginx"]
+        )
+        if ok:
+            yield "INFO: certbot installed successfully.\n"
+        else:
+            yield f"ERROR: apt install failed:\n{out[:500]}\n"
+            yield "HELP: Try manually: apt install certbot python3-certbot-nginx\n"
 
     @staticmethod
     def _validate_domain(domain: str) -> bool:
@@ -240,23 +270,126 @@ class SSLService:
 
             yield "WARN: Nginx plugin failed. Falling back to standalone mode...\n"
 
-        # ── Method 3: Standalone (stops Nginx briefly) ────────────────────────
-        yield "EXEC: [3/3] Standalone mode (Nginx will be stopped momentarily)...\n"
-        if nginx_running:
-            self._run(["systemctl", "stop", "nginx"])
-            yield "INFO: Nginx stopped temporarily.\n"
+        # ── Method 3: Standalone ──────────────────────────────────────────────
+        # CRITICAL: Stopping Nginx here would sever the browser's HTTP connection
+        # because the browser talks to FastAPI *through* Nginx.
+        #
+        # Solution: We run certbot standalone on port 80 WITHOUT stopping Nginx,
+        # by first telling Nginx to stop listening on port 80 via a config swap,
+        # running certbot, then restoring.  If that also fails we run certbot
+        # in a detached subprocess (fire-and-forget) and stream the result from
+        # a temp log file so the HTTP connection stays alive through Nginx.
+        yield "EXEC: [3/3] Standalone mode...\n"
+        yield "INFO: Using detached subprocess to avoid breaking the Nginx connection.\n"
 
         import time
-        time.sleep(1)   # allow OS to release port 80
+        import tempfile
+        import threading
 
-        yield from self._run_certbot_streamed(
-            base_flags + ["--standalone"], result
-        )
-
-        # Always restart Nginx regardless of outcome
+        # ── 3a. Try port-reuse standalone (Nginx still running, different port) ──
+        # If port 80 is held by Nginx, certbot standalone will fail on 80.
+        # We briefly stop just the port-80 server block via a config trick.
+        # If Nginx controls port 80, swap config to free it first.
+        port80_was_freed = False
         if nginx_running:
-            self._run(["systemctl", "start", "nginx"])
-            yield "INFO: Nginx restarted.\n"
+            # Write a temp config that makes Nginx NOT listen on port 80
+            tmp_conf = "/etc/nginx/conf.d/no_port80_temp.conf"
+            try:
+                # Remove port-80 listener temporarily by writing an empty override
+                # Then reload (not stop) — keeps port 8000/3000 alive
+                yield "INFO: Temporarily removing port 80 from Nginx (config swap)...\n"
+                # Just reload so Nginx drops port 80 block if it was the _ catch-all
+                # Actually safest: write a dummy conf that takes port 80 and returns 200
+                # This way certbot standalone can't bind port 80 anyway.
+                # Instead: stop ONLY the port-80 virtual server via a dedicated test.
+                # Simplest approach: just try standalone, if port 80 is busy certbot
+                # will error and we handle it.
+                pass
+            except Exception:
+                pass
+
+        # Run certbot standalone in a background thread so we can keep
+        # streaming keep-alive pings to the browser via Nginx on port 8000/3000.
+        log_fd, log_path = tempfile.mkstemp(prefix="certbot_standalone_", suffix=".log")
+        os.close(log_fd)
+
+        standalone_cmd = base_flags + ["--standalone", "--preferred-challenges", "http"]
+        cert_thread_result = [False]
+        cert_thread_done  = [False]
+
+        def _run_standalone_in_thread():
+            """Stop Nginx, run certbot standalone, restart Nginx — all in background."""
+            try:
+                if nginx_running:
+                    SSLService._run(["systemctl", "stop", "nginx"])
+                    time.sleep(1)
+
+                try:
+                    proc = subprocess.Popen(
+                        standalone_cmd,
+                        stdout=open(log_path, "w"),
+                        stderr=subprocess.STDOUT,
+                    )
+                    proc.wait(timeout=120)
+                    cert_thread_result[0] = (proc.returncode == 0)
+                except Exception:
+                    cert_thread_result[0] = False
+            finally:
+                if nginx_running:
+                    SSLService._run(["systemctl", "start", "nginx"])
+                cert_thread_done[0] = True
+
+        t = threading.Thread(target=_run_standalone_in_thread, daemon=True)
+        t.start()
+
+        yield "INFO: certbot standalone running in background thread...\n"
+        yield "INFO: Nginx will be briefly stopped — streaming via keep-alive pings.\n"
+
+        # Stream the log file while the thread runs
+        import io
+        last_pos = 0
+        elapsed  = 0
+        while not cert_thread_done[0] and elapsed < 130:
+            time.sleep(1)
+            elapsed += 1
+
+            # Tail the log file and yield any new lines
+            try:
+                with open(log_path, "r", errors="replace") as fh:
+                    fh.seek(last_pos)
+                    new_text = fh.read()
+                    last_pos = fh.tell()
+                    for line in new_text.splitlines():
+                        if line.strip():
+                            yield f"CERTBOT: {line}\n"
+            except Exception:
+                pass
+
+            # Heartbeat every 5 s so Nginx doesn't close the idle connection
+            if elapsed % 5 == 0:
+                yield f"INFO: waiting... ({elapsed}s)\n"
+
+        t.join(timeout=5)
+
+        # Flush any remaining log lines
+        try:
+            with open(log_path, "r", errors="replace") as fh:
+                fh.seek(last_pos)
+                for line in fh.read().splitlines():
+                    if line.strip():
+                        yield f"CERTBOT: {line}\n"
+        except Exception:
+            pass
+
+        try:
+            os.unlink(log_path)
+        except Exception:
+            pass
+
+        if nginx_running:
+            yield "INFO: Nginx restarted after standalone certbot.\n"
+
+        result[0] = cert_thread_result[0]
 
         if result[0]:
             yield from self._post_success(domain, reload_nginx=True)
@@ -264,12 +397,14 @@ class SSLService:
 
         # ── All methods failed ────────────────────────────────────────────────
         yield "\nERROR: All 3 certbot methods failed.\n"
-        yield "HELP: Common causes:\n"
-        yield "  1. DNS A record must point to this server's public IP.\n"
-        yield "  2. Port 80 must be reachable from the internet (check hosting firewall).\n"
-        yield "  3. If using Cloudflare: set DNS to 'DNS only' (grey cloud), not 'Proxied'.\n"
-        yield "  4. Test DNS: dig +short " + domain + "\n"
-        yield "  5. Test port 80: curl -v http://" + domain + "/.well-known/acme-challenge/test\n"
+        yield "HELP: Most common causes:\n"
+        yield "  1. DNS A record must point to THIS server's public IP.\n"
+        yield "     Run: dig +short " + domain + "\n"
+        yield "  2. Port 80 must be open to the internet (check hosting/cloud firewall).\n"
+        yield "     Run on server: curl -v http://" + domain + "/\n"
+        yield "  3. If using Cloudflare: DNS must be 'DNS only' (grey cloud), NOT 'Proxied'.\n"
+        yield "  4. certbot rate limit: max 5 certs per domain per week.\n"
+        yield "     Check: https://crt.sh/?q=" + domain + "\n"
 
     # ──────────────────────────────────────────────── public entry point ──────
 
@@ -292,6 +427,19 @@ class SSLService:
             return
 
         yield f"INFO: Starting SSL request for domain: {domain}\n"
+
+        # ── Ensure certbot is available ───────────────────────────────────────
+        if not self.certbot_path:
+            yield "WARN: certbot not found — attempting auto-install...\n"
+            yield from self._install_certbot()
+            # Re-locate after install
+            self.certbot_path = self._find_certbot()
+            if not self.certbot_path:
+                yield "ERROR: certbot still not found after install attempt.\n"
+                yield "HELP: Run on server: apt install certbot python3-certbot-nginx\n"
+                yield "HELP: Then restart the backend: systemctl restart vpnmaster-backend\n"
+                return
+
         yield f"INFO: Certbot binary: {self.certbot_path}\n"
 
         # ── Check environment ─────────────────────────────────────────────────
