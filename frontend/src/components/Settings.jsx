@@ -206,7 +206,7 @@ const Settings = () => {
                     { value: 'both', label: 'Both' },
                 ]} />
                 <S_Input {...sp} settingKey="ovpn_port" label="Port" placeholder="443" iranBadge tip="Port 443 makes VPN look like normal HTTPS." />
-                <S_Input {...sp} settingKey="ovpn_tun_mtu" label="TUN MTU" placeholder="1500" type="number" iranBadge tip="1500 for TCP/443 (Ethernet MTU). Use 1420 for UDP on restrictive ISPs." />
+                <S_Input {...sp} settingKey="ovpn_tun_mtu" label="TUN MTU" placeholder="1420" type="number" iranBadge tip="1420 default is more stable on restrictive ISP/NAT paths. Increase only after testing." />
                 <S_Select {...sp} settingKey="ovpn_topology" label="Topology" tip="Subnet is recommended for modern setups." options={[
                     { value: 'subnet', label: 'Subnet (Recommended)' },
                     { value: 'net30', label: 'Net30 (Legacy)' },
@@ -351,6 +351,7 @@ const Settings = () => {
             <S_Check {...sp} settingKey="ovpn_block_iran_ips" label="Block outgoing connections to Iranian IPs" iranBadge tip="Prevents server from initiating connections to Iran, which DPI monitors as suspicious behavior for a foreign web server." />
             <SectionTitle>Multi-Server Failover</SectionTitle>
             <S_Input {...sp} settingKey="ovpn_remote_servers" label="Remote Servers (comma-separated)" placeholder="1.2.3.4:443:tcp,5.6.7.8:443:tcp" tip="Backup servers if main is blocked." />
+            <S_Check {...sp} settingKey="ovpn_remote_random_hostname" label="Randomize Hostname Prefix" iranBadge tip="Adds random hostname prefixes for domain remotes to reduce cache/fingerprint correlation." />
         </div>
     );
 
@@ -379,8 +380,9 @@ const Settings = () => {
                 <S_Input {...sp} settingKey="ovpn_keepalive_timeout" label="Ping Timeout (sec)" placeholder="60" type="number" />
             </div>
             <SectionTitle>Retry & Timeout</SectionTitle>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-4 gap-4">
                 <S_Input {...sp} settingKey="ovpn_connect_retry" label="Connect Retry (sec)" placeholder="5" type="number" />
+                <S_Input {...sp} settingKey="ovpn_connect_retry_max_interval" label="Retry Max Interval" placeholder="30" type="number" />
                 <S_Input {...sp} settingKey="ovpn_connect_retry_max" label="Max Retry (0=infinite)" placeholder="0" type="number" />
                 <S_Input {...sp} settingKey="ovpn_server_poll_timeout" label="Server Poll Timeout" placeholder="10" type="number" />
             </div>
