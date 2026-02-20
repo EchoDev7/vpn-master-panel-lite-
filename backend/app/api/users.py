@@ -17,7 +17,9 @@ from ..utils.security import (
 )
 from .activity import log_activity
 from .notifications import create_notification
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -32,7 +34,7 @@ class UserCreate(BaseModel):
     # Limits
     data_limit_gb: float = 0  # 0 = unlimited
     connection_limit: int = 1
-    speed_limit_mbps: int = 0 # 0 = unlimited
+    speed_limit_mbps: float = 0.0  # 0 = unlimited; float to match DB column
     expiry_days: Optional[int] = 30
     
     # Protocol settings
@@ -66,7 +68,7 @@ class UserUpdate(BaseModel):
     # Limits
     data_limit_gb: Optional[float] = None
     connection_limit: Optional[int] = None
-    speed_limit_mbps: Optional[int] = None
+    speed_limit_mbps: Optional[float] = None
     expiry_date: Optional[datetime] = None
     expiry_days: Optional[int] = None
     
@@ -203,13 +205,18 @@ async def create_user(
     db.refresh(new_user)
 
     # Auto-Provisioning Pipeline (F5 - User Requested)
+    # Use asyncio.ensure_future so we get a proper log if it fails,
+    # and it works correctly from within an async FastAPI request handler.
     try:
         import asyncio
         from ..services.users import _provision_new_user
-        asyncio.create_task(_provision_new_user(new_user.id))
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_provision_new_user(new_user.id))
+        else:
+            logger.warning("No running event loop — skipping async provisioning for user %s", new_user.username)
     except Exception as e:
-        # Don't fail the request if async task logic has issues (e.g. event loop)
-        pass
+        logger.warning("Provisioning task could not be scheduled for user %s: %s", new_user.username, e)
 
     return new_user
 
@@ -448,7 +455,8 @@ async def get_openvpn_config(
         
     from ..services.openvpn import openvpn_service
     config_content = openvpn_service.generate_client_config(
-        username=user.username
+        username=user.username,
+        db=db,
     )
     
     return {
