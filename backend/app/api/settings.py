@@ -14,6 +14,43 @@ from ..utils.security import get_current_admin
 
 router = APIRouter()
 
+ALLOWED_SSL_PORTS = {"2053", "2083", "2087", "2096", "8443"}
+
+
+def _open_firewall_port(port: str) -> str:
+    """Best-effort firewall opener for SSL ports managed by Domain & SSL settings."""
+    import subprocess
+
+    # UFW (most common on Ubuntu)
+    try:
+        ufw_state = subprocess.run(
+            ["ufw", "status"], capture_output=True, text=True, timeout=10
+        )
+        if ufw_state.returncode == 0 and "Status: active" in ufw_state.stdout:
+            subprocess.run(["ufw", "allow", f"{port}/tcp"], check=False, timeout=10)
+            subprocess.run(["ufw", "reload"], check=False, timeout=20)
+            return f"✓ Firewall opened (ufw): tcp/{port}"
+    except Exception:
+        pass
+
+    # firewalld
+    try:
+        fw_state = subprocess.run(
+            ["firewall-cmd", "--state"], capture_output=True, text=True, timeout=10
+        )
+        if fw_state.returncode == 0 and "running" in (fw_state.stdout or "").lower():
+            subprocess.run(
+                ["firewall-cmd", "--permanent", f"--add-port={port}/tcp"],
+                check=False,
+                timeout=10,
+            )
+            subprocess.run(["firewall-cmd", "--reload"], check=False, timeout=20)
+            return f"✓ Firewall opened (firewalld): tcp/{port}"
+    except Exception:
+        pass
+
+    return f"ℹ Could not confirm managed firewall for tcp/{port}; verify cloud/security-group rules manually"
+
 class SettingUpdate(BaseModel):
     value: str
 
@@ -42,6 +79,32 @@ async def update_settings(
     Returns changed_categories so the frontend knows which services need a restart.
     """
     changed_categories: set = set()
+
+    def _existing_value(key: str, default: str) -> str:
+        row = db.query(Setting).filter(Setting.key == key).first()
+        return (row.value or default) if row else default
+
+    # Validate SSL port policy before applying changes (only when SSL port keys are updated)
+    ssl_port_keys_changed = "panel_https_port" in settings_data or "sub_https_port" in settings_data
+    effective_panel_port = str(settings_data.get("panel_https_port", _existing_value("panel_https_port", "8443"))).strip()
+    effective_sub_port = str(settings_data.get("sub_https_port", _existing_value("sub_https_port", "2053"))).strip()
+
+    if ssl_port_keys_changed:
+        if effective_panel_port not in ALLOWED_SSL_PORTS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"panel_https_port must be one of: {', '.join(sorted(ALLOWED_SSL_PORTS))}",
+            )
+        if effective_sub_port not in ALLOWED_SSL_PORTS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"sub_https_port must be one of: {', '.join(sorted(ALLOWED_SSL_PORTS))}",
+            )
+        if effective_panel_port == effective_sub_port:
+            raise HTTPException(
+                status_code=422,
+                detail="Panel HTTPS port and Subscription HTTPS port must be different.",
+            )
 
     for key, value in settings_data.items():
         setting = db.query(Setting).filter(Setting.key == key).first()
@@ -78,13 +141,15 @@ async def update_settings(
         panel_domain  = _get("panel_domain", "")
         sub_domain    = _get("subscription_domain", "")
         panel_port    = _get("panel_https_port", "8443")
-        sub_port      = _get("sub_https_port", "443")
+        sub_port      = _get("sub_https_port", "2053")
         restore_script = "/opt/vpn-master-panel/restore_ssl_nginx.sh"
 
         results = []
+        processed_domains = set()
         for domain, port in [(panel_domain, panel_port), (sub_domain, sub_port)]:
-            if not domain or domain == sub_domain == panel_domain and domain != panel_domain:
+            if not domain or domain in processed_domains:
                 continue
+            processed_domains.add(domain)
             # Only rebuild if cert already exists — don't try to create one
             cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
             if domain and os.path.isfile(cert_path) and os.path.isfile(restore_script):
@@ -118,6 +183,10 @@ async def update_settings(
     if nginx_rebuild_result:
         for msg in nginx_rebuild_result:
             restart_hints.append(msg)
+
+    if nginx_rebuild_needed:
+        for p in sorted({effective_panel_port, effective_sub_port}):
+            restart_hints.append(_open_firewall_port(p))
 
     return {
         "message": "Settings saved successfully",
@@ -260,10 +329,9 @@ def init_default_settings(db: Session):
         "panel_https_port":    "8443",
 
         # HTTPS port for the subscription endpoint.
-        # Default: 443 — subscription does not conflict with OpenVPN
-        # (OpenVPN binds to the OpenVPN service, not Nginx port 443).
-        # Change to 8444 or another port if you have a different service on 443.
-        "sub_https_port":      "443",
+        # Allowed SSL edge ports: 2053, 2083, 2087, 2096, 8443
+        # Keep different from panel_https_port.
+        "sub_https_port":      "2053",
 
         # =============================================
         # WireGuard — Iran Anti-Censorship Defaults
@@ -590,7 +658,7 @@ async def get_obfuscation_script(
 class SSLRequest(BaseModel):
     domain: str
     email: str
-    https_port: Optional[int] = None  # None = auto-detect; 443 or 8443 = explicit
+    https_port: Optional[int] = None  # None = backend default; allowed: 2053/2083/2087/2096/8443
 
 @router.post("/ssl/request")
 async def request_letsencrypt_ssl(
@@ -619,7 +687,7 @@ async def request_letsencrypt_ssl(
     ssl_service = SSLService()
 
     # Resolve https_port: use caller-supplied value if present, else None (auto-detect)
-    https_port_arg = req.https_port if req.https_port in (443, 8443, 8444) else None
+    https_port_arg = req.https_port if req.https_port in (2053, 2083, 2087, 2096, 8443) else None
 
     headers = {
         "X-Accel-Buffering": "no",
