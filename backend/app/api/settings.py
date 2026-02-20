@@ -315,10 +315,10 @@ def init_default_settings(db: Session):
         # =============================================
         "admin_contact": "",
 
-        # Subscription Links (3x-ui/Marzban/Hiddify-style)
-        "subscription_enabled": "0",
+        # Subscription Portal (public /sub/<token> page for each user)
+        "subscription_enabled": "1",
         "subscription_domain": "",
-        "subscription_format": "v2ray",
+        "subscription_format": "portal",
         "subscription_update_interval": "24",
         "config_export_qr": "1",
         "config_export_uri": "1",
