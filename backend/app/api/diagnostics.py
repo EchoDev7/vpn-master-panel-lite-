@@ -136,8 +136,8 @@ async def get_full_diagnostics(
         
         # 2. Package Versions
         try:
-            packages = ["openvpn", "nginx", "python3", "pip", "node", "npm", "git", "curl", "ufw", "wg", "sqlite3"]
-            
+            packages = ["openvpn", "nginx", "certbot", "python3", "pip", "node", "npm", "git", "curl", "ufw", "wg", "sqlite3"]
+
             for pkg in packages:
                 try:
                     if pkg in ["openvpn", "nginx", "git", "curl", "ufw", "sqlite3"]:
@@ -148,48 +148,84 @@ async def get_full_diagnostics(
                             "latest": versions["latest"],
                             "status": "Update Available" if versions["installed"] != versions["latest"] and versions["installed"] != "Not Installed" else "Up to date"
                         })
+                    elif pkg == "certbot":
+                        # certbot: check binary version + list installed SSL certs
+                        versions = get_package_version("certbot")
+                        cmd_ver = get_command_version("certbot", "--version")
+                        is_installed = shutil.which("certbot") is not None
+
+                        # Collect installed SSL certificates from Let's Encrypt
+                        ssl_certs = []
+                        try:
+                            live_dir = "/etc/letsencrypt/live"
+                            if os.path.isdir(live_dir):
+                                for domain_dir in sorted(os.listdir(live_dir)):
+                                    cert_path = os.path.join(live_dir, domain_dir, "fullchain.pem")
+                                    if os.path.isfile(cert_path):
+                                        expiry = "Unknown"
+                                        try:
+                                            r = subprocess.run(
+                                                ["openssl", "x509", "-enddate", "-noout", "-in", cert_path],
+                                                capture_output=True, text=True, timeout=5
+                                            )
+                                            if "=" in r.stdout:
+                                                expiry = r.stdout.split("=")[1].strip()
+                                        except Exception:
+                                            pass
+                                        ssl_certs.append({"domain": domain_dir, "expires": expiry})
+                        except Exception:
+                            pass
+
+                        package_status.append({
+                            "name": "certbot",
+                            "installed": cmd_ver if is_installed else "Not Installed",
+                            "latest": versions["latest"],
+                            "status": "OK" if is_installed else "MISSING — Required for SSL",
+                            "required": True,
+                            "ssl_certs": ssl_certs,
+                        })
                     elif pkg == "python3":
-                         versions = get_package_version("python3")
-                         cmd_ver = get_command_version("python3")
-                         package_status.append({
-                             "name": "python3",
-                             "installed": cmd_ver,
-                             "latest": versions["latest"],
-                             "status": "OK"
-                         })
+                        versions = get_package_version("python3")
+                        cmd_ver = get_command_version("python3")
+                        package_status.append({
+                            "name": "python3",
+                            "installed": cmd_ver,
+                            "latest": versions["latest"],
+                            "status": "OK"
+                        })
                     elif pkg == "pip":
-                         cmd_ver = get_command_version("pip")
-                         package_status.append({
-                             "name": "pip",
-                             "installed": cmd_ver,
-                             "latest": "Check Manually",
-                             "status": "OK"
-                         })
+                        cmd_ver = get_command_version("pip")
+                        package_status.append({
+                            "name": "pip",
+                            "installed": cmd_ver,
+                            "latest": "Check Manually",
+                            "status": "OK"
+                        })
                     elif pkg == "node":
-                         versions = get_package_version("nodejs")
-                         cmd_ver = get_command_version("node", "-v")
-                         package_status.append({
-                             "name": "node",
-                             "installed": cmd_ver,
-                             "latest": versions["latest"],
-                             "status": "OK"
-                         })
+                        versions = get_package_version("nodejs")
+                        cmd_ver = get_command_version("node", "-v")
+                        package_status.append({
+                            "name": "node",
+                            "installed": cmd_ver,
+                            "latest": versions["latest"],
+                            "status": "OK"
+                        })
                     elif pkg == "npm":
-                         cmd_ver = get_command_version("npm", "-v")
-                         package_status.append({
-                             "name": "npm",
-                             "installed": cmd_ver,
-                             "latest": "Check Manually", 
-                             "status": "OK"
-                         })
+                        cmd_ver = get_command_version("npm", "-v")
+                        package_status.append({
+                            "name": "npm",
+                            "installed": cmd_ver,
+                            "latest": "Check Manually",
+                            "status": "OK"
+                        })
                     elif pkg == "wg":
-                         versions = get_package_version("wireguard")
-                         package_status.append({
-                             "name": "wireguard",
-                             "installed": versions["installed"],
-                             "latest": versions["latest"],
-                             "status": "Update Available" if versions["installed"] != versions["latest"] and versions["installed"] != "Not Installed" else "OK"
-                         })
+                        versions = get_package_version("wireguard")
+                        package_status.append({
+                            "name": "wireguard",
+                            "installed": versions["installed"],
+                            "latest": versions["latest"],
+                            "status": "Update Available" if versions["installed"] != versions["latest"] and versions["installed"] != "Not Installed" else "OK"
+                        })
                 except Exception as e:
                     logger.error(f"Error checking package {pkg}: {e}")
                     package_status.append({"name": pkg, "installed": "Error", "latest": "Error", "status": "Error"})
