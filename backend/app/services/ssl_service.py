@@ -21,52 +21,56 @@ class SSLService:
             logger.error(f"Command failed: {cmd}\nError: {e.stderr}")
             return False, e.stderr
 
-    def issue_letsencrypt_cert(self, domain: str, email: str) -> Tuple[bool, str]:
+    def stream_letsencrypt_cert(self, domain: str, email: str):
         """
-        Request a Let's Encrypt certificate using certbot webroot or standalone plugin.
-        Assumes Nginx is installed and running on port 80 for challenges.
+        Generator that yields live Certbot logs for streaming to the frontend.
         """
         if not domain or not email:
-            return False, "Domain and email are required."
+            yield "ERROR: Domain and email are required.\n"
+            return
             
-        # 1. Ensure certbot is installed
-        if not os.path.exists(self.certbot_path):
-             # Try falling back to simply 'certbot'
-             self.certbot_path = "certbot"
-            
-        logger.info(f"Requesting SSL for {domain} with email {email}")
+        yield f"INFO: Initializing Let's Encrypt SSL Request for {domain}...\n"
         
-        # We use the nginx plugin if available, otherwise webroot.
-        # Assuming the standard VPN Master Panel Nginx setup
-        cmd = (
-            f"{self.certbot_path} certonly --non-interactive --agree-tos "
-            f"-m {email} -d {domain} --nginx"
-        )
+        certbot_path = self.certbot_path
+        if not os.path.exists(certbot_path):
+             certbot_path = "certbot"
+             
+        cmd = f"{certbot_path} certonly --non-interactive --agree-tos -m {email} -d {domain} --nginx"
+        yield f"EXEC: Running Nginx plugin verification...\n"
         
-        success, output = self._run_cmd(cmd)
+        process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in iter(process.stdout.readline, ""):
+            yield f"CERTBOT: {line}"
+        process.stdout.close()
+        process.wait()
         
-        if success:
-             # Verify certs exist
-             cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
-             if os.path.exists(cert_path):
-                 return True, f"SSL Certificate successfully issued for {domain}."
-             else:
-                 return False, f"Certbot reported success, but cert files not found at {cert_path}"
-                 
-        # If Nginx plugin failed, it might be due to missing server block. 
-        # Fallback to standalone (requires killing Nginx temporarily)
-        logger.info("Nginx plugin failed, attempting standalone fallback...")
-        self._run_cmd("systemctl stop nginx")
+        if process.returncode == 0:
+             yield f"\nSUCCESS: SSL Certificate successfully issued for {domain}!\n"
+             yield "EXEC: Reloading Nginx to apply new certificates...\n"
+             subprocess.run("systemctl reload nginx", shell=True)
+             yield "DONE: Nginx reloaded. Panel is now secured.\n"
+             return
+             
+        yield f"\nWARN: Nginx plugin failed (Exit Code: {process.returncode}).\n"
+        yield "INFO: Attempting aggressive Standalone fallback mode...\n"
+        yield "EXEC: Stopping Nginx service temporarily on port 80...\n"
+        subprocess.run("systemctl stop nginx", shell=True)
         
-        cmd_fallback = (
-            f"{self.certbot_path} certonly --standalone --non-interactive --agree-tos "
-            f"-m {email} -d {domain}"
-        )
-        success_fb, output_fb = self._run_cmd(cmd_fallback)
+        cmd_fallback = f"{certbot_path} certonly --standalone --non-interactive --agree-tos -m {email} -d {domain}"
+        yield f"EXEC: Running Standalone plugin verification...\n"
         
-        self._run_cmd("systemctl start nginx") # Restart regardless
+        process2 = subprocess.Popen(cmd_fallback, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in iter(process2.stdout.readline, ""):
+            yield f"CERTBOT: {line}"
+        process2.stdout.close()
+        process2.wait()
         
-        if success_fb:
-             return True, f"SSL Certificate successfully issued for {domain} (Standalone fallback)."
+        yield "EXEC: Starting Nginx service back up...\n"
+        subprocess.run("systemctl start nginx", shell=True)
+        
+        if process2.returncode == 0:
+             yield f"\nSUCCESS: SSL Certificate successfully issued for {domain} via Standalone mode!\n"
+             yield "DONE: Web server restored. Panel is now secured.\n"
         else:
-             return False, f"Certbot request failed. Is port 80 open and domain pointed to IP? \nLogs: {output_fb}"
+             yield f"\nERROR: Certbot standalone request failed (Exit Code: {process2.returncode}).\n"
+             yield "FATAL: Please check your domain DNS records and ensure Port 80 is strictly open.\n"
