@@ -4,7 +4,7 @@ User and Authentication Models
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import enum
 import base64
 
@@ -181,8 +181,14 @@ class User(Base):
         """Check if user is active and not expired"""
         if self.status != UserStatus.ACTIVE:
             return False
-        if self.expiry_date and datetime.utcnow() > self.expiry_date:
-            return False
+        if self.expiry_date:
+            now = datetime.now(timezone.utc)
+            expiry = self.expiry_date
+            # Normalize naive datetime from SQLite to UTC-aware
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if now > expiry:
+                return False
         return True
     
     @property
@@ -211,8 +217,12 @@ class User(Base):
         """Check if user has been active in the last 3 minutes"""
         if not self.last_connection:
             return False
-        # Use UTC for comparison
-        return datetime.utcnow() - self.last_connection < timedelta(minutes=3)
+        now = datetime.now(timezone.utc)
+        last = self.last_connection
+        # Normalize naive datetime from SQLite to UTC-aware
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        return (now - last) < timedelta(minutes=3)
 
 
 class TrafficLog(Base):
