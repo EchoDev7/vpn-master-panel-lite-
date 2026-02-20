@@ -198,7 +198,7 @@ def init_default_settings(db: Session):
 
         # Subscription Links (3x-ui/Marzban/Hiddify-style)
         "subscription_enabled": "0",
-        "subscription_base_url": "",
+        "subscription_domain": "",
         "subscription_format": "v2ray",
         "subscription_update_interval": "24",
         "config_export_qr": "1",
