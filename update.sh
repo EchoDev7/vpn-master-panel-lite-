@@ -71,18 +71,25 @@ if [ -d ".git" ]; then
         fi
     fi
 
-    # Stash local changes instead of hard reset
-    STASH_RESULT=$(git diff-index --quiet HEAD -- || echo "changed")
-    if [ "$STASH_RESULT" = "changed" ]; then
-        echo -e "${YELLOW}⚠️ Local changes detected. Stashing them...${NC}"
-        git stash
+    # Stash local tracked + untracked changes instead of hard reset
+    STASH_RESULT=""
+    if [ -n "$(git status --porcelain)" ]; then
+        STASH_RESULT="changed"
+        echo -e "${YELLOW}⚠️ Local changes detected (tracked/untracked). Stashing them...${NC}"
+        git stash push -u -m "update.sh auto-stash $(date +%s)"
     fi
     
     # Attempt to pull. If standard fetch worked, pull origin main works.
     # If standard fetch failed but proxy fetched, `git pull origin main` might fail again if it tries to connect.
     # We should specify standard merge if fetch already pulled the objects.
     # git merge origin/main handles it without network calls if fetch succeeded.
-    git merge origin/main --no-edit || git pull origin main
+    if ! git merge origin/main --no-edit; then
+        echo -e "${YELLOW}⚠️ Merge failed, trying git pull origin main...${NC}"
+        if ! git pull origin main; then
+            echo -e "${RED}❌ Could not update repository from origin/main.${NC}"
+            echo -e "${RED}❌ Your server is likely still running old code. Resolve git conflicts and re-run update.sh.${NC}"
+        fi
+    fi
     
     # Restore local changes if we stashed them
     if [ "$STASH_RESULT" = "changed" ]; then
@@ -640,7 +647,23 @@ if [ -d "/opt/vpn-master-panel/backend/data" ]; then
     chmod -R 755 /opt/vpn-master-panel/backend/data
 fi
 
-systemctl restart vpnmaster-backend
+BACKEND_SERVICE=""
+if systemctl list-unit-files | grep -q '^vpn-panel-backend.service'; then
+    BACKEND_SERVICE="vpn-panel-backend"
+elif systemctl list-unit-files | grep -q '^vpnmaster-backend.service'; then
+    BACKEND_SERVICE="vpnmaster-backend"
+fi
+
+if [ -n "$BACKEND_SERVICE" ]; then
+    systemctl restart "$BACKEND_SERVICE"
+    print_success "Backend restarted ($BACKEND_SERVICE)"
+else
+    print_warning "No backend service unit found (vpn-panel-backend/vpnmaster-backend). Attempting to install service..."
+    if [ -x "/opt/vpn-master-panel/backend/install_service.sh" ]; then
+        /opt/vpn-master-panel/backend/install_service.sh || true
+        systemctl restart vpn-panel-backend || true
+    fi
+fi
 # Restart OpenVPN to apply changes
 if systemctl list-units --full -all | grep -q "openvpn@server.service"; then
     systemctl restart openvpn@server
