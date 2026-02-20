@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..models.setting import Setting
 from ..models.user import User
 from ..services.openvpn import openvpn_service
 from ..services.wireguard import wireguard_service
@@ -258,6 +259,12 @@ def _get_user_by_token(db: Session, token: str) -> User:
     return user
 
 
+def _ensure_subscription_enabled(db: Session) -> None:
+    setting = db.query(Setting).filter(Setting.key == "subscription_enabled").first()
+    if setting and str(setting.value).strip() == "0":
+        raise HTTPException(status_code=403, detail="Subscription links are disabled")
+
+
 def _is_user_subscription_active(user: User) -> bool:
     if getattr(user, "status", None) and user.status.value != "active":
         return False
@@ -301,6 +308,7 @@ def _ensure_wireguard_material(user: User, db: Session) -> bool:
 
 @router.get("/{token}", response_class=HTMLResponse)
 async def get_subscription_page(token: str, db: Session = Depends(get_db)):
+    _ensure_subscription_enabled(db)
     user = _get_user_by_token(db, token)
 
     import json
@@ -355,6 +363,7 @@ async def get_subscription_page(token: str, db: Session = Depends(get_db)):
 
 @router.get("/{token}/openvpn", response_class=PlainTextResponse)
 async def get_openvpn_config(token: str, db: Session = Depends(get_db)):
+    _ensure_subscription_enabled(db)
     user = _get_user_by_token(db, token)
         
     if not user.openvpn_enabled:
@@ -369,6 +378,7 @@ async def get_openvpn_config(token: str, db: Session = Depends(get_db)):
 
 @router.get("/{token}/wireguard", response_class=PlainTextResponse)
 async def get_wireguard_config(token: str, db: Session = Depends(get_db)):
+    _ensure_subscription_enabled(db)
     user = _get_user_by_token(db, token)
         
     if not user.wireguard_enabled:
