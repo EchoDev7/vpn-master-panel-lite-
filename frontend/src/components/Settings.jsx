@@ -720,28 +720,63 @@ const Settings = () => {
                          * into the log window line by line.
                          * Returns true if the stream ended with "DONE:" (success indicator).
                          */
+                        /**
+                         * streamSSL — POST to the SSL endpoint and stream live output.
+                         *
+                         * The SSL process can take 60–180 s (certbot + DNS check + cert download).
+                         * We use fetch() with no timeout so the browser waits as long as needed.
+                         * Nginx MUST have proxy_read_timeout ≥ 300s and proxy_buffering off.
+                         */
                         const streamSSL = async (domain, email) => {
                             const token = localStorage.getItem('access_token');
-                            const baseURL = (import.meta.env.VITE_API_URL || '') + '/api/v1/settings/ssl/request';
+
+                            // Build the URL — use VITE_API_URL if set, else use a relative path
+                            // that works whether the browser is on port 3000 (Nginx) or 8000.
+                            const apiBase = import.meta.env.VITE_API_URL || '';
+                            const url = `${apiBase}/api/v1/settings/ssl/request`;
+
+                            // Show diagnostic curl command in the log so the user can test manually
+                            setSslStream(prev => ({
+                                ...prev,
+                                logs: prev.logs +
+                                    `INFO: Sending request to: ${url}\n` +
+                                    `INFO: (Test manually on server with diagnose.sh)\n`
+                            }));
+
+                            // AbortController lets us add a manual "Cancel" button later
+                            const controller = new AbortController();
 
                             let response;
                             try {
-                                response = await fetch(baseURL, {
+                                response = await fetch(url, {
                                     method: 'POST',
+                                    signal: controller.signal,
                                     headers: {
                                         'Content-Type': 'application/json',
                                         'Authorization': `Bearer ${token}`,
                                         'Accept': 'text/plain',
+                                        // Hint to any proxy/CDN: do not buffer this response
+                                        'X-Accel-Buffering': 'no',
+                                        'Cache-Control': 'no-cache',
                                     },
                                     body: JSON.stringify({ domain, email }),
                                 });
                             } catch (networkErr) {
-                                // Network-level failure (e.g. DNS, CORS, connection refused)
+                                // Network-level failure — connection refused, DNS fail, CORS, etc.
                                 setSslStream(prev => ({
                                     ...prev,
-                                    logs: prev.logs + `\nNETWORK ERROR: Could not reach the backend.\n` +
-                                        `  Detail: ${networkErr.message}\n` +
-                                        `  Check: Is the backend running on port 8001? Is Nginx correctly proxying /api/?\n`
+                                    logs: prev.logs +
+                                        `\nNETWORK ERROR: Could not reach the backend.\n` +
+                                        `  Detail: ${networkErr.message}\n\n` +
+                                        `  ── Troubleshooting Checklist ──────────────────────────\n` +
+                                        `  1. Run on server:  sudo bash /opt/vpn-master-panel/diagnose.sh\n` +
+                                        `  2. Is backend up?  systemctl status vpnmaster-backend\n` +
+                                        `  3. Is Nginx up?    systemctl status nginx\n` +
+                                        `  4. Nginx timeout?  grep proxy_read_timeout /etc/nginx/sites-enabled/*\n` +
+                                        `     → Must be ≥ 300s for SSL issuance\n` +
+                                        `  5. Buffering off?  grep proxy_buffering /etc/nginx/sites-enabled/*\n` +
+                                        `     → Must be: proxy_buffering off\n` +
+                                        `  6. Quick fix:      nginx -t && systemctl reload nginx\n`
                                 }));
                                 return false;
                             }
@@ -749,25 +784,55 @@ const Settings = () => {
                             if (!response.ok) {
                                 // HTTP error (4xx / 5xx) — try to read body for details
                                 let errBody = '';
-                                try { errBody = await response.text(); } catch (_) {}
+                                try { errBody = await response.text(); } catch (_) { }
                                 setSslStream(prev => ({
                                     ...prev,
-                                    logs: prev.logs + `\nHTTP ${response.status} ERROR: ${response.statusText}\n${errBody}\n`
+                                    logs: prev.logs +
+                                        `\nHTTP ${response.status} ERROR: ${response.statusText}\n` +
+                                        (errBody ? `  Server says: ${errBody.slice(0, 500)}\n` : '') +
+                                        (response.status === 401
+                                            ? `  → Session expired. Please log out and log in again.\n`
+                                            : response.status === 422
+                                            ? `  → Invalid request body (domain/email format check failed).\n`
+                                            : response.status >= 500
+                                            ? `  → Backend error. Check: journalctl -u vpnmaster-backend -n 50\n`
+                                            : '')
                                 }));
                                 return false;
                             }
 
-                            // Stream the body line by line
+                            // ── Stream the response body chunk by chunk ──────────────
+                            // Each chunk is a line (or several lines) from certbot output.
+                            // We append them to the log as they arrive.
+                            if (!response.body) {
+                                setSslStream(prev => ({
+                                    ...prev,
+                                    logs: prev.logs + `\nERROR: Browser does not support streaming (ReadableStream API).\n` +
+                                        `  Try Chrome/Edge 85+ or Firefox 65+.\n`
+                                }));
+                                return false;
+                            }
+
                             const reader = response.body.getReader();
                             const decoder = new TextDecoder('utf-8');
                             let accum = '';
-                            let lastChunk = '';
 
+                            // eslint-disable-next-line no-constant-condition
                             while (true) {
-                                const { done, value } = await reader.read();
+                                let done, value;
+                                try {
+                                    ({ done, value } = await reader.read());
+                                } catch (readErr) {
+                                    setSslStream(prev => ({
+                                        ...prev,
+                                        logs: prev.logs + `\nSTREAM ERROR: ${readErr.message}\n` +
+                                            `  The connection was interrupted. Nginx may have timed out.\n` +
+                                            `  Increase proxy_read_timeout in /etc/nginx/sites-available/vpnmaster\n`
+                                    }));
+                                    return false;
+                                }
                                 if (done) break;
                                 const chunk = decoder.decode(value, { stream: true });
-                                lastChunk = chunk;
                                 accum += chunk;
                                 setSslStream(prev => ({ ...prev, logs: prev.logs + chunk }));
                             }
