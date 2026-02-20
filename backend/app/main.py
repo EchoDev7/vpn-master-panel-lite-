@@ -3,7 +3,6 @@ VPN Master Panel - FastAPI Main Application
 """
 from fastapi import FastAPI, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
@@ -176,8 +175,10 @@ app.add_middleware(
     allow_headers=settings.CORS_ALLOW_HEADERS,
 )
 
-# Add Gzip compression
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# NOTE: GZipMiddleware is intentionally NOT added here.
+# It buffers the entire response body before compressing, which breaks
+# StreamingResponse (certbot live output). Static file compression is
+# handled by Nginx (gzip on; in nginx.conf) — zero overhead on FastAPI side.
 
 
 # Health check endpoint
