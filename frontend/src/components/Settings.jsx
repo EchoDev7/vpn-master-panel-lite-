@@ -1020,11 +1020,11 @@ const Settings = () => {
                     <div>
                         <p className="text-blue-300 font-semibold text-sm">Public Subscription Portal</p>
                         <p className="text-gray-400 text-xs mt-1">
-                            هر کاربر یک لینک اختصاصی در مسیر <code>/sub/&lt;token&gt;</code> دارد.
-                            کاربر با باز کردن این صفحه می‌تواند کانفیگ OpenVPN/WireGuard را دانلود کند.
+                            Each user has a dedicated link at <code>/sub/&lt;token&gt;</code>.
+                            Opening that page allows the user to download OpenVPN and WireGuard configs.
                         </p>
                         <p className="text-gray-400 text-xs mt-1">
-                            دامنه و پورت این لینک از تنظیمات Domain &amp; SSL خوانده می‌شود.
+                            The link domain and port are read from Domain &amp; SSL settings.
                         </p>
                     </div>
                 </div>
@@ -1076,10 +1076,10 @@ const Settings = () => {
             <SectionTitle>Config Export Options</SectionTitle>
             <S_Check {...sp} settingKey="config_export_qr"
                 label="Show WireGuard QR on Portal"
-                tip="نمایش QR برای WireGuard در صفحه اشتراک کاربر." />
+                tip="Display WireGuard QR codes on each user's subscription page." />
             <S_Check {...sp} settingKey="config_export_uri"
                 label="Keep one-click URI option (legacy)"
-                tip="گزینه سازگاری با فرمت‌های قدیمی. در حالت Portal فعلی استفاده مستقیم ندارد." />
+                tip="Compatibility option for legacy formats; not directly used in current portal mode." />
         </div>
         );
     };
