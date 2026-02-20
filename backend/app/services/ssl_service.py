@@ -16,25 +16,22 @@ Strategy (3-tier fallback, fully logged):
 
 Port-80 management
 -------------------
-Before every attempt we:
-  a. Check whether port 80 is actually reachable (ss / netstat).
-  b. If a firewall (ufw / iptables) is active, temporarily open port 80.
-  c. After the cert is issued, restore the firewall to its original state.
+Before every attempt we open port 80 in the active firewall (ufw / firewalld / iptables)
+and restore the rules in a `finally` block regardless of outcome.
 
-Nginx config generation
-------------------------
-Generates a production-ready config that proxies:
-  - /api/v1/  →  FastAPI backend  (port 8001)
-  - /ws/      →  WebSocket        (port 8001)
-  - /         →  React frontend   (port 3000)
+IMPORTANT — Generator design
+------------------------------
+Every method that needs to both stream progress AND return a boolean uses the
+"result holder" pattern (a mutable list) so that `yield from` semantics don't
+need to rely on StopIteration.value, which is fragile and was the root cause of
+the previous "STREAM ERROR: Load failed" bug.
 """
 
 import os
 import re
-import socket
 import subprocess
 import logging
-from typing import Iterator, Tuple, Optional
+from typing import Iterator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +48,20 @@ class SSLService:
     def __init__(self):
         self.certbot_path = self._find_certbot()
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────── helpers ──────
 
     @staticmethod
     def _find_certbot() -> str:
-        for p in ["/usr/bin/certbot", "/usr/local/bin/certbot"]:
+        """Locate the certbot binary."""
+        candidates = [
+            "/usr/bin/certbot",
+            "/usr/local/bin/certbot",
+            "/snap/bin/certbot",
+        ]
+        for p in candidates:
             if os.path.exists(p):
                 return p
-        return "certbot"  # fallback to PATH
+        return "certbot"   # fall back to PATH
 
     @staticmethod
     def _validate_domain(domain: str) -> bool:
@@ -69,23 +72,34 @@ class SSLService:
         return bool(email and _EMAIL_RE.match(email))
 
     @staticmethod
-    def _run(cmd: list) -> Tuple[bool, str]:
-        """Run a subprocess, return (success, combined_output)."""
+    def _run(cmd: List[str]) -> Tuple[bool, str]:
+        """Run a subprocess synchronously. Returns (success, combined_output)."""
         try:
             r = subprocess.run(
                 cmd, shell=False, check=True,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                timeout=30,
             )
-            return True, r.stdout
+            return True, r.stdout or ""
         except subprocess.CalledProcessError as exc:
             return False, exc.stdout or ""
+        except subprocess.TimeoutExpired:
+            return False, f"Timeout running: {' '.join(cmd)}"
         except FileNotFoundError:
             return False, f"Command not found: {cmd[0]}"
+        except Exception as exc:
+            return False, str(exc)
 
     @staticmethod
     def _service_running(name: str) -> bool:
-        ok, _ = SSLService._run(["systemctl", "is-active", "--quiet", name])
-        return ok
+        try:
+            r = subprocess.run(
+                ["systemctl", "is-active", "--quiet", name],
+                timeout=10,
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
 
     @staticmethod
     def _detect_firewall() -> Optional[str]:
@@ -103,35 +117,170 @@ class SSLService:
         return None
 
     @staticmethod
-    def _open_port80(fw: Optional[str]) -> list:
-        """Open port 80 in firewall. Returns list of cleanup commands."""
+    def _open_port80(fw: Optional[str]) -> List[List[str]]:
+        """Open port 80 in firewall. Returns cleanup command list."""
         if fw == "ufw":
             SSLService._run(["ufw", "allow", "80/tcp"])
+            SSLService._run(["ufw", "reload"])
             return [["ufw", "delete", "allow", "80/tcp"]]
         if fw == "firewalld":
-            # --temporary means auto-reverts on reboot; no explicit cleanup needed
             SSLService._run(["firewall-cmd", "--add-port=80/tcp", "--temporary"])
             return []
         return []
 
     @staticmethod
-    def _close_port80(cleanup_cmds: list):
+    def _close_port80(cleanup_cmds: List[List[str]]):
         for cmd in cleanup_cmds:
             SSLService._run(cmd)
 
     @staticmethod
     def _ensure_webroot():
-        """Make sure the ACME challenge directory exists."""
+        """Ensure the ACME challenge directory exists and is readable."""
         challenge_dir = os.path.join(_WEBROOT, ".well-known", "acme-challenge")
         os.makedirs(challenge_dir, exist_ok=True)
+        # Make sure Nginx (www-data) can read it
+        try:
+            os.chmod(challenge_dir, 0o755)
+            os.chmod(_WEBROOT, 0o755)
+        except Exception:
+            pass
 
-    # ── Main entry point ──────────────────────────────────────────────────────
+    # ───────────────────────────────────────────────── certbot subprocess ─────
+
+    def _run_certbot_streamed(
+        self, cmd: List[str], result_holder: List[bool]
+    ) -> Iterator[str]:
+        """
+        Runs certbot and streams stdout/stderr line-by-line.
+
+        Uses a `result_holder` list (mutable, passed by reference) to communicate
+        success/failure back to the caller.  This avoids relying on the fragile
+        StopIteration.value mechanism that broke the previous implementation.
+
+        result_holder[0] is set to True on returncode 0, False otherwise.
+        """
+        result_holder.clear()
+        result_holder.append(False)   # default: failed
+
+        try:
+            yield f"EXEC: {' '.join(cmd)}\n"
+            process = subprocess.Popen(
+                cmd,
+                shell=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,          # line-buffered
+            )
+
+            for line in iter(process.stdout.readline, ""):
+                stripped = line.rstrip("\n")
+                if stripped:
+                    yield f"CERTBOT: {stripped}\n"
+
+            process.stdout.close()
+            rc = process.wait()
+
+            if rc == 0:
+                result_holder[0] = True
+                yield f"INFO: Certbot exited successfully (code 0).\n"
+            else:
+                yield f"WARN: Certbot exited with code {rc}.\n"
+
+        except FileNotFoundError:
+            yield f"ERROR: Certbot not found at '{cmd[0]}'.\n"
+            yield "HELP: Install with: apt install certbot python3-certbot-nginx\n"
+        except Exception as exc:
+            yield f"ERROR: Unexpected certbot error: {exc}\n"
+
+    # ──────────────────────────────────────────────── 3-tier SSL logic ────────
+
+    def _try_all_methods(
+        self, domain: str, email: str, nginx_running: bool
+    ) -> Iterator[str]:
+        """
+        Try webroot → nginx plugin → standalone.
+        Yields live log lines.  Sets success via result_holder pattern.
+        """
+        base_flags = [
+            self.certbot_path, "certonly",
+            "--non-interactive", "--agree-tos",
+            "-m", email,
+            "-d", domain,
+        ]
+
+        result = [False]   # shared mutable result holder
+
+        # ── Method 1: Webroot (zero-downtime, preferred) ──────────────────────
+        if nginx_running:
+            self._ensure_webroot()
+            yield "EXEC: [1/3] Webroot challenge (zero-downtime, preferred)...\n"
+
+            ok_nginx, _ = self._run(["nginx", "-t"])
+            if not ok_nginx:
+                yield "WARN: Nginx config test failed — skipping webroot method.\n"
+            else:
+                yield from self._run_certbot_streamed(
+                    base_flags + ["--webroot", "-w", _WEBROOT], result
+                )
+                if result[0]:
+                    yield from self._post_success(domain, reload_nginx=True)
+                    return
+
+            yield "WARN: Webroot method failed. Trying Nginx plugin...\n"
+
+            # ── Method 2: Nginx plugin ────────────────────────────────────────
+            yield "EXEC: [2/3] Nginx plugin...\n"
+            yield from self._run_certbot_streamed(
+                base_flags + ["--nginx"], result
+            )
+            if result[0]:
+                yield from self._post_success(domain, reload_nginx=True)
+                return
+
+            yield "WARN: Nginx plugin failed. Falling back to standalone mode...\n"
+
+        # ── Method 3: Standalone (stops Nginx briefly) ────────────────────────
+        yield "EXEC: [3/3] Standalone mode (Nginx will be stopped momentarily)...\n"
+        if nginx_running:
+            self._run(["systemctl", "stop", "nginx"])
+            yield "INFO: Nginx stopped temporarily.\n"
+
+        import time
+        time.sleep(1)   # allow OS to release port 80
+
+        yield from self._run_certbot_streamed(
+            base_flags + ["--standalone"], result
+        )
+
+        # Always restart Nginx regardless of outcome
+        if nginx_running:
+            self._run(["systemctl", "start", "nginx"])
+            yield "INFO: Nginx restarted.\n"
+
+        if result[0]:
+            yield from self._post_success(domain, reload_nginx=True)
+            return
+
+        # ── All methods failed ────────────────────────────────────────────────
+        yield "\nERROR: All 3 certbot methods failed.\n"
+        yield "HELP: Common causes:\n"
+        yield "  1. DNS A record must point to this server's public IP.\n"
+        yield "  2. Port 80 must be reachable from the internet (check hosting firewall).\n"
+        yield "  3. If using Cloudflare: set DNS to 'DNS only' (grey cloud), not 'Proxied'.\n"
+        yield "  4. Test DNS: dig +short " + domain + "\n"
+        yield "  5. Test port 80: curl -v http://" + domain + "/.well-known/acme-challenge/test\n"
+
+    # ──────────────────────────────────────────────── public entry point ──────
 
     def stream_letsencrypt_cert(self, domain: str, email: str) -> Iterator[str]:
         """
         Generator that yields live progress lines suitable for StreamingResponse.
+        Call with:
+            StreamingResponse(ssl_service.stream_letsencrypt_cert(domain, email),
+                              media_type="text/plain; charset=utf-8")
         """
-        # ── Validate ──────────────────────────────────────────────────────────
+        # ── Input validation ──────────────────────────────────────────────────
         if not domain or not email:
             yield "ERROR: Domain and email are required.\n"
             return
@@ -142,148 +291,62 @@ class SSLService:
             yield f"ERROR: Invalid email address: '{email}'\n"
             return
 
-        yield f"INFO: Starting SSL certificate request for {domain}\n"
+        yield f"INFO: Starting SSL request for domain: {domain}\n"
         yield f"INFO: Certbot binary: {self.certbot_path}\n"
 
-        # ── Detect environment ────────────────────────────────────────────────
+        # ── Check environment ─────────────────────────────────────────────────
         nginx_running = self._service_running("nginx")
         fw = self._detect_firewall()
         yield f"INFO: Nginx running: {nginx_running}\n"
-        yield f"INFO: Firewall: {fw or 'none detected'}\n"
+        yield f"INFO: Active firewall: {fw or 'none detected'}\n"
 
-        # ── Open port 80 in firewall (ufw / firewalld) ────────────────────────
-        cleanup_fw = []
+        # ── Open port 80 ──────────────────────────────────────────────────────
+        cleanup_fw: List[List[str]] = []
         if fw:
             yield f"EXEC: Opening port 80 in {fw}...\n"
             cleanup_fw = self._open_port80(fw)
             yield "INFO: Port 80 opened in firewall.\n"
         else:
-            yield "INFO: No managed firewall detected — relying on OS defaults.\n"
+            yield "INFO: No managed firewall — relying on OS defaults.\n"
 
-        # ── iptables belt-and-suspenders ──────────────────────────────────────
+        # iptables belt-and-suspenders: ensure port 80 is open even without ufw
         iptables_added = False
         ok_ipt, _ = self._run(["which", "iptables"])
         if ok_ipt:
-            ok_check, _ = self._run(
-                ["iptables", "-C", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"]
-            )
+            ok_check, _ = self._run([
+                "iptables", "-C", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"
+            ])
             if not ok_check:
-                self._run(["iptables", "-I", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"])
+                self._run([
+                    "iptables", "-I", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"
+                ])
                 iptables_added = True
                 yield "EXEC: iptables: opened port 80 temporarily.\n"
 
+        # ── Run 3-tier certbot ────────────────────────────────────────────────
         try:
-            # Run the 3-tier attempt
             yield from self._try_all_methods(domain, email, nginx_running)
         finally:
-            # ── Always restore firewall ───────────────────────────────────────
+            # Always clean up firewall rules
             if cleanup_fw:
                 yield f"EXEC: Restoring {fw} firewall rules...\n"
                 self._close_port80(cleanup_fw)
                 yield "INFO: Firewall restored.\n"
             if iptables_added:
-                self._run(["iptables", "-D", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"])
+                self._run([
+                    "iptables", "-D", "INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT"
+                ])
                 yield "EXEC: iptables: temporary port 80 rule removed.\n"
 
-    def _try_all_methods(
-        self, domain: str, email: str, nginx_running: bool
-    ) -> Iterator[str]:
-        """
-        Try webroot → nginx plugin → standalone in order.
-        Yields log lines for each step.
-        """
-        base_flags = [
-            self.certbot_path, "certonly",
-            "--non-interactive", "--agree-tos",
-            "-m", email,
-            "-d", domain,
-        ]
-
-        # ── Method 1: Webroot (zero-downtime) ────────────────────────────────
-        if nginx_running:
-            self._ensure_webroot()
-            yield "EXEC: [1/3] Webroot challenge (zero-downtime)...\n"
-            ok, _ = self._run(["nginx", "-t"])
-            if not ok:
-                yield "WARN: Nginx config test failed — skipping webroot method.\n"
-            else:
-                success = yield from self._run_certbot_streamed(
-                    base_flags + ["--webroot", "-w", _WEBROOT]
-                )
-                if success:
-                    yield from self._post_success(domain, reload_nginx=True)
-                    return
-
-            yield "WARN: Webroot failed. Trying Nginx plugin...\n"
-
-            # ── Method 2: Nginx plugin ────────────────────────────────────────
-            yield "EXEC: [2/3] Nginx plugin...\n"
-            success = yield from self._run_certbot_streamed(base_flags + ["--nginx"])
-            if success:
-                yield from self._post_success(domain, reload_nginx=True)
-                return
-
-            yield "WARN: Nginx plugin failed. Falling back to standalone mode...\n"
-
-        # ── Method 3: Standalone ──────────────────────────────────────────────
-        yield "EXEC: [3/3] Standalone mode — stopping Nginx to free port 80...\n"
-        if nginx_running:
-            self._run(["systemctl", "stop", "nginx"])
-            yield "INFO: Nginx stopped.\n"
-
-        import time
-        time.sleep(1)  # give the OS a moment to release port 80
-
-        success = yield from self._run_certbot_streamed(base_flags + ["--standalone"])
-
-        # Always bring Nginx back regardless of outcome
-        if nginx_running:
-            self._run(["systemctl", "start", "nginx"])
-            yield "INFO: Nginx restarted.\n"
-
-        if success:
-            yield from self._post_success(domain, reload_nginx=True)
-            return
-
-        # ── All methods failed ────────────────────────────────────────────────
-        yield "\nERROR: All 3 certbot methods failed.\n"
-        yield "HELP: Checklist:\n"
-        yield "  1. DNS A record for the domain must point to this server's public IP.\n"
-        yield "  2. Port 80 must be reachable from the internet (check hosting provider panel).\n"
-        yield "  3. No cloud-level firewall (Hetzner, OVH, AWS SG) is blocking port 80.\n"
-        yield "  4. Test with: curl -v http://YOUR_SERVER_IP/\n"
-
-    def _run_certbot_streamed(self, cmd: list) -> Iterator[str]:
-        """
-        Runs certbot and streams stdout/stderr line-by-line.
-        Returns True (via StopIteration value) if returncode == 0.
-        """
-        try:
-            process = subprocess.Popen(
-                cmd, shell=False,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
-            )
-            for line in iter(process.stdout.readline, ""):
-                yield f"CERTBOT: {line}"
-            process.stdout.close()
-            process.wait()
-            return process.returncode == 0
-        except FileNotFoundError:
-            yield f"ERROR: Certbot not found: '{cmd[0]}'\n"
-            yield "HELP: Install with: apt install certbot python3-certbot-nginx\n"
-            return False
-        except Exception as exc:
-            yield f"ERROR: Certbot error: {exc}\n"
-            return False
+    # ──────────────────────────────────────────── post-success Nginx config ───
 
     def _post_success(self, domain: str, reload_nginx: bool) -> Iterator[str]:
-        """Steps after successful cert issuance."""
+        """Actions after a certificate is successfully issued."""
         yield f"\nSUCCESS: Certificate issued for {domain}\n"
         yield "EXEC: Writing Nginx SSL reverse-proxy config...\n"
         written = self._update_nginx_config(domain)
         if written:
-            yield "INFO: Nginx config written.\n"
+            yield "INFO: Nginx SSL config written.\n"
         else:
             yield "WARN: Could not write Nginx config (permission denied?). Review manually.\n"
 
@@ -291,39 +354,41 @@ class SSLService:
             ok, out = self._run(["nginx", "-t"])
             if ok:
                 self._run(["systemctl", "reload", "nginx"])
-                yield "EXEC: Nginx reloaded successfully.\n"
+                yield "EXEC: Nginx reloaded with SSL config.\n"
             else:
-                yield f"WARN: Nginx config test failed:\n{out}\n"
+                yield f"WARN: Nginx config test failed after SSL setup:\n{out}\n"
 
-        yield f"INFO: Cert → /etc/letsencrypt/live/{domain}/fullchain.pem\n"
-        yield f"INFO: Key  → /etc/letsencrypt/live/{domain}/privkey.pem\n"
-        yield "INFO: Auto-renewal is managed by certbot's systemd timer.\n"
+        yield f"INFO: Certificate location:\n"
+        yield f"INFO:   Cert → /etc/letsencrypt/live/{domain}/fullchain.pem\n"
+        yield f"INFO:   Key  → /etc/letsencrypt/live/{domain}/privkey.pem\n"
+        yield "INFO: Auto-renewal is handled by certbot's systemd timer.\n"
         yield "DONE: Panel is now protected with HTTPS.\n"
 
-    # ── Nginx Config ──────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────── Nginx config writer ──────
 
     def _update_nginx_config(self, domain: str) -> bool:
         """
-        Generate and install a production Nginx reverse-proxy config.
-        Ports used:  backend FastAPI = 8001,  frontend React = 3000.
+        Write a production Nginx reverse-proxy config for the given domain.
+        Ports: FastAPI backend = 8001, React frontend = 3000 (static served by Nginx itself).
         """
         config_path  = f"/etc/nginx/sites-available/vpn_panel_{domain}"
         symlink_path = f"/etc/nginx/sites-enabled/vpn_panel_{domain}"
 
         nginx_conf = f"""# VPN Master Panel — generated by ssl_service.py
-# Domain: {domain}
+# Domain: {domain}  |  Generated automatically — do not edit by hand.
 
-# ── HTTP: ACME challenge passthrough + redirect ──────────────────────────────
+# ── HTTP: redirect to HTTPS + ACME renewal ───────────────────────────────────
 server {{
     listen 80;
     listen [::]:80;
     server_name {domain};
 
-    # Required for certbot renewal
+    # Certbot renewal (webroot method)
     location /.well-known/acme-challenge/ {{
         root {_WEBROOT};
     }}
 
+    # Redirect everything else to HTTPS
     location / {{
         return 301 https://$host$request_uri;
     }}
@@ -338,15 +403,14 @@ server {{
     ssl_certificate     /etc/letsencrypt/live/{domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;
 
-    # Use Let's Encrypt recommended TLS settings if available
-    # (installed by certbot automatically)
+    # Let's Encrypt recommended TLS options (written by certbot)
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    # HSTS
+    # HSTS — 6 months
     add_header Strict-Transport-Security "max-age=15768000; includeSubDomains" always;
 
-    # ── Backend API & SSE streaming (FastAPI on :8001) ────────────────────
+    # ── Backend API + SSE streaming (FastAPI :8001) ───────────────────────────
     location /api/ {{
         proxy_pass         http://127.0.0.1:8001/api/;
         proxy_http_version 1.1;
@@ -354,15 +418,21 @@ server {{
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-        # Disable buffering so SSE / streaming responses reach the browser live
+
+        # Long timeout for certbot SSL issuance (can take 60-180 s)
+        proxy_read_timeout  600s;
+        proxy_send_timeout  600s;
+        proxy_connect_timeout 30s;
+
+        # Disable ALL buffering for live streaming (certbot output)
         proxy_buffering    off;
         proxy_cache        off;
+        proxy_cache_bypass 1;
         chunked_transfer_encoding on;
+        add_header X-Accel-Buffering no always;
     }}
 
-    # ── WebSocket (FastAPI on :8001) ──────────────────────────────────────
+    # ── WebSocket (FastAPI :8001) ─────────────────────────────────────────────
     location /ws/ {{
         proxy_pass         http://127.0.0.1:8001/ws/;
         proxy_http_version 1.1;
@@ -370,21 +440,28 @@ server {{
         proxy_set_header   Connection "upgrade";
         proxy_set_header   Host       $host;
         proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering    off;
     }}
 
-    # ── Frontend React/Vite (port 3000) ──────────────────────────────────
+    # ── React frontend static files ───────────────────────────────────────────
+    # Served directly by Nginx (fastest, no proxy overhead)
+    root /opt/vpn-master-panel/frontend/dist;
+    index index.html;
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {{
+        expires     30d;
+        add_header  Cache-Control "public, immutable";
+        try_files   $uri =404;
+    }}
+
     location / {{
-        proxy_pass         http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header   Upgrade    $http_upgrade;
-        proxy_set_header   Connection "upgrade";
-        proxy_set_header   Host       $host;
-        proxy_cache_bypass $http_upgrade;
+        try_files $uri $uri/ /index.html;
     }}
 }}
 """
         try:
-            # Disable the default nginx placeholder if it exists
+            # Remove stale default site symlink if present
             default_enabled = "/etc/nginx/sites-enabled/default"
             if os.path.islink(default_enabled):
                 try:
@@ -395,18 +472,20 @@ server {{
             with open(config_path, "w") as fh:
                 fh.write(nginx_conf)
 
+            # Create symlink only if it doesn't already exist
             if not os.path.exists(symlink_path):
                 os.symlink(config_path, symlink_path)
 
             return True
+
         except PermissionError:
-            logger.error("Permission denied writing Nginx config. Backend must run as root.")
+            logger.error("Permission denied writing Nginx config — backend must run as root.")
             return False
         except Exception as exc:
             logger.error(f"Nginx config write error: {exc}")
             return False
 
-    # ── Status helpers ────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────── status check ─────
 
     def check_ssl_status(self, domain: str) -> dict:
         """Return info about an installed certificate."""
@@ -415,10 +494,11 @@ server {{
             return {"installed": False, "domain": domain}
         try:
             result = subprocess.run(
-                ["openssl", "x509", "-in", cert_path, "-noout", "-dates", "-subject"],
-                capture_output=True, text=True
+                ["openssl", "x509", "-in", cert_path, "-noout",
+                 "-dates", "-subject"],
+                capture_output=True, text=True, timeout=10,
             )
-            info = {}
+            info: dict = {}
             for line in result.stdout.strip().splitlines():
                 if "=" in line:
                     k, v = line.split("=", 1)
@@ -427,8 +507,8 @@ server {{
                 "installed": True,
                 "domain": domain,
                 "not_before": info.get("notBefore"),
-                "not_after": info.get("notAfter"),
-                "cert_path": cert_path,
+                "not_after":  info.get("notAfter"),
+                "cert_path":  cert_path,
             }
         except Exception as exc:
             return {"installed": True, "domain": domain, "error": str(exc)}
