@@ -596,19 +596,18 @@ class OpenVPNService:
         if remote_proto == "both":
             remote_proto = "tcp"
 
-        conf: List[str] = []
-
-        # ── Header ───────────────────────────────────────────────────
-        conf += [
+        conf: List[str] = [
             f"# OpenVPN client config — {username}",
             f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            f"# Protocol: {remote_proto.upper()}/{remote_port}  |  Iran DPI Bypass Edition",
-            "# Compatible: Android (OpenVPN for Android / Connect), iOS, Windows, macOS",
-            "",
             "client",
             f"dev {s.get('dev') or s.get('dev_type', 'tun')}",
             f"proto {remote_proto}",
         ]
+
+        def _remote_line(host: str, port: str, proto: str) -> str:
+            # OpenVPN standard allows proto in remote as optional. We keep it only
+            # when different from global proto (e.g. mixed failover entries).
+            return f"remote {host} {port}" if proto == remote_proto else f"remote {host} {port} {proto}"
 
         # ── Remotes (primary + failover) ─────────────────────────────
         # Additional remotes (comma-separated "ip:port:proto")
@@ -622,35 +621,23 @@ class OpenVPNService:
             if len(parts) >= 2:
                 r_ip, r_port = parts[0], parts[1]
                 r_proto = parts[2] if len(parts) > 2 else remote_proto
-                conf.append(f"remote {r_ip} {r_port} {r_proto}")
+                conf.append(_remote_line(r_ip, r_port, r_proto))
                 has_extra = True
 
         # Primary remote always last (lower priority with remote-random)
-        conf.append(f"remote {remote_ip} {remote_port} {remote_proto}")
+        conf.append(_remote_line(remote_ip, remote_port, remote_proto))
         if has_extra:
             conf.append("remote-random")
         if s.get("remote_random_hostname", "1") == "1" and any(c.isalpha() for c in str(remote_ip)):
             conf.append("remote-random-hostname")
 
-        # ── Connection behaviour ──────────────────────────────────────
         conf += [
-            "",
-            "# ── Connection ──────────────────────────────────────────",
             "resolv-retry infinite",
             "nobind",
             "persist-key",
-            "persist-tun",         # critical for Android/iOS reconnect
+            "persist-tun",
             "remote-cert-tls server",
             "auth-retry interact",
-        ]
-
-        # float: allow server IP to change (not needed client-side usually, but harmless)
-        # Android reconnects after network switch — remote-cert-tls handles security
-
-        # ── Cryptography ─────────────────────────────────────────────
-        conf += [
-            "",
-            "# ── Cryptography ────────────────────────────────────────",
         ]
 
         data_ciphers = s.get("data_ciphers", "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305")
@@ -671,9 +658,8 @@ class OpenVPNService:
         if tls_suites:
             conf.append(f"tls-ciphersuites {tls_suites}")
 
-        # Compression — DISABLED (VORACLE; DPI fingerprint)
         compress_val = s.get("compress", "")
-        if compress_val and compress_val not in ("", "none"):
+        if compress_val in ("lz4-v2", "lz4", "lzo"):
             conf.append(f"compress {compress_val}")
             conf.append("allow-compression yes")
         elif s.get("allow_compression", "0") == "1":
@@ -682,100 +668,47 @@ class OpenVPNService:
         else:
             conf.append("allow-compression no")
 
-        # ── MTU / MSS ─────────────────────────────────────────────────
-        # These must match server-side values to avoid asymmetric MSS clamping.
-        # Conservative defaults tuned for mixed Iranian ISP/mobile/NAT paths.
-        # Admin can increase MTU/MSS if link quality allows.
-        conf += [
-            "",
-            "# ── MTU / MSS (must match server) ───────────────────────",
-            f"tun-mtu {s.get('tun_mtu','1420')}",
-            f"mssfix  {s.get('mssfix','1380')}",
-        ]
+        conf += [f"tun-mtu {s.get('tun_mtu','1420')}", f"mssfix {s.get('mssfix','1380')}"]
         fragment = s.get("fragment", "0")
         if fragment and fragment != "0":
             conf.append(f"fragment {fragment}")
 
-        # Socket buffer auto-tuning (server also pushes this)
-        conf += [
-            "sndbuf 0",
-            "rcvbuf 0",
-        ]
+        conf += ["sndbuf 0", "rcvbuf 0"]
 
-        # ── Routing ──────────────────────────────────────────────────
-        conf += [
-            "",
-            "# ── Routing ─────────────────────────────────────────────",
-        ]
         if s.get("redirect_gateway", "1") == "1":
             conf.append("redirect-gateway def1 bypass-dhcp")
 
-        # ── DNS ───────────────────────────────────────────────────────
-        # Client-side: dhcp-option DNS is processed by the tun driver.
-        # Required for Android/iOS/macOS (server push is not enough on all platforms).
-        # Windows uses block-outside-dns + dhcp-option together for leak prevention.
-        conf += [
-            "",
-            "# ── DNS (anti-leak, works on all platforms) ──────────────",
-        ]
         dns_raw = s.get("dns", "1.1.1.1,8.8.8.8")
         for dns_entry in dns_raw.replace(",", " ").split():
             dns_entry = dns_entry.strip()
             if dns_entry:
                 conf.append(f"dhcp-option DNS {dns_entry}")
-        # IPv6 DNS (optional) — prevents DNS leak on IPv6-capable networks
-        conf.append("dhcp-option DNS6 2606:4700:4700::1111")  # Cloudflare IPv6
-        conf.append("dhcp-option DNS6 2001:4860:4860::8888")  # Google IPv6
+        conf.append("dhcp-option DNS6 2606:4700:4700::1111")
+        conf.append("dhcp-option DNS6 2001:4860:4860::8888")
 
-        # ── Connection Timing (Iran keep-alive tuning) ────────────────
-        # Iran middleboxes drop idle TCP connections after ~60-90s of inactivity.
-        # ping: client sends a ping every N seconds to keep the connection alive.
-        # ping-restart: restart the connection if no response in N seconds.
-        # NOTE: 'keepalive' is server-only. On clients use 'ping' + 'ping-restart'.
-        # The server will push "ping X" and "ping-restart Y" so these serve as
-        # fallback defaults in case the server push is not received.
         ping_interval = s.get("keepalive_interval", "10")
         ping_timeout  = s.get("keepalive_timeout",  "60")
         conf += [
-            "",
-            "# ── Connection Timing (Iran middlebox keep-alive) ────────",
             f"ping {ping_interval}",
             f"ping-restart {ping_timeout}",
-            # reneg-sec: re-key every hour. Must be <= server's reneg-sec to avoid
-            # client-initiated renegotiation being rejected.
             f"reneg-sec {s.get('reneg_sec', '3600')}",
-            # connect-retry: initial wait, max wait between reconnect attempts
             f"connect-retry {s.get('connect_retry', '5')} {s.get('connect_retry_max_interval', '30')}",
-            # connect-retry-max: 0 = retry forever (recommended for Iran — connection drops are common)
             f"connect-retry-max {s.get('connect_retry_max', '0')}",
-            # server-poll-timeout: give up on one remote and try next after N sec
             f"server-poll-timeout {s.get('server_poll_timeout', '10')}",
         ]
 
-        # ── Platform-specific ─────────────────────────────────────────
         conf += [
-            "",
-            "# ── Platform-specific ───────────────────────────────────",
-            # Legacy compatibility: older clients may not understand NCP keys.
             "ignore-unknown-option data-ciphers",
             "ignore-unknown-option data-ciphers-fallback",
-            # Prevent unknown-option errors on clients that don't support this flag.
             "ignore-unknown-option block-outside-dns",
-            # Helps OpenVPN 2.x clients parse option consistently.
             "setenv opt block-outside-dns",
-            # auth-nocache: don't keep credentials in memory
             "auth-nocache",
-            "",
-            "# ── Logging ─────────────────────────────────────────────",
             f"verb {s.get('verb','3')}",
-            "",
-            "# ── Credentials ─────────────────────────────────────────",
-            "auth-user-pass",       # prompt for username/password on connect
+            "auth-user-pass",
         ]
 
         if s.get("block_outside_dns", "1") == "1":
-            # Windows DNS leak fix (ignored safely on non-Windows due to ignore-unknown-option)
-            conf.insert(conf.index("# ── Logging ─────────────────────────────────────────────") - 1, "block-outside-dns")
+            conf.append("block-outside-dns")
 
         # ── HTTP proxy (domain fronting / Iran bypass) ────────────────
         if s.get("http_proxy_enabled") == "1":
