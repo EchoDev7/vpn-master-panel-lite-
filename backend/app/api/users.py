@@ -483,12 +483,9 @@ async def get_wireguard_config(
             user.wireguard_private_key = keys['private_key']
             user.wireguard_public_key = keys['public_key']
 
-            # Allocate IP
-            try:
-                user.wireguard_ip = wireguard_service.allocate_ip()
-            except Exception:
-                # Fallback: simple IP allocation based on user ID
-                user.wireguard_ip = f"10.66.66.{(user.id % 253) + 2}"
+            # Allocate IP — always use the service which checks existing allocations
+            # to prevent address collisions. Only raise if allocation truly fails.
+            user.wireguard_ip = wireguard_service.allocate_ip()
 
             # Generate PresharedKey if enabled
             try:
@@ -517,7 +514,7 @@ async def get_wireguard_config(
         # Fallback: generate a basic default config
         server_keys = wireguard_service.get_server_keys()
         endpoint_ip = wireguard_service.server_ip
-        client_ip = user.wireguard_ip or f"10.66.66.{(user.id % 253) + 2}"
+        client_ip = user.wireguard_ip or "10.66.66.2"  # safe static fallback; allocate_ip should have run
         config_content = f"""[Interface]
 PrivateKey = {user.wireguard_private_key}
 Address = {client_ip}/24
@@ -697,29 +694,37 @@ async def get_user_logs(
     # The user specifically requested: tail -f /var/log/syslog | grep ovpn
     # We filter by both 'ovpn' AND username to minimize noise, or just 'ovpn' if relevant context needed?
     # Context usually implies username match.
-    syslog_path = "/var/log/syslog" 
+    syslog_path = "/var/log/syslog"
     if not os.path.exists(syslog_path):
-        syslog_path = "/var/log/messages" # CentOS/RHEL fallback
-        
+        syslog_path = "/var/log/messages"  # CentOS/RHEL fallback
+
     sys_logs = []
     if os.path.exists(syslog_path):
-        # We start by grepping 'ovpn' AND username to be specific
-        # cmd: grep 'ovpn' /var/log/syslog | grep 'username' | tail -n lines
+        # Use -F (fixed string) on both grep stages to prevent regex/injection via username
         import subprocess
         try:
-             p1 = subprocess.Popen(["grep", "ovpn", syslog_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-             p2 = subprocess.Popen(["grep", user.username], stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-             p3 = subprocess.Popen(["tail", "-n", str(lines)], stdin=p2.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-             p1.stdout.close()
-             p2.stdout.close()
-             output, _ = p3.communicate()
-             if output:
-                 sys_logs = output.splitlines()
+            p1 = subprocess.Popen(
+                ["grep", "-F", "--", "ovpn", syslog_path],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            p2 = subprocess.Popen(
+                ["grep", "-F", "--", user.username],
+                stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            p3 = subprocess.Popen(
+                ["tail", "-n", str(lines)],
+                stdin=p2.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            p1.stdout.close()
+            p2.stdout.close()
+            output, _ = p3.communicate()
+            if output:
+                sys_logs = output.splitlines()
         except Exception as e:
-             sys_logs = [f"Error reading syslog: {e}"]
+            sys_logs = [f"Error reading syslog: {e}"]
 
     if sys_logs:
-         logs.extend([f"\n--- Syslog (OpenVPN) for {user.username} ---"] + sys_logs)
+        logs.extend([f"\n--- Syslog (OpenVPN) for {user.username} ---"] + sys_logs)
 
     # 3. Check specific openvpn.log (Context)
     # This is noisier, maybe only if auth logs are empty or requested?
