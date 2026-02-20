@@ -2,6 +2,7 @@
 Settings API Endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional, Dict
@@ -450,13 +451,11 @@ async def request_letsencrypt_ssl(
     req: SSLRequest,
     current_admin: User = Depends(get_current_admin)
 ):
-    """Trigger Certbot to issue an SSL certificate for the panel domain"""
+    """Trigger Certbot to issue an SSL certificate for the panel domain (Streaming)"""
     from ..services.ssl_service import SSLService
     
     ssl_service = SSLService()
-    success, message = ssl_service.issue_letsencrypt_cert(req.domain, req.email)
-    
-    if not success:
-        raise HTTPException(status_code=400, detail=message)
-        
-    return {"message": message}
+    return StreamingResponse(
+        ssl_service.stream_letsencrypt_cert(req.domain, req.email), 
+        media_type="text/plain"
+    )
