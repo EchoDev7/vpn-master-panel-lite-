@@ -207,6 +207,18 @@ def init_default_settings(db: Session):
         "panel_domain":        "",         # Admin panel domain (proxy ON)
         "ssl_email":           "",         # Email for Let's Encrypt alerts
 
+        # HTTPS port for the admin panel.
+        # Default: 8443 — because OpenVPN uses port 443 (Iran anti-censorship TCP/443).
+        # Change to 443 only if OpenVPN is configured on a different port.
+        # The backend also auto-detects port conflicts at SSL issuance time.
+        "panel_https_port":    "8443",
+
+        # HTTPS port for the subscription endpoint.
+        # Default: 443 — subscription does not conflict with OpenVPN
+        # (OpenVPN binds to the OpenVPN service, not Nginx port 443).
+        # Change to 8444 or another port if you have a different service on 443.
+        "sub_https_port":      "443",
+
         # =============================================
         # WireGuard — Iran Anti-Censorship Defaults
         # =============================================
@@ -532,6 +544,7 @@ async def get_obfuscation_script(
 class SSLRequest(BaseModel):
     domain: str
     email: str
+    https_port: Optional[int] = None  # None = auto-detect; 443 or 8443 = explicit
 
 @router.post("/ssl/request")
 async def request_letsencrypt_ssl(
@@ -559,6 +572,9 @@ async def request_letsencrypt_ssl(
 
     ssl_service = SSLService()
 
+    # Resolve https_port: use caller-supplied value if present, else None (auto-detect)
+    https_port_arg = req.https_port if req.https_port in (443, 8443, 8444) else None
+
     headers = {
         "X-Accel-Buffering": "no",
         "Cache-Control": "no-cache",
@@ -573,7 +589,7 @@ async def request_letsencrypt_ssl(
         browser sees live output without waiting for certbot to finish.
         """
         loop = asyncio.get_event_loop()
-        sync_gen = ssl_service.stream_letsencrypt_cert(req.domain, req.email)
+        sync_gen = ssl_service.stream_letsencrypt_cert(req.domain, req.email, https_port_arg)
 
         while True:
             # Run the next() call of the sync generator in a thread so the
