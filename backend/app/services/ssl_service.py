@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 _DOMAIN_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]{1,253}[a-zA-Z0-9]$')
 _EMAIL_RE  = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 
+_ALLOWED_SSL_PORTS = {2053, 2083, 2087, 2096, 8443}
+
 # Webroot directory served by Nginx for ACME challenge
 _WEBROOT = "/var/www/html"
 
@@ -162,6 +164,16 @@ class SSLService:
     def _close_port80(cleanup_cmds: List[List[str]]):
         for cmd in cleanup_cmds:
             SSLService._run(cmd)
+
+    @staticmethod
+    def _open_https_port(fw: Optional[str], port: int):
+        if fw == "ufw":
+            SSLService._run(["ufw", "allow", f"{port}/tcp"])
+            SSLService._run(["ufw", "reload"])
+            return
+        if fw == "firewalld":
+            SSLService._run(["firewall-cmd", "--permanent", f"--add-port={port}/tcp"])
+            SSLService._run(["firewall-cmd", "--reload"])
 
     @staticmethod
     def _ensure_webroot():
@@ -335,15 +347,18 @@ class SSLService:
         # ── Resolve HTTPS port ────────────────────────────────────────────────
         # Priority: 1) caller-supplied https_port  2) auto-detect port conflict
         if https_port is not None:
-            self._https_port_override = https_port
-            yield f"INFO: HTTPS port set by caller: {https_port}\n"
-        else:
-            detected = self._detect_https_port()
-            self._https_port_override = detected
-            if detected == 8443:
-                yield "INFO: Port 443 is in use (OpenVPN?) — HTTPS will use port 8443.\n"
+            if https_port not in _ALLOWED_SSL_PORTS:
+                yield (
+                    f"WARN: Requested HTTPS port {https_port} is not allowed. "
+                    f"Allowed: {sorted(_ALLOWED_SSL_PORTS)}. Falling back to 8443.\n"
+                )
+                self._https_port_override = 8443
             else:
-                yield "INFO: Port 443 is free — HTTPS will use port 443.\n"
+                self._https_port_override = https_port
+            yield f"INFO: HTTPS port set by caller: {self._https_port_override}\n"
+        else:
+            self._https_port_override = 8443
+            yield "INFO: No HTTPS port provided by caller — defaulting to 8443.\n"
 
         # ── Ensure certbot is available ───────────────────────────────────────
         if not self.certbot_path:
@@ -411,13 +426,12 @@ class SSLService:
         yield "EXEC: Writing Nginx SSL reverse-proxy config...\n"
 
         # Detect which HTTPS port will be used before writing config
-        https_port = self._detect_https_port()
+        https_port = getattr(self, "_https_port_override", None) or 8443
         written = self._update_nginx_config(domain)
         if written:
             yield f"INFO: Nginx SSL config written (HTTPS port: {https_port}).\n"
             if https_port == 8443:
-                yield "INFO: Port 8443 used because OpenVPN occupies port 443.\n"
-                yield f"INFO: Make sure port 8443 is open: ufw allow 8443/tcp\n"
+                yield "INFO: Port 8443 is being used for HTTPS edge traffic.\n"
         else:
             yield "WARN: Could not write Nginx config (permission denied?). Review manually.\n"
 
@@ -428,6 +442,13 @@ class SSLService:
                 yield "EXEC: Nginx reloaded with SSL config.\n"
             else:
                 yield f"WARN: Nginx config test failed after SSL setup:\n{out}\n"
+
+        fw = self._detect_firewall()
+        if fw:
+            self._open_https_port(fw, https_port)
+            yield f"INFO: Firewall updated for HTTPS port {https_port} ({fw}).\n"
+        else:
+            yield f"INFO: No managed firewall detected — ensure tcp/{https_port} is open in your cloud firewall.\n"
 
         yield f"INFO: Certificate location:\n"
         yield f"INFO:   Cert → /etc/letsencrypt/live/{domain}/fullchain.pem\n"
@@ -442,29 +463,6 @@ class SSLService:
 
     # ─────────────────────────────────────────────── Nginx config writer ──────
 
-    @staticmethod
-    def _detect_https_port() -> int:
-        """
-        Detect which HTTPS port to use for the panel.
-
-        Port 443 is commonly used by OpenVPN (TCP/443 is the default anti-censorship
-        setting for Iran). If anything is already listening on 443, we fall back to
-        8443 which is pre-opened in the firewall by install.sh.
-
-        Returns 443 if free, else 8443.
-        """
-        import socket
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                result = s.connect_ex(("127.0.0.1", 443))
-                if result == 0:
-                    # Something is already bound to 443 (likely OpenVPN)
-                    return 8443
-        except Exception:
-            pass
-        return 443
-
     def _update_nginx_config(self, domain: str) -> bool:
         """
         Write a production Nginx reverse-proxy config for the given domain.
@@ -472,26 +470,22 @@ class SSLService:
         Port selection (in priority order):
           1. self._https_port_override — set by stream_letsencrypt_cert() from
              the caller-supplied value (user setting panel_https_port / sub_https_port)
-          2. Auto-detect: if port 443 is free → 443, else → 8443
+          2. Fallback default: 8443
 
         React frontend is served directly by Nginx from /frontend/dist.
         FastAPI backend runs on 127.0.0.1:8001 (internal).
         """
-        https_port = getattr(self, "_https_port_override", None) or self._detect_https_port()
+        https_port = getattr(self, "_https_port_override", None) or 8443
         config_path  = f"/etc/nginx/sites-available/vpn_panel_{domain}"
         symlink_path = f"/etc/nginx/sites-enabled/vpn_panel_{domain}"
 
         # Build the redirect URL — include port only when non-standard
-        if https_port == 443:
-            redirect_target = f"https://$host$request_uri"
-            listen_directive = "443 ssl http2"
-        else:
-            redirect_target = f"https://$host:{https_port}$request_uri"
-            listen_directive = f"{https_port} ssl http2"
+        redirect_target = f"https://$host:{https_port}$request_uri"
+        listen_directive = f"{https_port} ssl http2"
 
         nginx_conf = f"""# VPN Master Panel — generated by ssl_service.py
 # Domain: {domain}  |  HTTPS port: {https_port}
-# NOTE: Port {https_port} is used because {'port 443 is occupied (OpenVPN)' if https_port == 8443 else 'port 443 is available'}.
+# NOTE: Managed SSL edge-port policy is active (allowed: 2053, 2083, 2087, 2096, 8443).
 # Generated automatically — do not edit by hand.
 
 # ── HTTP: redirect to HTTPS + ACME renewal ───────────────────────────────────
@@ -560,6 +554,20 @@ server {{
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         proxy_buffering    off;
+    }}
+
+    # ── Public subscription endpoints (/sub/*) ───────────────────────────────
+    location /sub/ {{
+        proxy_pass         http://127.0.0.1:8001/sub/;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_buffering    off;
+        proxy_cache        off;
     }}
 
     # ── React frontend static files ───────────────────────────────────────────
