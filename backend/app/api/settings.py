@@ -61,6 +61,48 @@ async def update_settings(
 
     db.commit()
 
+    # ── Auto-apply: rebuild Nginx SSL config when domain/port settings change ─
+    # These keys affect Nginx config — apply changes immediately without manual intervention.
+    SSL_TRIGGER_KEYS = {"panel_domain", "subscription_domain", "panel_https_port", "sub_https_port"}
+    nginx_rebuild_needed = bool(SSL_TRIGGER_KEYS.intersection(settings_data.keys()))
+
+    nginx_rebuild_result = None
+    if nginx_rebuild_needed:
+        import subprocess, os
+        from ..models.setting import Setting as SettingModel
+
+        def _get(key: str, default: str) -> str:
+            row = db.query(SettingModel).filter(SettingModel.key == key).first()
+            return row.value if row and row.value else default
+
+        panel_domain  = _get("panel_domain", "")
+        sub_domain    = _get("subscription_domain", "")
+        panel_port    = _get("panel_https_port", "8443")
+        sub_port      = _get("sub_https_port", "443")
+        restore_script = "/opt/vpn-master-panel/restore_ssl_nginx.sh"
+
+        results = []
+        for domain, port in [(panel_domain, panel_port), (sub_domain, sub_port)]:
+            if not domain or domain == sub_domain == panel_domain and domain != panel_domain:
+                continue
+            # Only rebuild if cert already exists — don't try to create one
+            cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
+            if domain and os.path.isfile(cert_path) and os.path.isfile(restore_script):
+                try:
+                    r = subprocess.run(
+                        ["bash", restore_script, domain, port],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    if r.returncode == 0:
+                        results.append(f"✓ Nginx config updated for {domain}:{port}")
+                    else:
+                        results.append(f"⚠ Nginx rebuild failed for {domain}: {r.stderr[:200]}")
+                except Exception as exc:
+                    results.append(f"⚠ Nginx rebuild error for {domain}: {exc}")
+            elif domain and os.path.isfile(cert_path):
+                results.append(f"ℹ {domain}: cert exists but restore script not found")
+        nginx_rebuild_result = results or None
+
     # Build a human-readable restart hint for the frontend
     restart_hints = []
     if "openvpn" in changed_categories:
@@ -73,11 +115,15 @@ async def update_settings(
             "WireGuard settings changed — click 'Generate & Apply' to write "
             "wg0.conf and restart the service."
         )
+    if nginx_rebuild_result:
+        for msg in nginx_rebuild_result:
+            restart_hints.append(msg)
 
     return {
         "message": "Settings saved successfully",
         "changed_categories": list(changed_categories),
         "restart_hints": restart_hints,
+        "nginx_updated": nginx_rebuild_result,
     }
 
 # Initialize default settings
