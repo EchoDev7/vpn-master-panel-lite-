@@ -584,13 +584,14 @@ EOF
 
 setup_firewall() {
     print_step "Configuring Firewall"
-    
+
     ufw default deny incoming
     ufw default allow outgoing
-    
+
     ufw allow 22/tcp > /dev/null 2>&1
     ufw allow 80/tcp > /dev/null 2>&1
     ufw allow 443/tcp > /dev/null 2>&1
+    ufw allow 8443/tcp > /dev/null 2>&1  # Panel HTTPS (avoids conflict with OpenVPN on 443)
     
     # Configure NAT for internet routing (Enterprise Idempotent Method)
     print_info "Configuring UFW NAT routing..."
@@ -711,8 +712,8 @@ show_resource_usage() {
 }
 
 show_success_message() {
-    SERVER_IP=$(curl -s ifconfig.me)
-    
+    SERVER_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+
     clear
     echo -e "${GREEN}"
     cat << "EOF"
@@ -723,41 +724,65 @@ show_success_message() {
 ╚══════════════════════════════════════════════════════════════╝
 EOF
     echo -e "${NC}"
-    
+
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${YELLOW}🎯 Optimized for Low Resources:${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  ✓ Database:     SQLite (file-based, no RAM overhead)"
-    echo -e "  ✓ Redis:        Limited to 100MB"
-    echo -e "  ✓ Backend:      Single worker, 300MB max"
-    echo -e "  ✓ Nginx:        1 worker, optimized"
-    echo -e "  ✓ Swap:         2GB configured"
+    echo -e "  ✓ Database:  SQLite (file-based, no RAM overhead)"
+    echo -e "  ✓ Backend:   Single worker, 300MB max"
+    echo -e "  ✓ Nginx:     1 worker, optimized"
+    echo -e "  ✓ Swap:      2GB configured"
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}Access Information:${NC}"
+    echo -e "${YELLOW}📡 Access Information:${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  🌐 Web Panel:  http://$SERVER_IP:3000"
-    echo -e "  📡 API:        http://$SERVER_IP:8000"
+    echo -e "  🌐 Panel (HTTP):   ${GREEN}http://$SERVER_IP:3000${NC}"
+    echo -e "  📡 API Gateway:    http://$SERVER_IP:8000"
     echo ""
-    echo -e "  👤 Username:   admin"
-    echo -e "  🔑 Password:   $ADMIN_PASS"
+    echo -e "  👤 Username:  admin"
+    echo -e "  🔑 Password:  admin"
     echo ""
-    echo -e "${RED}⚠️  Change password after first login!${NC}"
+    echo -e "${RED}  ⚠️  IMPORTANT: Change the admin password after first login!${NC}"
     echo ""
-    
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}🔒 Next Step — Enable HTTPS (SSL):${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  1. Point your domain DNS to this server: ${GREEN}$SERVER_IP${NC}"
+    echo -e "     e.g.  panel.yourdomain.com  →  $SERVER_IP  (Cloudflare: DNS-only ⚪)"
+    echo ""
+    echo -e "  2. Open the panel → ${GREEN}Settings → 🔒 Domain & SSL${NC}"
+    echo -e "     • Enter your domain:  panel.yourdomain.com"
+    echo -e "     • Enter your email:   admin@yourdomain.com"
+    echo -e "     • Click: ${GREEN}Issue Let's Encrypt SSL${NC}"
+    echo ""
+    echo -e "  3. After SSL is issued, access via HTTPS:"
+    echo -e "     ${GREEN}https://panel.yourdomain.com:8443${NC}"
+    echo ""
+    echo -e "  ℹ️  Port 8443 is used for HTTPS because OpenVPN uses port 443."
+    echo -e "  ℹ️  Port 8443 is already open in the firewall."
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}🔗 Subscription Domain (for users):${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  Point a second domain:  sub.yourdomain.com  →  $SERVER_IP"
+    echo -e "  Then in Settings → 🔒 Domain & SSL → enter it as Subscription Domain"
+    echo -e "  Click ${GREEN}Issue Let's Encrypt SSL${NC} — it will get cert for both domains."
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}🛠️  Useful Commands:${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  Status:    systemctl status vpnmaster-backend nginx"
+    echo -e "  Logs:      journalctl -u vpnmaster-backend -f"
+    echo -e "  Diagnose:  bash /opt/vpn-master-panel/diagnose.sh"
+    echo -e "  Update:    bash /opt/vpn-master-panel/update.sh"
+    echo ""
+
     show_resource_usage
-    
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}Performance Tips:${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  • Supports 20+ concurrent users"
-    echo -e "  • Database: /opt/vpn-master-panel/backend/vpnmaster.db"
-    echo -e "  • Monitor: sudo systemctl status vpnmaster-backend"
-    echo -e "  • Logs: sudo journalctl -u vpnmaster-backend -f"
-    echo ""
 }
 
 # Main
