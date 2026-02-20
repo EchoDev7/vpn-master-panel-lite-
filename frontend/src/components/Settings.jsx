@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Save, Settings as SettingsIcon, Shield, Globe, Server, Lock, Wifi, Route, Clock, Wrench, FileText, AlertTriangle, Eye, Activity, RefreshCw, Terminal, Link, MessageSquare, Zap, Key } from 'lucide-react';
+import { Save, Settings as SettingsIcon, Shield, Globe, Server, Lock, Wifi, Route, Clock, Wrench, FileText, AlertTriangle, Eye, Activity, RefreshCw, Terminal, Link, MessageSquare, Zap, Key, X } from 'lucide-react';
 import { apiService } from '../services/api';
 import { InputField, SelectField, CheckboxField, TextareaField, MultiSelectField, SectionTitle, IranBadge } from './SettingsFields';
 import ConfirmationModal from './ConfirmationModal';
@@ -75,6 +75,7 @@ const Settings = () => {
     const [activeTab, setActiveTab] = useState('ovpn_network');
     const [serverConfigPreview, setServerConfigPreview] = useState(null);
     const [showServerConfig, setShowServerConfig] = useState(false);
+    const [serverConfigWarnings, setServerConfigWarnings] = useState([]);
     const [pkiInfo, setPkiInfo] = useState(null);
     const [wgServerConfigPreview, setWgServerConfigPreview] = useState(null);
     const [showWgServerConfig, setShowWgServerConfig] = useState(false);
@@ -169,7 +170,7 @@ const Settings = () => {
                     { value: 'both', label: 'Both' },
                 ]} />
                 <S_Input {...sp} settingKey="ovpn_port" label="Port" placeholder="443" iranBadge tip="Port 443 makes VPN look like normal HTTPS." />
-                <S_Input {...sp} settingKey="ovpn_mtu" label="MTU" placeholder="1400" type="number" iranBadge tip="Lower MTU (1400) works better with Iran ISPs." />
+                <S_Input {...sp} settingKey="ovpn_tun_mtu" label="TUN MTU" placeholder="1500" type="number" iranBadge tip="1500 for TCP/443 (Ethernet MTU). Use 1420 for UDP on restrictive ISPs." />
                 <S_Select {...sp} settingKey="ovpn_topology" label="Topology" tip="Subnet is recommended for modern setups." options={[
                     { value: 'subnet', label: 'Subnet (Recommended)' },
                     { value: 'net30', label: 'Net30 (Legacy)' },
@@ -324,7 +325,7 @@ const Settings = () => {
                 { value: '1', label: 'Yes — Route All Traffic (Full Tunnel)' },
                 { value: '0', label: 'No — Split Tunneling' },
             ]} />
-            <S_Check {...sp} settingKey="ovpn_inter_client" label="Allow Client-to-Client" tip="VPN clients can communicate with each other." />
+            <S_Check {...sp} settingKey="ovpn_client_to_client" label="Allow Client-to-Client" tip="VPN clients can communicate with each other." />
             <SectionTitle>DNS Settings</SectionTitle>
             <S_Input {...sp} settingKey="ovpn_dns" label="DNS Servers (comma-separated)" placeholder="1.1.1.1, 8.8.8.8" />
             <S_Check {...sp} settingKey="ovpn_block_outside_dns" label="Block Outside DNS (Prevent DNS Leaks)" iranBadge tip="Prevents DNS leaks to ISP." />
@@ -360,7 +361,7 @@ const Settings = () => {
                     { value: 'lz4-v2', label: 'LZ4-v2 (New)' },
                     { value: 'lzo', label: 'LZO (Legacy)' },
                 ]} />
-                <S_Check {...sp} settingKey="ovpn_allow_compression" label="Allow Compression (Asym)" tip="Allow clients to use compression even if pushed no." />
+                <S_Check {...sp} settingKey="ovpn_allow_compression" label="Allow Compression (Asymmetric)" tip="Server sends uncompressed but accepts compressed from legacy clients. Keep disabled for Iran DPI stealth." />
             </div>
         </div>
     );
@@ -384,21 +385,28 @@ const Settings = () => {
             <SectionTitle>Server Configuration</SectionTitle>
             <div className="flex gap-3">
                 <button onClick={async () => {
-                    try { const res = await apiService.getServerConfigPreview(); setServerConfigPreview(res.data.content); setShowServerConfig(true); } catch { showToast("Failed to load preview", "error"); }
+                    try {
+                        const res = await apiService.getServerConfigPreview();
+                        setServerConfigPreview(res.data.content);
+                        setServerConfigWarnings(res.data.warnings || []);
+                        setShowServerConfig(true);
+                    } catch { showToast("Failed to load preview", "error"); }
                 }} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 border border-gray-600 transition-colors">
                     <Eye className="w-4 h-4" /> Preview server.conf
                 </button>
                 <button onClick={() => confirmAction(
-                    "Generate Configuration",
-                    "Generate server.conf based on current settings?",
+                    "Generate & Apply server.conf",
+                    "Generate server.conf from current settings and restart OpenVPN service?",
                     async () => {
                         try {
                             const res = await apiService.applyServerConfig();
                             const d = res.data;
-                            if (d.system_written) {
-                                showToast(`Written to: ${d.system_path}`, "success");
+                            if (d.warnings && d.warnings.length > 0) {
+                                showToast(`Applied with ${d.warnings.length} warning(s) — check Preview for details`, "warning");
+                            } else if (d.system_written) {
+                                showToast(`Written to: ${d.system_path} — ${d.restart_status}`, "success");
                             } else {
-                                showToast(`Saved to: ${d.backup_path}`, "success");
+                                showToast(`Saved to: ${d.backup_path}. ${d.hint}`, "success");
                             }
                         } catch { showToast("Failed to generate config", "error"); }
                     },
@@ -414,6 +422,16 @@ const Settings = () => {
                         <span className="text-sm font-medium text-gray-300">server.conf Preview</span>
                         <button onClick={() => setShowServerConfig(false)} className="text-gray-400 hover:text-white text-sm">✕</button>
                     </div>
+                    {serverConfigWarnings.length > 0 && (
+                        <div className="p-3 bg-amber-500/10 border-b border-amber-500/30 space-y-1">
+                            {serverConfigWarnings.map((w, i) => (
+                                <div key={i} className="flex items-start gap-2 text-xs text-amber-300">
+                                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                                    <span>{w}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                     <textarea readOnly value={serverConfigPreview} className="w-full h-64 bg-transparent text-gray-300 p-4 font-mono text-xs resize-none focus:outline-none" />
                 </div>
             )}
@@ -450,16 +468,16 @@ const Settings = () => {
 
             <div className="mt-6 pt-6 border-t border-gray-700">
                 <button onClick={() => confirmAction(
-                    "Generate Configuration",
-                    "Generate server.conf based on current settings?",
+                    "Generate & Apply server.conf",
+                    "Generate server.conf from current settings and restart OpenVPN service?",
                     async () => {
                         try {
                             const res = await apiService.applyServerConfig();
                             const d = res.data;
                             if (d.system_written) {
-                                showToast(`Written to: ${d.system_path}`, "success");
+                                showToast(`Written to: ${d.system_path} — ${d.restart_status}`, "success");
                             } else {
-                                showToast(`Saved to: ${d.backup_path}`, "success");
+                                showToast(`Saved to: ${d.backup_path}. ${d.hint}`, "success");
                             }
                         } catch { showToast("Failed to generate config", "error"); }
                     },
