@@ -148,26 +148,41 @@ class TrafficMonitor:
             lines = content.splitlines()
             
             # Version 2 Parser (Comma separated, starts with HEADER/CLIENT_LIST)
-            # HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Bytes Received,Bytes Sent,Connected Since,Connected Since (time_t),Username,Client ID,Peer ID
-            # CLIENT_LIST,user1,1.2.3.4:1234,10.8.0.2,1000,2000,...
-            
+            # status-version 2 CLIENT_LIST column layout (0-indexed):
+            #  0  CLIENT_LIST
+            #  1  Common Name       ← cert CN / username-as-common-name
+            #  2  Real Address      ← client_ip:port
+            #  3  Virtual Address   ← assigned VPN IPv4
+            #  4  Virtual IPv6 Addr ← may be empty string (MUST NOT be skipped)
+            #  5  Bytes Received
+            #  6  Bytes Sent
+            #  7  Connected Since   ← human-readable
+            #  8  Connected Since   ← Unix timestamp
+            #  9  Username          ← auth-user-pass value (preferred over CN)
+            # 10  Client ID
+            # 11  Peer ID
+            # 12  Data Channel Cipher
+
             is_v2 = any("CLIENT_LIST" in line for line in lines[:5])
-            
+
             for line in lines:
                 parts = line.split(',')
-                
+
                 if is_v2:
                     if line.startswith("CLIENT_LIST") and "Common Name" not in line:
-                         # parts[1]=username (Common Name), parts[2]=real_addr
-                         # parts[5]=bytes_rx, parts[6]=bytes_tx
+                         # Username from parts[9] (auth-user-pass), fall back to CN (parts[1])
+                         # Real IP: rsplit on ':' once to handle IPv6 addresses like [::1]:1234
                          if len(parts) > 6:
                              try:
-                                 username = parts[1]
+                                 cn = parts[1].strip()
+                                 username = parts[9].strip() if len(parts) > 9 and parts[9].strip() else cn
                                  if username == "UNDEF": continue
+                                 real_addr = parts[2].strip()
+                                 real_ip = real_addr.rsplit(':', 1)[0].strip('[]')
                                  stats[username] = {
                                      "rx": int(parts[5] or 0),
                                      "tx": int(parts[6] or 0),
-                                     "ip": parts[2].split(':')[0]
+                                     "ip": real_ip
                                  }
                              except (ValueError, IndexError):
                                  continue
@@ -179,12 +194,13 @@ class TrafficMonitor:
                         continue
                     
                     try:
-                        username = parts[0]
+                        username = parts[0].strip()
                         if username == "UNDEF": continue
+                        real_addr = parts[1].strip()
                         stats[username] = {
                             "rx": int(parts[2]),
                             "tx": int(parts[3]),
-                            "ip": parts[1].split(':')[0]
+                            "ip": real_addr.rsplit(':', 1)[0].strip('[]')
                         }
                     except (ValueError, IndexError):
                         continue
@@ -269,27 +285,25 @@ class TrafficMonitor:
             # Log to DB
             log = ConnectionLog(
                 user_id=user.id,
-                protocol=protocol, # openvpn, wireguard
-                client_ip=ip, # Fixed: ip_address -> client_ip
-                connected_at=datetime.utcnow()
+                protocol=protocol,
+                client_ip=ip,
+                connected_at=datetime.now(timezone.utc)
             )
             db.add(log)
-            # We need to flush to get the ID if we wanted to update it later, 
-            # but for now we just log start. We can log duration on disconnect.
-            
+
             # Update User last_connection
-            user.last_connection = datetime.utcnow()
-            
+            user.last_connection = datetime.now(timezone.utc)
+
             # Add to local active sessions
             self._active_sessions[session_key] = {
-                "start_time": datetime.utcnow(),
+                "start_time": datetime.now(timezone.utc),
                 "ip": ip,
                 "user_id": user.id
             }
         else:
             # Existing connection, just update heartbeat/last_seen locally if needed
             # For WireGuard proper "Online" status, we rely on the `is_online` flag passed in.
-            user.last_connection = datetime.utcnow()
+            user.last_connection = datetime.now(timezone.utc)
 
     def _log_disconnection(self, db: Session, session_key: str):
         """Handle Disconnect event"""
@@ -297,7 +311,7 @@ class TrafficMonitor:
             session_data = self._active_sessions.pop(session_key)
             username = session_key.split('_')[0]
             
-            logger.info(f"User {username} disconnected (Session duration: {datetime.utcnow() - session_data['start_time']})")
+            logger.info(f"User {username} disconnected (Session duration: {datetime.now(timezone.utc) - session_data['start_time']})")
             
             # In a more advanced system, we might update the specific ConnectionLog entry with 'disconnected_at'
             # For now, we just remove it from active tracking. 
@@ -315,7 +329,7 @@ class TrafficMonitor:
                 ).order_by(ConnectionLog.connected_at.desc()).first()
                 
                 if last_log:
-                    last_log.disconnected_at = datetime.utcnow()
+                    last_log.disconnected_at = datetime.now(timezone.utc)
             except Exception as e:
                 logger.error(f"Error updating disconnect log: {e}")
 
@@ -368,13 +382,13 @@ class TrafficMonitor:
             try:
                 # Try standard syslog format: Dec 13 10:00:00
                 dt = datetime.strptime(ts_str, "%b %d %H:%M:%S")
-                now = datetime.now()
-                dt = dt.replace(year=now.year)
-                if dt > now: # Future? Must be last year (Dec in Jan)
+                now = datetime.now(timezone.utc)
+                dt = dt.replace(year=now.year, tzinfo=timezone.utc)
+                if dt > now:  # Future? Must be last year (Dec log read in Jan)
                     dt = dt.replace(year=now.year - 1)
             except ValueError:
                 # Fallback or other formats
-                dt = datetime.utcnow()
+                dt = datetime.now(timezone.utc)
 
             # Duplicate Check:
             # Check if we have a log for this user within tight window (e.g. 5 sec)
@@ -391,7 +405,6 @@ class TrafficMonitor:
                     protocol="openvpn",
                     client_ip=real_ip,
                     connected_at=dt,
-                    server_ip=vpn_ip # Using server_ip column for VPN IP temporarily or extend model
                 )
                 db.add(log)
                 user.last_connection = dt
