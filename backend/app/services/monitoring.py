@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 from ..database import get_db_context
-from ..models.user import User, UserStatus, ConnectionLog
+from ..models.user import User, UserStatus, ConnectionLog, TrafficLog, TrafficType
 from ..services.wireguard import wireguard_service
 from ..services.openvpn_mgmt import openvpn_mgmt
 
@@ -269,67 +269,85 @@ class TrafficMonitor:
         if delta_rx > 0 or delta_tx > 0:
             user.total_upload_bytes += delta_rx
             user.total_download_bytes += delta_tx
-            # We don't commit here, outer loop does
-            
+
+            # Insert a TrafficLog row so the dashboard/analytics queries have data.
+            # traffic_type: TUNNEL if protocol is a tunnel, else DIRECT.
+            t_type = TrafficType.DIRECT if protocol in ("openvpn", "wireguard") else TrafficType.TUNNEL
+            log = TrafficLog(
+                user_id=user.id,
+                upload_bytes=delta_rx,
+                download_bytes=delta_tx,
+                traffic_type=t_type,
+            )
+            db.add(log)
+            # Commit happens in the outer loop (sync_traffic → db.commit())
+
         # Update Cache
         self._traffic_cache[cache_key] = {"rx": curr_rx, "tx": curr_tx}
         
     def _handle_connection_status(self, db: Session, user: User, protocol: str, ip: str):
         """Handle Log On event and update Active Sessions"""
         session_key = f"{user.username}_{protocol}"
-        
+
         if session_key not in self._active_sessions:
             # New Connection detected
             logger.info(f"User {user.username} connected via {protocol} from {ip}")
-            
+
+            now = datetime.now(timezone.utc)
+
             # Log to DB
             log = ConnectionLog(
                 user_id=user.id,
                 protocol=protocol,
                 client_ip=ip,
-                connected_at=datetime.now(timezone.utc)
+                is_active=True,
+                connected_at=now,
             )
             db.add(log)
 
             # Update User last_connection
-            user.last_connection = datetime.now(timezone.utc)
+            user.last_connection = now
 
-            # Add to local active sessions
+            # Store username and protocol explicitly so _log_disconnection
+            # can use them safely even when username contains underscores.
             self._active_sessions[session_key] = {
-                "start_time": datetime.now(timezone.utc),
+                "start_time": now,
                 "ip": ip,
-                "user_id": user.id
+                "user_id": user.id,
+                "username": user.username,
+                "protocol": protocol,
             }
         else:
-            # Existing connection, just update heartbeat/last_seen locally if needed
-            # For WireGuard proper "Online" status, we rely on the `is_online` flag passed in.
+            # Existing connection — just refresh last_connection heartbeat.
             user.last_connection = datetime.now(timezone.utc)
 
     def _log_disconnection(self, db: Session, session_key: str):
         """Handle Disconnect event"""
         if session_key in self._active_sessions:
             session_data = self._active_sessions.pop(session_key)
-            username = session_key.split('_')[0]
-            
-            logger.info(f"User {username} disconnected (Session duration: {datetime.now(timezone.utc) - session_data['start_time']})")
-            
-            # In a more advanced system, we might update the specific ConnectionLog entry with 'disconnected_at'
-            # For now, we just remove it from active tracking. 
-            # If we want to log disconnection time, we'd need to fetch the last log entry or keep track of Log ID.
-            # Let's keep it simple for now: We have the 'connected_at' log.
-            # We could add a "Disconnection" log or update the existing one.
-            # Updating is better for clean history.
-            
+            # session_key format: "{username}_{protocol}"
+            # Use stored session_data (safe) instead of parsing session_key
+            # This avoids breakage when usernames contain underscores.
+            user_id = session_data.get('user_id')
+            protocol = session_data.get('protocol', '')
+            username_for_log = session_data.get('username', session_key)
+
+            logger.info(
+                f"User {username_for_log} disconnected via {protocol} "
+                f"(Session duration: {datetime.now(timezone.utc) - session_data['start_time']})"
+            )
+
             try:
                 # Find the latest open connection log for this user/protocol
                 last_log = db.query(ConnectionLog).filter(
-                    ConnectionLog.user_id == session_data['user_id'],
-                    ConnectionLog.protocol == session_key.split('_')[1],
+                    ConnectionLog.user_id == user_id,
+                    ConnectionLog.protocol == protocol,
                     ConnectionLog.disconnected_at == None
                 ).order_by(ConnectionLog.connected_at.desc()).first()
-                
+
                 if last_log:
                     last_log.disconnected_at = datetime.now(timezone.utc)
+                    last_log.is_active = False
             except Exception as e:
                 logger.error(f"Error updating disconnect log: {e}")
 
