@@ -29,11 +29,11 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = "CHANGE_THIS_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32"
-    
+    ALGORITHM: str = "HS256"
+
     @property
     def is_default_secret(self) -> bool:
         return self.SECRET_KEY == "CHANGE_THIS_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32"
-    ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
