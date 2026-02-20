@@ -542,23 +542,51 @@ async def request_letsencrypt_ssl(
     Issue a Let's Encrypt SSL certificate for a domain.
     Streams live certbot output so the UI can display progress in real time.
 
-    The response uses:
-      - Content-Type: text/event-stream  (SSE-compatible, never buffered)
-      - X-Accel-Buffering: no            (disables Nginx proxy buffering)
-      - Cache-Control: no-cache          (prevents any intermediary caching)
+    IMPORTANT — async wrapper:
+      ssl_service.stream_letsencrypt_cert() is a *synchronous* generator
+      (it calls subprocess.Popen and reads lines in a tight loop).
+      We wrap it in an async generator that delegates to a thread pool via
+      asyncio.to_thread / run_in_executor so the event loop is never blocked
+      and FastAPI can flush each chunk immediately without buffering.
+
+    Headers:
+      X-Accel-Buffering: no   → Nginx: disable proxy_buffering for this response
+      Cache-Control: no-cache → no intermediary caching
+      Connection: keep-alive  → keep the TCP connection alive during long cert issuance
     """
+    import asyncio
     from ..services.ssl_service import SSLService
 
     ssl_service = SSLService()
 
     headers = {
-        "X-Accel-Buffering": "no",       # Nginx: disable proxy_buffering for this response
+        "X-Accel-Buffering": "no",
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
+        "Transfer-Encoding": "chunked",
     }
 
+    async def _async_stream():
+        """
+        Bridge between the synchronous SSLService generator and FastAPI's
+        async StreamingResponse.  Each chunk is yielded immediately so the
+        browser sees live output without waiting for certbot to finish.
+        """
+        loop = asyncio.get_event_loop()
+        sync_gen = ssl_service.stream_letsencrypt_cert(req.domain, req.email)
+
+        while True:
+            # Run the next() call of the sync generator in a thread so the
+            # event loop stays responsive and Nginx keep-alive ticks work.
+            chunk = await loop.run_in_executor(
+                None, lambda g=sync_gen: next(g, None)
+            )
+            if chunk is None:
+                break
+            yield chunk.encode("utf-8")
+
     return StreamingResponse(
-        ssl_service.stream_letsencrypt_cert(req.domain, req.email),
+        _async_stream(),
         media_type="text/plain; charset=utf-8",
         headers=headers,
     )
