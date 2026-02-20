@@ -106,7 +106,7 @@ const SubscriptionPlans = () => {
                         Subscription Portal Links
                     </h1>
                     <p className="text-gray-300 mt-2">
-                        لینک اختصاصی هر کاربر را کپی/باز کنید. صفحه عمومی کاربر در مسیر <code>/sub/&lt;token&gt;</code> قابل دسترسی است.
+                        Copy or open each user's dedicated link. The public subscription page is available at <code>/sub/&lt;token&gt;</code>.
                     </p>
                 </div>
 
