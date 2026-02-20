@@ -229,6 +229,7 @@ def init_default_settings(db: Session):
         "ovpn_tran_window":          "3600",
         "ovpn_tls_timeout":          "2",
         "ovpn_connect_retry":        "5",
+        "ovpn_connect_retry_max_interval": "30",
         "ovpn_connect_retry_max":    "0",
         "ovpn_server_poll_timeout":  "10",
         # explicit-exit-notify is UDP-only; omit for TCP (will be ignored anyway)
@@ -260,11 +261,10 @@ def init_default_settings(db: Session):
         "ovpn_tls_control_channel":  "tls-crypt",
         "ovpn_auth_nocache":         "1",
 
-        # ─── MTU / MSS — TCP/443 over Ethernet ─────────────────────────
-        # tun-mtu 1500: full Ethernet MTU; mssfix 1450 leaves room for
-        # OpenVPN+TLS headers when running TCP-in-TCP (TCP/443).
-        "ovpn_tun_mtu":   "1500",
-        "ovpn_mssfix":    "1450",
+        # ─── MTU / MSS — conservative DPI-safe defaults ─────────────────
+        # 1420/1380 performs better across restrictive Iranian ISP/NAT paths.
+        "ovpn_tun_mtu":   "1420",
+        "ovpn_mssfix":    "1380",
         "ovpn_fragment":  "0",       # Fragment not needed for TCP; use for UDP only
         # NOTE: mtu-test/mtu-disc removed — unreliable through Iran NAT, breaks TCP/443
 
@@ -304,6 +304,7 @@ def init_default_settings(db: Session):
         "ovpn_remote_servers":       "",   # "ip:port:proto,ip:port:proto"
         "ovpn_remote_address_type":  "auto",   # auto | custom_ip | domain
         "ovpn_remote_domain":        "",       # custom domain for clients
+        "ovpn_remote_random_hostname": "1",   # reduce cache/fingerprint correlation
 
         # ─── Port Sharing (HTTPS camouflage) ────────────────────────────
         # Forward non-VPN probes on port 443 to a real HTTPS server.
