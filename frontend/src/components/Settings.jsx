@@ -1018,13 +1018,13 @@ const Settings = () => {
                 <div className="flex items-start gap-3">
                     <Link className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
                     <div>
-                        <p className="text-blue-300 font-semibold text-sm">Subscription Links</p>
+                        <p className="text-blue-300 font-semibold text-sm">Public Subscription Portal</p>
                         <p className="text-gray-400 text-xs mt-1">
-                            Users paste a subscription URL in their VPN client (Clash, v2rayNG, Shadowrocket, etc.)
-                            and configs auto-update. Works like <b>3x-ui</b>, <b>Marzban</b>, and <b>Hiddify</b>.
+                            هر کاربر یک لینک اختصاصی در مسیر <code>/sub/&lt;token&gt;</code> دارد.
+                            کاربر با باز کردن این صفحه می‌تواند کانفیگ OpenVPN/WireGuard را دانلود کند.
                         </p>
                         <p className="text-gray-400 text-xs mt-1">
-                            Subscription domain and port are configured in the <b>Domain & SSL</b> tab.
+                            دامنه و پورت این لینک از تنظیمات Domain &amp; SSL خوانده می‌شود.
                         </p>
                     </div>
                 </div>
@@ -1035,7 +1035,7 @@ const Settings = () => {
                 <p className="text-gray-400 text-xs mb-1 font-semibold">🔗 Subscription Link Preview:</p>
                 <p className="text-green-400 text-xs font-mono break-all">{previewUrl}</p>
                 <p className="text-gray-500 text-xs mt-1">
-                    Replace <code className="text-yellow-400">YOUR_UUID_HERE</code> with the user's actual UUID (shown in Users tab).
+                    Replace <code className="text-yellow-400">YOUR_UUID_HERE</code> with the user's actual subscription token (shown in Users tab).
                 </p>
             </div>
 
@@ -1058,12 +1058,13 @@ const Settings = () => {
             </div>
 
             <S_Select {...sp} settingKey="subscription_format"
-                label="Config Format"
-                tip="Format of the generated subscription content. V2Ray/Clash is most compatible."
+                label="Subscription Mode"
+                tip="portal mode matches the implemented public subscription page (/sub/&lt;token&gt;)."
                 options={[
-                    { value: 'v2ray',  label: 'V2Ray / Clash URI (recommended)' },
-                    { value: 'base64', label: 'Base64 Encoded (legacy clients)' },
-                    { value: 'json',   label: 'JSON (advanced)' },
+                    { value: 'portal', label: 'Portal Page (OpenVPN + WireGuard download)' },
+                    { value: 'v2ray',  label: 'Legacy: V2Ray/Clash (not active in this build)' },
+                    { value: 'base64', label: 'Legacy: Base64 (not active in this build)' },
+                    { value: 'json',   label: 'Legacy: JSON (not active in this build)' },
                 ]} />
 
             <S_Input {...sp} settingKey="subscription_update_interval"
@@ -1074,11 +1075,11 @@ const Settings = () => {
 
             <SectionTitle>Config Export Options</SectionTitle>
             <S_Check {...sp} settingKey="config_export_qr"
-                label="Include QR Code in User Exports"
-                tip="Generate QR codes so users can scan with mobile apps (v2rayNG, Shadowrocket)." />
+                label="Show WireGuard QR on Portal"
+                tip="نمایش QR برای WireGuard در صفحه اشتراک کاربر." />
             <S_Check {...sp} settingKey="config_export_uri"
-                label="Include One-click Import URI"
-                tip="Generate vless:// or vmess:// URIs for direct import into clients." />
+                label="Keep one-click URI option (legacy)"
+                tip="گزینه سازگاری با فرمت‌های قدیمی. در حالت Portal فعلی استفاده مستقیم ندارد." />
         </div>
         );
     };
