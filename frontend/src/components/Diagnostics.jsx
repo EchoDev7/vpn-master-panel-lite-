@@ -365,18 +365,83 @@ export default function Diagnostics() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700/50">
-                            {data.packages.map((pkg) => (
-                                <tr key={pkg.name} className="hover:bg-gray-700/10">
-                                    <td className="p-3 text-cyan-400 font-bold">{pkg.name}</td>
-                                    <td className="p-3 text-gray-300">{pkg.installed}</td>
-                                    <td className="p-3 text-gray-400">{pkg.latest}</td>
-                                    <td className="p-3">
-                                        <span className={pkg.status === 'OK' || pkg.status === 'Up to date' ? 'text-green-400 font-bold' : 'text-yellow-400 font-bold'}>
-                                            {pkg.status}
-                                        </span>
-                                    </td>
-                                </tr>
-                            ))}
+                            {data.packages.map((pkg) => {
+                                const isMissing = pkg.installed === 'Not Installed' || pkg.status?.includes('MISSING');
+                                const isOk = pkg.status === 'OK' || pkg.status === 'Up to date';
+                                const isRequired = pkg.required === true;
+
+                                return (
+                                    <React.Fragment key={pkg.name}>
+                                        {/* Main package row */}
+                                        <tr className={`hover:bg-gray-700/10 ${isRequired && isMissing ? 'bg-red-900/20' : ''}`}>
+                                            <td className="p-3 font-bold flex items-center gap-2">
+                                                <span className={pkg.name === 'certbot' ? 'text-yellow-300' : 'text-cyan-400'}>
+                                                    {pkg.name === 'certbot' ? '🔒 ' : ''}{pkg.name}
+                                                </span>
+                                                {isRequired && (
+                                                    <span className="text-xs bg-orange-600/40 text-orange-300 px-1.5 py-0.5 rounded border border-orange-500/40">
+                                                        REQUIRED
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className={`p-3 ${isMissing ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                                                {pkg.installed}
+                                            </td>
+                                            <td className="p-3 text-gray-400">{pkg.latest}</td>
+                                            <td className="p-3">
+                                                <span className={
+                                                    isMissing
+                                                        ? 'text-red-400 font-bold'
+                                                        : isOk
+                                                            ? 'text-green-400 font-bold'
+                                                            : 'text-yellow-400 font-bold'
+                                                }>
+                                                    {isMissing && isRequired ? '⚠ ' : ''}{pkg.status}
+                                                </span>
+                                            </td>
+                                        </tr>
+
+                                        {/* certbot: show installed SSL certificates as sub-rows */}
+                                        {pkg.name === 'certbot' && Array.isArray(pkg.ssl_certs) && pkg.ssl_certs.length > 0 && (
+                                            <tr className="bg-yellow-900/10">
+                                                <td colSpan={4} className="px-6 pb-3 pt-1">
+                                                    <div className="text-xs text-yellow-300/70 font-bold mb-1">
+                                                        🛡️ Installed SSL Certificates ({pkg.ssl_certs.length}):
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
+                                                        {pkg.ssl_certs.map((cert) => (
+                                                            <div key={cert.domain}
+                                                                className="flex justify-between items-center bg-gray-900/40 rounded px-3 py-1 border border-yellow-700/30">
+                                                                <span className="text-green-300 font-mono text-xs">
+                                                                    🔐 {cert.domain}
+                                                                </span>
+                                                                <span className="text-gray-400 text-xs">
+                                                                    Expires: {cert.expires}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+
+                                        {/* certbot missing — show install hint */}
+                                        {pkg.name === 'certbot' && isMissing && (
+                                            <tr className="bg-red-900/10">
+                                                <td colSpan={4} className="px-6 pb-3 pt-1">
+                                                    <div className="text-xs text-red-300 bg-red-900/20 rounded px-3 py-2 border border-red-700/40">
+                                                        ⚠️ certbot is required for SSL/HTTPS. It will be installed automatically
+                                                        when you request an SSL certificate, or run:
+                                                        <code className="ml-2 text-yellow-300">
+                                                            apt install certbot python3-certbot-nginx
+                                                        </code>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </React.Fragment>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
