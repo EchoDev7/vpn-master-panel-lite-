@@ -444,12 +444,12 @@ const Users = () => {
                 }
             }
 
-            showToast('لینک اشتراک کپی شد', 'success');
+            showToast('Subscription link copied.', 'success');
             setCopiedUserId(user.id);
             setTimeout(() => setCopiedUserId(null), 2000);
         } catch (err) {
             console.error('Copy failed:', err);
-            showToast('کپی لینک ناموفق بود', 'error');
+            showToast('Failed to copy subscription link.', 'error');
         }
     };
 
