@@ -707,9 +707,22 @@ post_update_fixes() {
     SUB_DOMAIN=$(read_setting "subscription_domain" "")
     PANEL_PORT=$(read_setting "panel_https_port" "8443")
     SUB_PORT=$(read_setting "sub_https_port" "443")
+    EFFECTIVE_SUB_PORT="$SUB_PORT"
+
+    # If sub HTTPS is configured as 443 but that port is occupied (typically OpenVPN),
+    # move subscription HTTPS to 8443 and persist setting so UI-generated links stay correct.
+    if [ "$EFFECTIVE_SUB_PORT" = "443" ]; then
+        if ss -tlnp 2>/dev/null | grep -q ':443 '; then
+            EFFECTIVE_SUB_PORT="8443"
+            echo -e "${YELLOW}⚠ sub_https_port=443 is busy. Switching subscription HTTPS to 8443.${NC}"
+            if [ -f "$DB_FILE" ]; then
+                sqlite3 "$DB_FILE" "UPDATE settings SET value='8443' WHERE key='sub_https_port';" 2>/dev/null || true
+            fi
+        fi
+    fi
 
     echo -e "${CYAN}   Panel domain:  ${PANEL_DOMAIN:-'(not set)'}  port ${PANEL_PORT}${NC}"
-    echo -e "${CYAN}   Sub domain:    ${SUB_DOMAIN:-'(not set)'}  port ${SUB_PORT}${NC}"
+    echo -e "${CYAN}   Sub domain:    ${SUB_DOMAIN:-'(not set)'}  port ${EFFECTIVE_SUB_PORT}${NC}"
 
     # ── 2. Ensure firewall ports are open ─────────────────────────────────────
     echo -e "${CYAN}   Opening firewall ports...${NC}"
@@ -718,7 +731,7 @@ post_update_fixes() {
     ufw allow 80/tcp   > /dev/null 2>&1
     # Open whatever port the admin has chosen
     [ -n "$PANEL_PORT" ] && ufw allow ${PANEL_PORT}/tcp > /dev/null 2>&1
-    [ -n "$SUB_PORT"   ] && ufw allow ${SUB_PORT}/tcp   > /dev/null 2>&1
+    [ -n "$EFFECTIVE_SUB_PORT" ] && ufw allow ${EFFECTIVE_SUB_PORT}/tcp > /dev/null 2>&1
     print_success "Firewall ports verified"
 
     # ── 3. Re-build Nginx SSL configs for domains that have certs ────────────
@@ -743,9 +756,9 @@ post_update_fixes() {
         if [ -n "$SUB_DOMAIN" ] && [ "$SUB_DOMAIN" != "$PANEL_DOMAIN" ]; then
             CERT_PATH="/etc/letsencrypt/live/${SUB_DOMAIN}/fullchain.pem"
             if [ -f "$CERT_PATH" ]; then
-                echo -e "${CYAN}   Rebuilding Nginx SSL config for sub: ${SUB_DOMAIN} (port ${SUB_PORT})${NC}"
-                bash "$RESTORE_SCRIPT" "$SUB_DOMAIN" "$SUB_PORT" > /dev/null 2>&1 \
-                    && print_success "Sub SSL config updated (${SUB_DOMAIN}:${SUB_PORT})" \
+                echo -e "${CYAN}   Rebuilding Nginx SSL config for sub: ${SUB_DOMAIN} (port ${EFFECTIVE_SUB_PORT})${NC}"
+                bash "$RESTORE_SCRIPT" "$SUB_DOMAIN" "$EFFECTIVE_SUB_PORT" > /dev/null 2>&1 \
+                    && print_success "Sub SSL config updated (${SUB_DOMAIN}:${EFFECTIVE_SUB_PORT})" \
                     || echo -e "${YELLOW}⚠ Could not rebuild sub SSL config${NC}"
             else
                 echo -e "${YELLOW}   Sub domain set but no cert yet — use panel to issue cert${NC}"
@@ -796,10 +809,10 @@ post_update_fixes() {
     fi
     if [ -n "$SUB_DOMAIN" ] && [ "$SUB_DOMAIN" != "$PANEL_DOMAIN" ] && \
        [ -f "/etc/letsencrypt/live/${SUB_DOMAIN}/fullchain.pem" ]; then
-        if [ "$SUB_PORT" = "443" ]; then
+        if [ "$EFFECTIVE_SUB_PORT" = "443" ]; then
             echo -e "  Sub  (HTTPS):    ${GREEN}https://${SUB_DOMAIN}/sub/UUID${NC}"
         else
-            echo -e "  Sub  (HTTPS):    ${GREEN}https://${SUB_DOMAIN}:${SUB_PORT}/sub/UUID${NC}"
+            echo -e "  Sub  (HTTPS):    ${GREEN}https://${SUB_DOMAIN}:${EFFECTIVE_SUB_PORT}/sub/UUID${NC}"
         fi
     fi
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -827,10 +840,10 @@ post_update_fixes() {
     fi
 
     if [ -n "$SUB_DOMAIN" ]; then
-        if [ "$SUB_PORT" = "443" ]; then
+        if [ "$EFFECTIVE_SUB_PORT" = "443" ]; then
             SUB_URL="https://${SUB_DOMAIN}/sub/INVALID_TOKEN"
         else
-            SUB_URL="https://${SUB_DOMAIN}:${SUB_PORT}/sub/INVALID_TOKEN"
+            SUB_URL="https://${SUB_DOMAIN}:${EFFECTIVE_SUB_PORT}/sub/INVALID_TOKEN"
         fi
 
         SUB_HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "$SUB_URL" 2>/dev/null || echo "000")
@@ -838,7 +851,7 @@ post_update_fixes() {
             print_success "Subscription endpoint reachable (${SUB_URL} -> HTTP ${SUB_HTTP_CODE})"
         else
             print_warning "Subscription endpoint check failed (${SUB_URL} -> HTTP ${SUB_HTTP_CODE})"
-            echo -e "${YELLOW}   Check DNS (A record), firewall port ${SUB_PORT}, and Nginx SSL site for ${SUB_DOMAIN}.${NC}"
+            echo -e "${YELLOW}   Check DNS (A record), firewall port ${EFFECTIVE_SUB_PORT}, and Nginx SSL site for ${SUB_DOMAIN}.${NC}"
         fi
     fi
 }
