@@ -67,9 +67,15 @@ class OpenVPNService:
     # Settings
     # ------------------------------------------------------------------
 
-    def _load_settings(self) -> Dict[str, str]:
-        """Load ovpn_* settings from DB, merged with safe hard defaults."""
-        from ..database import get_db_context
+    def _load_settings(self, db=None) -> Dict[str, str]:
+        """Load ovpn_* settings from DB, merged with safe hard defaults.
+
+        If *db* is provided (e.g. an already-open SQLAlchemy Session from a
+        FastAPI Depends), it is used directly to avoid opening a second
+        SQLite connection on the same StaticPool.  When called from
+        background tasks or standalone scripts, leave *db* as None and a
+        fresh context-managed session will be created automatically.
+        """
         from ..models.setting import Setting
 
         # Hard defaults — Iran-optimised
@@ -126,7 +132,7 @@ class OpenVPNService:
             # TLS profile
             "tls_cert_profile": "preferred",
             # Anti-censorship extras
-            "inter_client":             "0",
+            "client_to_client":         "0",   # canonical key (no alias needed)
             "port_share":               "",
             "block_iran_ips":           "0",
             "http_proxy_enabled":       "0",
@@ -135,6 +141,14 @@ class OpenVPNService:
             "http_proxy_custom_header": "",
             "remote_address_type":      "auto",
             "remote_domain":            "",
+            "remote_servers":           "",
+            # Connection retry (client-side, written to client config)
+            "connect_retry":            "5",
+            "connect_retry_max":        "0",
+            "server_poll_timeout":      "10",
+            # Push routes
+            "push_routes":              "",
+            "push_remove_routes":       "",
             # System
             "user":      "nobody",
             "group":     "nogroup",
@@ -142,11 +156,20 @@ class OpenVPNService:
             "pers_tun":  "1",
         }
 
-        with get_db_context() as db:
-            rows = db.query(Setting).filter(Setting.key.like("ovpn_%")).all()
+        def _apply(session):
+            rows = session.query(Setting).filter(Setting.key.like("ovpn_%")).all()
             for row in rows:
                 key = row.key[5:]  # strip "ovpn_" prefix
                 defaults[key] = row.value
+
+        if db is not None:
+            # Caller already holds a session — reuse it directly.
+            _apply(db)
+        else:
+            # No session provided — open a short-lived one.
+            from ..database import get_db_context
+            with get_db_context() as session:
+                _apply(session)
 
         return defaults
 
@@ -205,9 +228,9 @@ class OpenVPNService:
     # Server config generation
     # ------------------------------------------------------------------
 
-    def generate_server_config(self) -> str:
+    def generate_server_config(self, db=None) -> str:
         """Generate complete /etc/openvpn/server.conf content."""
-        s = self._load_settings()
+        s = self._load_settings(db=db)
         conf: List[str] = []
 
         # ── Header ───────────────────────────────────────────────────
@@ -438,15 +461,28 @@ class OpenVPNService:
         conf.append(f'push "reneg-sec {_reneg}"')
 
         # Client-to-client (disabled by default — privacy)
-        # Support both the DB key and the UI alias key
-        if s.get("client_to_client") == "1" or s.get("inter_client") == "1":
+        if s.get("client_to_client") == "1":
             conf.append("client-to-client")
 
-        # Additional routes
-        for route in s.get("push_routes", "").split(","):
+        # Push additional routes to clients (e.g. LAN access)
+        for route in s.get("push_routes", "").split("\n"):
             r = route.strip()
             if r:
+                # Accept both "network mask" and "network/prefix" formats
+                if "/" in r:
+                    import ipaddress
+                    try:
+                        net = ipaddress.IPv4Network(r, strict=False)
+                        r = f"{net.network_address} {net.netmask}"
+                    except ValueError:
+                        pass  # emit as-is
                 conf.append(f'push "route {r}"')
+
+        # Remove routes from client routing table (split-tunnel exclusions)
+        for route in s.get("push_remove_routes", "").split("\n"):
+            r = route.strip()
+            if r:
+                conf.append(f'push "route-del {r}"')
 
         # ── Authentication ───────────────────────────────────────────
         conf += ["", "# ── Authentication ───────────────────────────────"]
@@ -515,6 +551,7 @@ class OpenVPNService:
         server_ip_override: str = None,
         port_override: int = None,
         protocol_override: str = None,
+        db=None,
     ) -> str:
         """
         Generate a .ovpn file optimised for:
@@ -534,7 +571,7 @@ class OpenVPNService:
           - No LZO/compression (security + DPI fingerprint)
         """
         self._ensure_pki()
-        s = self._load_settings()
+        s = self._load_settings(db=db)
 
         # ── Resolve remote address ───────────────────────────────────
         addr_type = s.get("remote_address_type", "auto")
@@ -691,8 +728,10 @@ class OpenVPNService:
             # reneg-sec: re-key every hour. Must be <= server's reneg-sec to avoid
             # client-initiated renegotiation being rejected.
             f"reneg-sec {s.get('reneg_sec', '3600')}",
-            # connect-retry: wait 5s initially, back-off to max 30s between retries
-            "connect-retry 5 30",
+            # connect-retry: initial wait, max wait between reconnect attempts
+            f"connect-retry {s.get('connect_retry', '5')} 30",
+            # connect-retry-max: 0 = retry forever (recommended for Iran — connection drops are common)
+            f"connect-retry-max {s.get('connect_retry_max', '0')}",
             # server-poll-timeout: give up on one remote and try next after N sec
             f"server-poll-timeout {s.get('server_poll_timeout', '10')}",
         ]
