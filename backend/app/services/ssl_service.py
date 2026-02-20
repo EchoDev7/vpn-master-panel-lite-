@@ -270,90 +270,153 @@ class SSLService:
 
             yield "WARN: Nginx plugin failed. Falling back to standalone mode...\n"
 
-        # ── Method 3: Standalone ──────────────────────────────────────────────
-        # CRITICAL: Stopping Nginx here would sever the browser's HTTP connection
-        # because the browser talks to FastAPI *through* Nginx.
+        # ── Method 3: Standalone (config-swap, NO Nginx stop) ────────────────
         #
-        # Solution: We run certbot standalone on port 80 WITHOUT stopping Nginx,
-        # by first telling Nginx to stop listening on port 80 via a config swap,
-        # running certbot, then restoring.  If that also fails we run certbot
-        # in a detached subprocess (fire-and-forget) and stream the result from
-        # a temp log file so the HTTP connection stays alive through Nginx.
-        yield "EXEC: [3/3] Standalone mode...\n"
-        yield "INFO: Using detached subprocess to avoid breaking the Nginx connection.\n"
+        # CRITICAL DESIGN CONSTRAINT:
+        #   The browser talks to FastAPI through Nginx on port 8000/3000.
+        #   If we `systemctl stop nginx`, the streaming HTTP connection dies
+        #   immediately → "STREAM ERROR: Load failed".
+        #
+        # Solution — Nginx config-swap:
+        #   1. Backup the current Nginx vpnmaster config.
+        #   2. Write a minimal config that does NOT listen on port 80,
+        #      but still proxies port 8000 → FastAPI:8001 (keeps our connection alive).
+        #   3. `nginx -s reload` (zero-downtime, no connection drop).
+        #   4. Run certbot standalone on port 80 (now free).
+        #   5. Restore original config + reload.
+        #
+        # We stream certbot output from a temp log file while the thread runs.
+
+        yield "EXEC: [3/3] Standalone mode (Nginx config-swap — no connection drop)...\n"
 
         import time
         import tempfile
         import threading
 
-        # ── 3a. Try port-reuse standalone (Nginx still running, different port) ──
-        # If port 80 is held by Nginx, certbot standalone will fail on 80.
-        # We briefly stop just the port-80 server block via a config trick.
-        # If Nginx controls port 80, swap config to free it first.
-        port80_was_freed = False
-        if nginx_running:
-            # Write a temp config that makes Nginx NOT listen on port 80
-            tmp_conf = "/etc/nginx/conf.d/no_port80_temp.conf"
-            try:
-                # Remove port-80 listener temporarily by writing an empty override
-                # Then reload (not stop) — keeps port 8000/3000 alive
-                yield "INFO: Temporarily removing port 80 from Nginx (config swap)...\n"
-                # Just reload so Nginx drops port 80 block if it was the _ catch-all
-                # Actually safest: write a dummy conf that takes port 80 and returns 200
-                # This way certbot standalone can't bind port 80 anyway.
-                # Instead: stop ONLY the port-80 virtual server via a dedicated test.
-                # Simplest approach: just try standalone, if port 80 is busy certbot
-                # will error and we handle it.
-                pass
-            except Exception:
-                pass
+        NGINX_CONF = "/etc/nginx/sites-available/vpnmaster"
+        NGINX_CONF_BAK = "/etc/nginx/sites-available/vpnmaster.bak_ssl"
 
-        # Run certbot standalone in a background thread so we can keep
-        # streaming keep-alive pings to the browser via Nginx on port 8000/3000.
+        # Minimal Nginx config: no port 80, keeps port 8000 + 3000 alive
+        MINIMAL_NGINX_CONF = """\
+# Temporary config during certbot standalone — port 80 removed
+server {
+    listen 0.0.0.0:8000;
+    server_name _;
+    location /api/ {
+        proxy_pass         http://127.0.0.1:8001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_read_timeout 600s;
+        proxy_buffering    off;
+        proxy_cache        off;
+        chunked_transfer_encoding on;
+        add_header X-Accel-Buffering no always;
+    }
+    location /ws/ {
+        proxy_pass         http://127.0.0.1:8001/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host $host;
+        proxy_read_timeout 3600s;
+        proxy_buffering    off;
+    }
+    location / {
+        proxy_pass         http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_read_timeout 600s;
+        proxy_buffering    off;
+    }
+}
+server {
+    listen 0.0.0.0:3000;
+    server_name _;
+    root /opt/vpn-master-panel/frontend/dist;
+    index index.html;
+    location / { try_files $uri $uri/ /index.html; }
+    location /api/ {
+        proxy_pass http://127.0.0.1:8001/api/;
+        proxy_read_timeout 600s;
+        proxy_buffering off;
+        chunked_transfer_encoding on;
+    }
+}
+"""
         log_fd, log_path = tempfile.mkstemp(prefix="certbot_standalone_", suffix=".log")
         os.close(log_fd)
 
         standalone_cmd = base_flags + ["--standalone", "--preferred-challenges", "http"]
         cert_thread_result = [False]
-        cert_thread_done  = [False]
+        cert_thread_done   = [False]
 
-        def _run_standalone_in_thread():
-            """Stop Nginx, run certbot standalone, restart Nginx — all in background."""
+        def _swap_and_run():
+            """
+            1. Swap Nginx config to remove port-80 listener (keeps 8000/3000 alive).
+            2. Run certbot standalone on the now-free port 80.
+            3. Restore original config.
+            All in a background thread so the main generator keeps streaming.
+            """
+            swapped = False
             try:
-                if nginx_running:
-                    SSLService._run(["systemctl", "stop", "nginx"])
-                    time.sleep(1)
+                # ── Step 1: backup + swap config ─────────────────────────────
+                if os.path.isfile(NGINX_CONF):
+                    import shutil as _shutil
+                    _shutil.copy2(NGINX_CONF, NGINX_CONF_BAK)
+                    with open(NGINX_CONF, "w") as f:
+                        f.write(MINIMAL_NGINX_CONF)
+                    ok, _ = SSLService._run(["nginx", "-t"])
+                    if ok:
+                        SSLService._run(["nginx", "-s", "reload"])
+                        swapped = True
+                        time.sleep(1)   # give nginx a moment to release port 80
+                    else:
+                        # Config test failed — restore immediately
+                        _shutil.copy2(NGINX_CONF_BAK, NGINX_CONF)
+                        SSLService._run(["nginx", "-s", "reload"])
+                        swapped = False
 
+                # ── Step 2: run certbot standalone ───────────────────────────
                 try:
-                    proc = subprocess.Popen(
-                        standalone_cmd,
-                        stdout=open(log_path, "w"),
-                        stderr=subprocess.STDOUT,
-                    )
+                    with open(log_path, "w") as log_fh:
+                        proc = subprocess.Popen(
+                            standalone_cmd,
+                            stdout=log_fh,
+                            stderr=subprocess.STDOUT,
+                        )
                     proc.wait(timeout=120)
                     cert_thread_result[0] = (proc.returncode == 0)
-                except Exception:
+                except Exception as exc:
+                    with open(log_path, "a") as log_fh:
+                        log_fh.write(f"\nERROR: {exc}\n")
                     cert_thread_result[0] = False
+
             finally:
-                if nginx_running:
-                    SSLService._run(["systemctl", "start", "nginx"])
+                # ── Step 3: restore original config ──────────────────────────
+                if swapped and os.path.isfile(NGINX_CONF_BAK):
+                    import shutil as _shutil
+                    _shutil.copy2(NGINX_CONF_BAK, NGINX_CONF)
+                    SSLService._run(["nginx", "-t"])
+                    SSLService._run(["nginx", "-s", "reload"])
+                    try:
+                        os.unlink(NGINX_CONF_BAK)
+                    except Exception:
+                        pass
                 cert_thread_done[0] = True
 
-        t = threading.Thread(target=_run_standalone_in_thread, daemon=True)
+        t = threading.Thread(target=_swap_and_run, daemon=True)
         t.start()
 
-        yield "INFO: certbot standalone running in background thread...\n"
-        yield "INFO: Nginx will be briefly stopped — streaming via keep-alive pings.\n"
+        yield "INFO: Nginx config swapped (port 80 freed) — certbot running in background...\n"
+        yield "INFO: Your connection on port 8000/3000 stays alive.\n"
 
-        # Stream the log file while the thread runs
-        import io
+        # ── Stream certbot log while thread runs ──────────────────────────────
         last_pos = 0
         elapsed  = 0
-        while not cert_thread_done[0] and elapsed < 130:
+        while not cert_thread_done[0] and elapsed < 140:
             time.sleep(1)
             elapsed += 1
 
-            # Tail the log file and yield any new lines
             try:
                 with open(log_path, "r", errors="replace") as fh:
                     fh.seek(last_pos)
@@ -365,13 +428,13 @@ class SSLService:
             except Exception:
                 pass
 
-            # Heartbeat every 5 s so Nginx doesn't close the idle connection
+            # Keep-alive ping every 5 s
             if elapsed % 5 == 0:
-                yield f"INFO: waiting... ({elapsed}s)\n"
+                yield f"INFO: waiting for certbot... ({elapsed}s)\n"
 
         t.join(timeout=5)
 
-        # Flush any remaining log lines
+        # Flush remaining lines
         try:
             with open(log_path, "r", errors="replace") as fh:
                 fh.seek(last_pos)
@@ -386,9 +449,7 @@ class SSLService:
         except Exception:
             pass
 
-        if nginx_running:
-            yield "INFO: Nginx restarted after standalone certbot.\n"
-
+        yield "INFO: Nginx config restored.\n"
         result[0] = cert_thread_result[0]
 
         if result[0]:
