@@ -64,9 +64,17 @@ class WireGuardService:
     DATA_DIR = "/opt/vpn-panel/data/wireguard"
 
     def __init__(self):
-        self.server_ip = self._get_public_ip()
+        # Defer the blocking network call — only resolve IP on first access
+        self._server_ip: Optional[str] = None
         Path(self.CONFIG_DIR).mkdir(parents=True, exist_ok=True)
         Path(self.DATA_DIR).mkdir(parents=True, exist_ok=True)
+
+    @property
+    def server_ip(self) -> str:
+        """Lazily resolve the public IP (cached after first call)."""
+        if self._server_ip is None:
+            self._server_ip = self._get_public_ip()
+        return self._server_ip
 
     # =============================================
     # Utilities
