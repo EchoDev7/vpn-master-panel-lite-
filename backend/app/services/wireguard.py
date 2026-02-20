@@ -61,7 +61,7 @@ class WireGuardService:
     """Full-featured WireGuard VPN service manager"""
 
     CONFIG_DIR = "/etc/wireguard"
-    DATA_DIR = "/opt/vpn-panel/data/wireguard"
+    DATA_DIR = "/opt/vpn-master-panel/data/wireguard"
 
     def __init__(self):
         # Defer the blocking network call — only resolve IP on first access
