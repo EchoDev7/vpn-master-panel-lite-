@@ -394,52 +394,121 @@ systemctl enable vpnmaster-backend
 # Nginx Repair Function
 repair_nginx() {
     echo -e "${YELLOW}⚠️ Detected Nginx issue. Reconfiguring...${NC}"
-    
-    # Create safe config
-    cat > /etc/nginx/sites-available/vpnmaster << EOF
-# Backend API
+
+    cat > /etc/nginx/sites-available/vpnmaster << 'NGINXEOF'
+# ─────────────────────────────────────────────────────────────
+# VPN Master Panel — Nginx Configuration (update.sh)
+# Backend FastAPI on 127.0.0.1:8001 (internal)
+# Port 8000 = public API gateway  |  Port 3000 = React frontend
+# ─────────────────────────────────────────────────────────────
+
+# ── Port 80: ACME challenge passthrough (Let's Encrypt) ──────
+server {
+    listen 0.0.0.0:80;
+    server_name _;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 200 "VPN Master Panel";
+        add_header Content-Type text/plain;
+    }
+}
+
+# ── Port 8000: Backend API gateway ───────────────────────────
 server {
     listen 0.0.0.0:8000;
     server_name _;
 
-    location / {
-        proxy_pass http://127.0.0.1:8001;
+    location /api/ {
+        proxy_pass         http://127.0.0.1:8001/api/;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+
+        # Critical for SSL streaming — certbot can take 30-180 seconds
+        proxy_read_timeout  600s;
+        proxy_send_timeout  600s;
+        proxy_connect_timeout 30s;
+
+        # Disable buffering for SSE / streaming (certbot live output)
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_cache_bypass 1;
+        chunked_transfer_encoding on;
+        add_header X-Accel-Buffering no always;
+    }
+
+    location /ws/ {
+        proxy_pass         http://127.0.0.1:8001/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade    $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host       $host;
+        proxy_read_timeout 3600s;
+        proxy_buffering    off;
+    }
+
+    location / {
+        proxy_pass         http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header   Host       $host;
+        proxy_read_timeout 600s;
+        proxy_buffering    off;
     }
 }
 
-# Frontend
+# ── Port 3000: React frontend (static files) ─────────────────
 server {
     listen 0.0.0.0:3000;
     server_name _;
 
-    root /opt/vpn-master-panel/frontend/dist;
+    root  /opt/vpn-master-panel/frontend/dist;
     index index.html;
 
     gzip on;
-    gzip_types text/plain text/css application/json application/javascript;
+    gzip_types text/plain text/css application/json application/javascript
+               text/xml application/xml text/javascript image/svg+xml;
+    gzip_min_length 1000;
 
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-        try_files \$uri =404;
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires     30d;
+        add_header  Cache-Control "public, immutable";
+        try_files   $uri =404;
     }
 
     location / {
-        try_files \$uri \$uri/ /index.html;
+        try_files $uri $uri/ /index.html;
     }
 
-    location /api {
-        proxy_pass http://127.0.0.1:8001;
+    location /api/ {
+        proxy_pass         http://127.0.0.1:8001/api/;
         proxy_http_version 1.1;
-        proxy_set_header Host \$host;
+        proxy_set_header   Host              $host;
+        proxy_read_timeout  600s;
+        proxy_buffering     off;
+        proxy_cache         off;
+        chunked_transfer_encoding on;
+        add_header X-Accel-Buffering no always;
+    }
+
+    location /ws/ {
+        proxy_pass         http://127.0.0.1:8001/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade    $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host       $host;
+        proxy_read_timeout 3600s;
+        proxy_buffering    off;
     }
 }
-EOF
+NGINXEOF
+
     rm -f /etc/nginx/sites-enabled/default
     ln -sf /etc/nginx/sites-available/vpnmaster /etc/nginx/sites-enabled/
     nginx -t && systemctl restart nginx
