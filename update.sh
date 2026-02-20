@@ -10,6 +10,11 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+print_success() { echo -e "${GREEN}✓ $1${NC}"; }
+print_info()    { echo -e "${CYAN}ℹ $1${NC}"; }
+print_warning() { echo -e "${YELLOW}⚠ $1${NC}"; }
+print_error()   { echo -e "${RED}✗ $1${NC}"; }
+
 # Check Root
 if [[ $EUID -ne 0 ]]; then
    echo -e "${RED}This script must be run as root${NC}"
@@ -95,8 +100,9 @@ fi
 echo -e "${CYAN}📦 Updating System Packages...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt update -qq
-# Ensure critical packages are present (certbot added for SSL)
-apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs npm python3-pip openssl fail2ban certbot python3-certbot-nginx
+# Ensure critical packages are present
+# sqlite3 is needed by post_update_fixes() to read settings from DB
+apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs npm python3-pip openssl fail2ban certbot python3-certbot-nginx sqlite3
 echo -e "${GREEN}✓ certbot: $(certbot --version 2>&1 | head -1)${NC}"
 
 # Configure Fail2Ban if missing
@@ -648,6 +654,135 @@ if ! nginx -t > /dev/null 2>&1; then
 else
     systemctl restart nginx
 fi
+
+# ════════════════════════════════════════════════════════════
+#  POST-UPDATE: Auto-apply all settings that previously
+#  required manual server commands.
+#  Runs every time so the server stays consistent with the
+#  panel settings even if something drifted.
+# ════════════════════════════════════════════════════════════
+post_update_fixes() {
+    echo -e "${CYAN}🔧 Running post-update fixes...${NC}"
+
+    DB_FILE="$INSTALL_DIR/backend/vpnmaster_lite.db"
+
+    # ── Helper: read a value from the settings table ──────────────────────────
+    read_setting() {
+        local key="$1"
+        local default="$2"
+        if [ -f "$DB_FILE" ]; then
+            val=$(sqlite3 "$DB_FILE" \
+                "SELECT value FROM settings WHERE key='${key}' LIMIT 1;" 2>/dev/null)
+            echo "${val:-$default}"
+        else
+            echo "$default"
+        fi
+    }
+
+    # ── 1. Read current settings from DB ─────────────────────────────────────
+    PANEL_DOMAIN=$(read_setting "panel_domain" "")
+    SUB_DOMAIN=$(read_setting "subscription_domain" "")
+    PANEL_PORT=$(read_setting "panel_https_port" "8443")
+    SUB_PORT=$(read_setting "sub_https_port" "443")
+
+    echo -e "${CYAN}   Panel domain:  ${PANEL_DOMAIN:-'(not set)'}  port ${PANEL_PORT}${NC}"
+    echo -e "${CYAN}   Sub domain:    ${SUB_DOMAIN:-'(not set)'}  port ${SUB_PORT}${NC}"
+
+    # ── 2. Ensure firewall ports are open ─────────────────────────────────────
+    echo -e "${CYAN}   Opening firewall ports...${NC}"
+    ufw allow 8443/tcp > /dev/null 2>&1
+    ufw allow 443/tcp  > /dev/null 2>&1
+    ufw allow 80/tcp   > /dev/null 2>&1
+    # Open whatever port the admin has chosen
+    [ -n "$PANEL_PORT" ] && ufw allow ${PANEL_PORT}/tcp > /dev/null 2>&1
+    [ -n "$SUB_PORT"   ] && ufw allow ${SUB_PORT}/tcp   > /dev/null 2>&1
+    print_success "Firewall ports verified"
+
+    # ── 3. Re-build Nginx SSL configs for domains that have certs ────────────
+    # This is the critical step that was previously manual.
+    # Uses restore_ssl_nginx.sh which auto-detects port conflicts.
+    RESTORE_SCRIPT="$INSTALL_DIR/restore_ssl_nginx.sh"
+    if [ -f "$RESTORE_SCRIPT" ]; then
+        # Panel domain
+        if [ -n "$PANEL_DOMAIN" ]; then
+            CERT_PATH="/etc/letsencrypt/live/${PANEL_DOMAIN}/fullchain.pem"
+            if [ -f "$CERT_PATH" ]; then
+                echo -e "${CYAN}   Rebuilding Nginx SSL config for panel: ${PANEL_DOMAIN} (port ${PANEL_PORT})${NC}"
+                bash "$RESTORE_SCRIPT" "$PANEL_DOMAIN" "$PANEL_PORT" > /dev/null 2>&1 \
+                    && print_success "Panel SSL config updated (${PANEL_DOMAIN}:${PANEL_PORT})" \
+                    || echo -e "${YELLOW}⚠ Could not rebuild panel SSL config${NC}"
+            else
+                echo -e "${YELLOW}   Panel domain set but no cert yet — SSL not configured (use panel to issue cert)${NC}"
+            fi
+        fi
+
+        # Subscription domain (only if different from panel)
+        if [ -n "$SUB_DOMAIN" ] && [ "$SUB_DOMAIN" != "$PANEL_DOMAIN" ]; then
+            CERT_PATH="/etc/letsencrypt/live/${SUB_DOMAIN}/fullchain.pem"
+            if [ -f "$CERT_PATH" ]; then
+                echo -e "${CYAN}   Rebuilding Nginx SSL config for sub: ${SUB_DOMAIN} (port ${SUB_PORT})${NC}"
+                bash "$RESTORE_SCRIPT" "$SUB_DOMAIN" "$SUB_PORT" > /dev/null 2>&1 \
+                    && print_success "Sub SSL config updated (${SUB_DOMAIN}:${SUB_PORT})" \
+                    || echo -e "${YELLOW}⚠ Could not rebuild sub SSL config${NC}"
+            else
+                echo -e "${YELLOW}   Sub domain set but no cert yet — use panel to issue cert${NC}"
+            fi
+        fi
+    else
+        echo -e "${YELLOW}⚠ restore_ssl_nginx.sh not found — skipping SSL config rebuild${NC}"
+    fi
+
+    # ── 4. Ensure certbot auto-renewal timer is active ────────────────────────
+    if command -v certbot > /dev/null 2>&1; then
+        # Enable systemd timer (preferred over cron)
+        systemctl enable certbot.timer > /dev/null 2>&1
+        systemctl start  certbot.timer > /dev/null 2>&1
+        # Fallback: add cron if timer not available
+        if ! systemctl is-active --quiet certbot.timer 2>/dev/null; then
+            if ! crontab -l 2>/dev/null | grep -q 'certbot renew'; then
+                (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
+                echo -e "${CYAN}   Added certbot renewal cron (daily 3am)${NC}"
+            fi
+        else
+            print_success "Certbot auto-renewal timer active"
+        fi
+    fi
+
+    # ── 5. Reload Nginx after all config changes ──────────────────────────────
+    if nginx -t > /dev/null 2>&1; then
+        systemctl reload nginx
+        print_success "Nginx reloaded with latest configs"
+    else
+        echo -e "${RED}✗ Nginx config test failed after post-update fixes${NC}"
+        nginx -t
+    fi
+
+    # ── 6. Print current access URLs ─────────────────────────────────────────
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  Access URLs${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "  HTTP  (no SSL):  ${GREEN}http://${SERVER_IP}:3000${NC}"
+    if [ -n "$PANEL_DOMAIN" ] && [ -f "/etc/letsencrypt/live/${PANEL_DOMAIN}/fullchain.pem" ]; then
+        if [ "$PANEL_PORT" = "443" ]; then
+            echo -e "  Panel (HTTPS):   ${GREEN}https://${PANEL_DOMAIN}${NC}"
+        else
+            echo -e "  Panel (HTTPS):   ${GREEN}https://${PANEL_DOMAIN}:${PANEL_PORT}${NC}"
+        fi
+    fi
+    if [ -n "$SUB_DOMAIN" ] && [ "$SUB_DOMAIN" != "$PANEL_DOMAIN" ] && \
+       [ -f "/etc/letsencrypt/live/${SUB_DOMAIN}/fullchain.pem" ]; then
+        if [ "$SUB_PORT" = "443" ]; then
+            echo -e "  Sub  (HTTPS):    ${GREEN}https://${SUB_DOMAIN}/sub/UUID${NC}"
+        else
+            echo -e "  Sub  (HTTPS):    ${GREEN}https://${SUB_DOMAIN}:${SUB_PORT}/sub/UUID${NC}"
+        fi
+    fi
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+post_update_fixes
 
 # Ensure check_status.sh is executable
 if [ -f "check_status.sh" ]; then
