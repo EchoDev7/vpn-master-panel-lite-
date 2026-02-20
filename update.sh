@@ -525,6 +525,7 @@ ufw allow 80/tcp > /dev/null 2>&1
 ufw allow 443/tcp > /dev/null 2>&1
 ufw allow 3000/tcp > /dev/null 2>&1
 ufw allow 8000/tcp > /dev/null 2>&1
+ufw allow 8443/tcp > /dev/null 2>&1  # Panel HTTPS (OpenVPN uses 443)
 # VPN Ports (customizable via panel later, but defaults here)
 ufw allow 1194/udp > /dev/null 2>&1
 ufw allow 51820/udp > /dev/null 2>&1
