@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from sqlalchemy.orm import Session
-from datetime import datetime
-import os
 
 from ..database import get_db
 from ..models.user import User
@@ -229,30 +229,89 @@ HTML_TEMPLATE = """
             document.getElementById('guide-content').classList.toggle('show');
         }
         
-        function showOS(os) {
+        function showOS(os, evt) {
             document.querySelectorAll('.guide-content > div[id^="guide-"]').forEach(el => el.style.display = 'none');
             document.getElementById('guide-' + os).style.display = 'block';
             
             document.querySelectorAll('.guide-os-btn').forEach(el => el.classList.remove('active'));
-            event.target.classList.add('active');
+            if (evt && evt.target) {
+                evt.target.classList.add('active');
+            }
         }
+
+        document.querySelectorAll('.guide-os-btn').forEach((btn) => {
+            btn.addEventListener('click', (evt) => {
+                const os = evt.target.textContent.toLowerCase();
+                showOS(os, evt);
+            });
+        });
     </script>
 </body>
 </html>
 """
 
-@router.get("/{token}", response_class=HTMLResponse)
-async def get_subscription_page(token: str, db: Session = Depends(get_db)):
+
+def _get_user_by_token(db: Session, token: str) -> User:
     user = db.query(User).filter(User.subscription_token == token).first()
     if not user:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    return user
+
+
+def _is_user_subscription_active(user: User) -> bool:
+    if getattr(user, "status", None) and user.status.value != "active":
+        return False
+    if user.expiry_date:
+        expiry = user.expiry_date
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expiry:
+            return False
+    return True
+
+
+def _ensure_wireguard_material(user: User, db: Session) -> bool:
+    if not user.wireguard_enabled:
+        return False
+
+    updated = False
+    if not user.wireguard_private_key or not user.wireguard_public_key:
+        keys = wireguard_service.generate_keypair()
+        user.wireguard_private_key = keys["private_key"]
+        user.wireguard_public_key = keys["public_key"]
+        updated = True
+
+    if not user.wireguard_ip:
+        user.wireguard_ip = wireguard_service.allocate_ip()
+        updated = True
+
+    if not user.wireguard_preshared_key:
+        try:
+            user.wireguard_preshared_key = wireguard_service.generate_preshared_key()
+            updated = True
+        except Exception:
+            # Preshared key is optional for client config generation.
+            pass
+
+    if updated:
+        db.commit()
+        db.refresh(user)
+
+    return True
+
+@router.get("/{token}", response_class=HTMLResponse)
+async def get_subscription_page(token: str, db: Session = Depends(get_db)):
+    user = _get_user_by_token(db, token)
 
     import json
     
-    # Calculate stats
+    now = datetime.now(timezone.utc)
     remaining = 999
     if user.expiry_date:
-        remaining = (user.expiry_date - datetime.utcnow()).days
+        expiry = user.expiry_date
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        remaining = max(0, (expiry - now).days)
         
     limit_gb = user.data_limit_gb if user.data_limit_gb > 0 else "Unlimited"
     percent = 0
@@ -261,7 +320,7 @@ async def get_subscription_page(token: str, db: Session = Depends(get_db)):
         
     context = {
         "username": user.username,
-        "status": user.status.value,
+        "status": "active" if _is_user_subscription_active(user) else "expired",
         "data_used_gb": round(user.data_usage_gb, 2),
         "data_limit_gb": limit_gb,
         "data_percent": percent,
@@ -274,16 +333,15 @@ async def get_subscription_page(token: str, db: Session = Depends(get_db)):
         "wg_config": "" 
     }
     
-    # Pre-generate WG config for QR code if requested
-    if user.wireguard_enabled and user.wireguard_private_key:
+    # Pre-generate WG config for QR code when available.
+    if _ensure_wireguard_material(user, db):
          try:
-             # We generate client config text here for the QR code
              context["wg_config"] = wireguard_service.generate_client_config(
                  user.wireguard_private_key, 
                  user.wireguard_ip, 
                  user.wireguard_preshared_key
              )
-         except:
+         except Exception:
              pass
 
     # Inject JSON into template (simple hydration).
@@ -297,28 +355,34 @@ async def get_subscription_page(token: str, db: Session = Depends(get_db)):
 
 @router.get("/{token}/openvpn", response_class=PlainTextResponse)
 async def get_openvpn_config(token: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.subscription_token == token).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = _get_user_by_token(db, token)
         
     if not user.openvpn_enabled:
         raise HTTPException(status_code=400, detail="OpenVPN disabled for this user")
         
-    config = openvpn_service.generate_client_config(user.username)
-    return PlainTextResponse(content=config, media_type="application/x-openvpn-profile")
+    config = openvpn_service.generate_client_config(user.username, db=db)
+    return PlainTextResponse(
+        content=config,
+        media_type="application/x-openvpn-profile",
+        headers={"Content-Disposition": f"attachment; filename={user.username}.ovpn"},
+    )
 
 @router.get("/{token}/wireguard", response_class=PlainTextResponse)
 async def get_wireguard_config(token: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.subscription_token == token).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = _get_user_by_token(db, token)
         
     if not user.wireguard_enabled:
         raise HTTPException(status_code=400, detail="WireGuard disabled for this user")
+
+    _ensure_wireguard_material(user, db)
         
     config = wireguard_service.generate_client_config(
         user.wireguard_private_key,
         user.wireguard_ip,
         user.wireguard_preshared_key
     )
-    return PlainTextResponse(content=config, media_type="text/plain")
+    return PlainTextResponse(
+        content=config,
+        media_type="text/plain",
+        headers={"Content-Disposition": f"attachment; filename={user.username}.conf"},
+    )
