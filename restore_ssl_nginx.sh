@@ -19,6 +19,12 @@ BACKEND="127.0.0.1:8001"
 # Auto-detect HTTPS port: use 8443 if 443 is busy (OpenVPN), else 443
 if [ -n "$2" ]; then
     HTTPS_PORT="$2"
+    if [ "$HTTPS_PORT" = "443" ]; then
+        if ss -tlnp 2>/dev/null | grep -q ':443 ' || netstat -tlnp 2>/dev/null | grep -q ':443 '; then
+            HTTPS_PORT=8443
+            echo -e "${YELLOW}⚠ Requested port 443 is busy — using 8443 for HTTPS${NC}"
+        fi
+    fi
 else
     if ss -tlnp 2>/dev/null | grep -q ':443 ' || netstat -tlnp 2>/dev/null | grep -q ':443 '; then
         HTTPS_PORT=8443
@@ -127,6 +133,22 @@ server {{
         proxy_cache_bypass 1;
         chunked_transfer_encoding on;
         add_header X-Accel-Buffering no always;
+    }}
+
+    # ── Public subscription endpoints (/sub/*) ─────────────────────────────
+    location /sub/ {{
+        proxy_pass         http://{backend}/sub/;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout  600s;
+        proxy_send_timeout  600s;
+        proxy_connect_timeout 30s;
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_cache_bypass 1;
     }}
 
     # ── WebSocket ───────────────────────────────────────────────────────────
