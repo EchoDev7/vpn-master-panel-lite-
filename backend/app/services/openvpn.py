@@ -406,15 +406,36 @@ class OpenVPNService:
         if s.get("redirect_gateway", "1") == "1":
             conf.append('push "redirect-gateway def1 bypass-dhcp"')
 
-        # DNS push — 1.1.1.1 and 8.8.8.8 work inside Iran for VPN tunnels
+        # DNS push — 1.1.1.1 and 8.8.8.8 work reliably inside Iran VPN tunnels.
+        # Server pushes to Windows/Android clients; client config also sets dhcp-option
+        # directly for iOS/macOS compatibility.
         dns_raw = s.get("dns", "1.1.1.1,8.8.8.8")
         for dns in dns_raw.replace(",", " ").split():
             if dns.strip():
                 conf.append(f'push "dhcp-option DNS {dns.strip()}"')
 
+        # IPv6 DNS push (prevents DNS leak on dual-stack networks)
+        conf.append('push "dhcp-option DNS6 2606:4700:4700::1111"')
+        conf.append('push "dhcp-option DNS6 2001:4860:4860::8888"')
+
         # block-outside-dns: critical for Windows DNS leak protection
         if s.get("block_outside_dns", "1") == "1":
             conf.append('push "block-outside-dns"')
+
+        # keepalive is NOT a push option — it is set directly on server.
+        # The client will inherit the server's ping/ping-restart timing automatically.
+        # We do push explicit ping directives so clients don't rely solely on the server:
+        ping_interval = s.get("keepalive_interval", "10")
+        ping_timeout  = s.get("keepalive_timeout",  "60")
+        conf.append(f'push "ping {ping_interval}"')
+        conf.append(f'push "ping-restart {ping_timeout}"')
+
+        # ping-timer-rem: apply ping-restart timer from server side on client
+        conf.append('push "ping-timer-rem"')
+
+        # reneg-sec push: client re-keys at same interval — prevents asymmetric renegotiation
+        _reneg = s.get("reneg_sec", "3600")
+        conf.append(f'push "reneg-sec {_reneg}"')
 
         # Client-to-client (disabled by default — privacy)
         # Support both the DB key and the UI alias key
@@ -537,10 +558,11 @@ class OpenVPNService:
         conf += [
             f"# OpenVPN client config — {username}",
             f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "# Compatible: Android, iOS, Windows, macOS",
+            f"# Protocol: {remote_proto.upper()}/{remote_port}  |  Iran DPI Bypass Edition",
+            "# Compatible: Android (OpenVPN for Android / Connect), iOS, Windows, macOS",
             "",
             "client",
-            f"dev tun",
+            "dev tun",
             f"proto {remote_proto}",
         ]
 
@@ -634,6 +656,46 @@ class OpenVPNService:
         ]
         if s.get("redirect_gateway", "1") == "1":
             conf.append("redirect-gateway def1 bypass-dhcp")
+
+        # ── DNS ───────────────────────────────────────────────────────
+        # Client-side: dhcp-option DNS is processed by the tun driver.
+        # Required for Android/iOS/macOS (server push is not enough on all platforms).
+        # Windows uses block-outside-dns + dhcp-option together for leak prevention.
+        conf += [
+            "",
+            "# ── DNS (anti-leak, works on all platforms) ──────────────",
+        ]
+        dns_raw = s.get("dns", "1.1.1.1,8.8.8.8")
+        for dns_entry in dns_raw.replace(",", " ").split():
+            dns_entry = dns_entry.strip()
+            if dns_entry:
+                conf.append(f"dhcp-option DNS {dns_entry}")
+        # IPv6 DNS (optional) — prevents DNS leak on IPv6-capable networks
+        conf.append("dhcp-option DNS6 2606:4700:4700::1111")  # Cloudflare IPv6
+        conf.append("dhcp-option DNS6 2001:4860:4860::8888")  # Google IPv6
+
+        # ── Connection Timing (Iran keep-alive tuning) ────────────────
+        # Iran middleboxes drop idle TCP connections after ~60-90s of inactivity.
+        # ping: client sends a ping every N seconds to keep the connection alive.
+        # ping-restart: restart the connection if no response in N seconds.
+        # NOTE: 'keepalive' is server-only. On clients use 'ping' + 'ping-restart'.
+        # The server will push "ping X" and "ping-restart Y" so these serve as
+        # fallback defaults in case the server push is not received.
+        ping_interval = s.get("keepalive_interval", "10")
+        ping_timeout  = s.get("keepalive_timeout",  "60")
+        conf += [
+            "",
+            "# ── Connection Timing (Iran middlebox keep-alive) ────────",
+            f"ping {ping_interval}",
+            f"ping-restart {ping_timeout}",
+            # reneg-sec: re-key every hour. Must be <= server's reneg-sec to avoid
+            # client-initiated renegotiation being rejected.
+            f"reneg-sec {s.get('reneg_sec', '3600')}",
+            # connect-retry: wait 5s initially, back-off to max 30s between retries
+            "connect-retry 5 30",
+            # server-poll-timeout: give up on one remote and try next after N sec
+            f"server-poll-timeout {s.get('server_poll_timeout', '10')}",
+        ]
 
         # ── Platform-specific ─────────────────────────────────────────
         conf += [
