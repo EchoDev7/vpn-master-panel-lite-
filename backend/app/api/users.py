@@ -4,6 +4,7 @@ Users API Endpoints - CRUD operations for VPN users
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -174,6 +175,7 @@ async def create_user(
         role=user_data.role,
         data_limit_gb=user_data.data_limit_gb,
         connection_limit=user_data.connection_limit,
+        speed_limit_mbps=user_data.speed_limit_mbps,
         expiry_date=expiry_date,
         openvpn_enabled=user_data.openvpn_enabled,
         wireguard_enabled=user_data.wireguard_enabled,
@@ -189,19 +191,32 @@ async def create_user(
     # Generate WireGuard keys if enabled
     if user_data.wireguard_enabled:
         try:
-            from ..services.wireguard import generate_wireguard_keys
-            keys = generate_wireguard_keys()
+            from ..services.wireguard import wireguard_service
+            keys = wireguard_service.generate_keypair()
+            keys["ip"] = wireguard_service.allocate_ip()
             new_user.wireguard_private_key = keys['private_key']
             new_user.wireguard_public_key = keys['public_key']
             new_user.wireguard_ip = keys['ip']
+            try:
+                settings = wireguard_service._load_settings()
+                if settings.get("wg_preshared_key_enabled", "1") == "1":
+                    new_user.wireguard_preshared_key = wireguard_service.generate_preshared_key()
+            except Exception:
+                pass
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"Failed to generate WireGuard keys: {e}. Disabling WireGuard for this user.")
             new_user.wireguard_enabled = False
-    
+
     db.add(new_user)
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.exception("Failed to create user %s", user_data.username)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}"
+        )
     db.refresh(new_user)
 
     # Auto-Provisioning Pipeline (F5 - User Requested)
