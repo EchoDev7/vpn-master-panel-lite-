@@ -114,11 +114,27 @@ class OpenVPNService:
             "status_version": "2",
             "management":     "127.0.0.1 7505",
             # Push options
-            "redirect_gateway": "1",
-            "dns":              "1.1.1.1,8.8.8.8",
+            "redirect_gateway":  "1",
+            "dns":               "1.1.1.1,8.8.8.8",
             "block_outside_dns": "1",
             # Auth
-            "auth_mode": "password",
+            "auth_mode":    "password",
+            "duplicate_cn": "0",
+            # Compression (disabled by default)
+            "compress":          "",
+            "allow_compression": "0",
+            # TLS profile
+            "tls_cert_profile": "preferred",
+            # Anti-censorship extras
+            "inter_client":             "0",
+            "port_share":               "",
+            "block_iran_ips":           "0",
+            "http_proxy_enabled":       "0",
+            "http_proxy_host":          "",
+            "http_proxy_port":          "80",
+            "http_proxy_custom_header": "",
+            "remote_address_type":      "auto",
+            "remote_domain":            "",
             # System
             "user":      "nobody",
             "group":     "nogroup",
@@ -160,9 +176,27 @@ class OpenVPNService:
                 "UDP/443 is blocked in Iran. Use TCP/443 for reliable bypass."
             )
 
-        if settings.get("compress") and settings.get("compress") != "none":
+        proto = settings.get("protocol", "tcp")
+        if proto == "udp":
+            fragment = settings.get("fragment", "0")
+            mssfix   = int(settings.get("mssfix", "1450"))
+            if (not fragment or fragment == "0") and mssfix > 1400:
+                warnings.append(
+                    "UDP mode with no fragment and high mssfix may cause packet loss "
+                    "on Iranian ISPs with MTU < 1500. Consider fragment=1200 or mssfix=1300."
+                )
+
+        if settings.get("tls_control_channel") in ("none", "") and proto == "tcp":
             warnings.append(
-                "Compression enabled. This can leak information (VORACLE attack)."
+                "tls-crypt disabled on TCP/443: DPI can identify OpenVPN TLS ClientHello. "
+                "Enable tls-crypt for Iran bypass."
+            )
+
+        compress = settings.get("compress", "")
+        if compress and compress not in ("", "none"):
+            warnings.append(
+                f"Compression '{compress}' enabled. This leaks information (VORACLE attack) "
+                "and makes traffic identifiable by DPI."
             )
 
         return warnings
@@ -250,6 +284,11 @@ class OpenVPNService:
         tls_suites = s.get("tls_cipher_suites", "")
         if tls_suites:
             conf.append(f"tls-ciphersuites {tls_suites}")
+        # Certificate profile (preferred = modern ECDSA+RSA hybrid)
+        tls_prof = s.get("tls_cert_profile", "preferred")
+        if tls_prof and tls_prof != "preferred":
+            # 'preferred' is the OpenVPN default; only emit if changed
+            conf.append(f"tls-cert-profile {tls_prof}")
 
         # TLS renegotiation interval
         conf.append(f"reneg-sec {s.get('reneg_sec', '3600')}")
@@ -269,7 +308,7 @@ class OpenVPNService:
         if s.get("float", "1") == "1":
             conf.append("float")
 
-        # duplicate-cn: allow same cert from multiple devices (not recommended for security)
+        # duplicate-cn: allow same cert from multiple devices (reduces security)
         if s.get("duplicate_cn") == "1":
             conf.append("duplicate-cn")
 
@@ -301,24 +340,44 @@ class OpenVPNService:
         if s.get("tls_timeout"):
             conf.append(f"tls-timeout {s['tls_timeout']}")
 
-        # Compression — DISABLED by default (VORACLE attack; also DPI detectable)
-        # Only enable if explicitly set AND allow-compression yes
+        # Compression — DISABLED by default (VORACLE attack; also DPI-detectable)
+        # Only enable if explicitly set to a non-empty, non-"none" algorithm.
         compress_val = s.get("compress", "")
+        allow_comp   = s.get("allow_compression", "0")
         if compress_val and compress_val not in ("", "none"):
             conf.append(f"compress {compress_val}")
             conf.append(f'push "compress {compress_val}"')
             conf.append("allow-compression yes")
+        elif allow_comp == "1":
+            # Asymmetric: server sends uncompressed, but accepts compressed from client
+            conf.append("compress")
+            conf.append("allow-compression asym")
         else:
-            # Explicitly reject if client tries to negotiate compression
+            # Fully disable — client also told to not compress
             conf.append("compress")
             conf.append("push \"compress\"")
 
-        # ── Port Sharing (Iran bypass: share port 443 with HTTPS) ────
+        # ── Anti-Censorship (Iran DPI bypass techniques) ─────────────
         conf += ["", "# ── Anti-Censorship ──────────────────────────────"]
+
+        # Port sharing: if DPI probes port 443 with raw HTTPS, OpenVPN
+        # transparently forwards to a real HTTPS backend (e.g. nginx on 8443).
+        # This makes the port respond correctly to both VPN and HTTPS probes.
         port_share = s.get("port_share", "")
         if port_share:
-            # e.g. "localhost 443" to share with nginx/Apache
             conf.append(f"port-share {port_share}")
+
+        # Push socket buffer auto-tuning to clients (speeds up Iran VPS links)
+        conf.append('push "sndbuf 0"')
+        conf.append('push "rcvbuf 0"')
+
+        # Block server→Iran outbound: prevent DPI from flagging our VPS as
+        # "server receiving VPN that initiates Iranian IP connections".
+        # We do this via iptables in a script rather than inside server.conf.
+        if s.get("block_iran_ips") == "1":
+            conf.append(
+                "# block_iran_ips=1: add iptables rules via PostUp script or custom config"
+            )
 
         # ── System ──────────────────────────────────────────────────
         conf += ["", "# ── System ───────────────────────────────────────"]
@@ -358,7 +417,8 @@ class OpenVPNService:
             conf.append('push "block-outside-dns"')
 
         # Client-to-client (disabled by default — privacy)
-        if s.get("client_to_client") == "1":
+        # Support both the DB key and the UI alias key
+        if s.get("client_to_client") == "1" or s.get("inter_client") == "1":
             conf.append("client-to-client")
 
         # Additional routes
@@ -541,18 +601,31 @@ class OpenVPNService:
             conf.append(f"tls-ciphersuites {tls_suites}")
 
         # Compression — DISABLED (VORACLE; DPI fingerprint)
-        conf.append("compress")      # negotiate off
+        compress_val = s.get("compress", "")
+        if compress_val and compress_val not in ("", "none"):
+            conf.append(f"compress {compress_val}")
+        else:
+            conf.append("compress")   # negotiate off; server will push "compress" too
 
         # ── MTU / MSS ─────────────────────────────────────────────────
+        # These must match server-side values to avoid asymmetric MSS clamping.
+        # TCP/443: tun-mtu 1500, mssfix 1450 (room for OpenVPN+TLS+TCP headers)
+        # UDP: tun-mtu 1500, mssfix 1420 is safer for restrictive ISPs
         conf += [
             "",
-            "# ── MTU / MSS ───────────────────────────────────────────",
+            "# ── MTU / MSS (must match server) ───────────────────────",
             f"tun-mtu {s.get('tun_mtu','1500')}",
             f"mssfix  {s.get('mssfix','1450')}",
         ]
         fragment = s.get("fragment", "0")
         if fragment and fragment != "0":
             conf.append(f"fragment {fragment}")
+
+        # Socket buffer auto-tuning (server also pushes this)
+        conf += [
+            "sndbuf 0",
+            "rcvbuf 0",
+        ]
 
         # ── Routing ──────────────────────────────────────────────────
         conf += [
@@ -565,14 +638,17 @@ class OpenVPNService:
         # ── Platform-specific ─────────────────────────────────────────
         conf += [
             "",
-            "# ── Platform-specific (Windows: DNS leak protection) ─────",
-            "block-outside-dns",    # Windows 10+ DNS leak fix; harmless on other OS
+            "# ── Platform-specific ───────────────────────────────────",
+            # Windows 10+ DNS leak fix; safely ignored by Android/iOS/macOS
+            "block-outside-dns",
+            # auth-nocache: don't keep credentials in memory
+            "auth-nocache",
             "",
             "# ── Logging ─────────────────────────────────────────────",
             f"verb {s.get('verb','3')}",
             "",
             "# ── Credentials ─────────────────────────────────────────",
-            "auth-user-pass",       # prompt for username/password
+            "auth-user-pass",       # prompt for username/password on connect
         ]
 
         # ── HTTP proxy (domain fronting / Iran bypass) ────────────────
