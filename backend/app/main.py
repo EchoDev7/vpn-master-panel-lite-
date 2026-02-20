@@ -272,41 +272,57 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     """WebSocket endpoint for real-time updates"""
     from .websocket.manager import manager
     from .websocket.handlers import WebSocketHandler
-    from .utils.security import decode_token
-    
+    from jose import JWTError
+    from .config import settings as app_settings
+    from jose import jwt as jose_jwt
+
+    # Validate token before accepting the WebSocket — decode_token raises
+    # HTTPException which WebSocket cannot handle gracefully, so we use
+    # jose directly and close with the correct WebSocket close code.
     try:
-        # Verify token
-        payload = decode_token(token)
-        if not payload:
-            await websocket.close(code=1008, reason="Invalid token")
-            return
-            
-        user_id = payload.get("sub")
-        is_admin = payload.get("is_admin", False)
-        
-        # Connect
+        payload = jose_jwt.decode(
+            token, app_settings.SECRET_KEY, algorithms=[app_settings.ALGORITHM]
+        )
+    except JWTError as exc:
+        logger.warning(f"WebSocket rejected — invalid token: {exc}")
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+    except Exception as exc:
+        logger.error(f"WebSocket token decode error: {exc}")
+        await websocket.close(code=1011, reason="Internal error")
+        return
+
+    user_id = payload.get("sub")
+    if not user_id:
+        await websocket.close(code=1008, reason="Invalid token payload")
+        return
+
+    is_admin = payload.get("role") in ("admin", "super_admin")
+
+    try:
+        # Accept and register connection
         await manager.connect(websocket, user_id, is_admin)
-        
+
         try:
             while True:
                 # Receive messages from client
                 data = await websocket.receive_text()
                 message = json.loads(data)
-                
+
                 # Handle message
                 await WebSocketHandler.handle_message(websocket, message)
-                
+
         except WebSocketDisconnect:
             manager.disconnect(websocket)
         except Exception as e:
             logger.error(f"WebSocket error: {e}")
             manager.disconnect(websocket)
-            
+
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
         try:
             await websocket.close(code=1011, reason="Internal error")
-        except:
+        except Exception:
             pass
 
 
