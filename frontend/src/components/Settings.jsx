@@ -710,49 +710,98 @@ const Settings = () => {
             <div className="mt-6 pt-6 border-t border-gray-700">
                 <button onClick={() => confirmAction(
                     "Request Let's Encrypt SSL",
-                    "This will request certificates for BOTH your Panel Domain and Subscription Domain.\n\nPrerequisites:\n1. BOTH domains MUST point to this server's IP in Cloudflare (Proxy ON).\n2. Port 80 must be open.\n\nContinue?",
+                    "This will request certificates for BOTH your Panel Domain and Subscription Domain.\n\nPrerequisites:\n1. BOTH domains MUST point to this server's IP (Cloudflare Proxy OFF / DNS-only).\n2. Port 80 will be opened automatically by the panel if needed.\n\nContinue?",
                     async () => {
                         setConfirmation(prev => ({ ...prev, isOpen: false }));
                         setSslStream({ isOpen: true, logs: 'Initializing Let\'s Encrypt client...\n', loading: true });
-                        try {
+
+                        /**
+                         * Helper: POST /settings/ssl/request and stream the text response
+                         * into the log window line by line.
+                         * Returns true if the stream ended with "DONE:" (success indicator).
+                         */
+                        const streamSSL = async (domain, email) => {
                             const token = localStorage.getItem('access_token');
                             const baseURL = (import.meta.env.VITE_API_URL || '') + '/api/v1/settings/ssl/request';
 
-                            // Request for Panel Domain
-                            if (settings.panel_domain) {
-                                setSslStream(prev => ({ ...prev, logs: prev.logs + `>>> Starting SSL process for Panel Domain: ${settings.panel_domain}\n` }));
-                                const response1 = await fetch(baseURL, {
+                            let response;
+                            try {
+                                response = await fetch(baseURL, {
                                     method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                    body: JSON.stringify({ domain: settings.panel_domain, email: settings.ssl_email || 'admin@example.com' })
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${token}`,
+                                        'Accept': 'text/plain',
+                                    },
+                                    body: JSON.stringify({ domain, email }),
                                 });
-                                const reader1 = response1.body.getReader();
-                                const decoder1 = new TextDecoder('utf-8');
-                                while (true) {
-                                    const { done, value } = await reader1.read();
-                                    if (done) break;
-                                    setSslStream(prev => ({ ...prev, logs: prev.logs + decoder1.decode(value, { stream: true }) }));
-                                }
+                            } catch (networkErr) {
+                                // Network-level failure (e.g. DNS, CORS, connection refused)
+                                setSslStream(prev => ({
+                                    ...prev,
+                                    logs: prev.logs + `\nNETWORK ERROR: Could not reach the backend.\n` +
+                                        `  Detail: ${networkErr.message}\n` +
+                                        `  Check: Is the backend running on port 8001? Is Nginx correctly proxying /api/?\n`
+                                }));
+                                return false;
                             }
 
-                            // Request for Subscription Domain
-                            if (settings.subscription_domain) {
-                                setSslStream(prev => ({ ...prev, logs: prev.logs + `\n>>> Starting SSL process for Subscription Domain: ${settings.subscription_domain}\n` }));
-                                const response2 = await fetch(baseURL, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                    body: JSON.stringify({ domain: settings.subscription_domain, email: settings.ssl_email || 'admin@example.com' })
-                                });
-                                const reader2 = response2.body.getReader();
-                                const decoder2 = new TextDecoder('utf-8');
-                                while (true) {
-                                    const { done, value } = await reader2.read();
-                                    if (done) break;
-                                    setSslStream(prev => ({ ...prev, logs: prev.logs + decoder2.decode(value, { stream: true }) }));
-                                }
+                            if (!response.ok) {
+                                // HTTP error (4xx / 5xx) — try to read body for details
+                                let errBody = '';
+                                try { errBody = await response.text(); } catch (_) {}
+                                setSslStream(prev => ({
+                                    ...prev,
+                                    logs: prev.logs + `\nHTTP ${response.status} ERROR: ${response.statusText}\n${errBody}\n`
+                                }));
+                                return false;
                             }
+
+                            // Stream the body line by line
+                            const reader = response.body.getReader();
+                            const decoder = new TextDecoder('utf-8');
+                            let accum = '';
+                            let lastChunk = '';
+
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                const chunk = decoder.decode(value, { stream: true });
+                                lastChunk = chunk;
+                                accum += chunk;
+                                setSslStream(prev => ({ ...prev, logs: prev.logs + chunk }));
+                            }
+
+                            return accum.includes('DONE:');
+                        };
+
+                        try {
+                            const email = settings.ssl_email || 'admin@example.com';
+
+                            // Panel domain
+                            if (settings.panel_domain) {
+                                setSslStream(prev => ({
+                                    ...prev,
+                                    logs: prev.logs + `\n${'─'.repeat(60)}\n>>> Panel Domain: ${settings.panel_domain}\n${'─'.repeat(60)}\n`
+                                }));
+                                await streamSSL(settings.panel_domain, email);
+                            }
+
+                            // Subscription domain (only if different from panel domain)
+                            if (settings.subscription_domain && settings.subscription_domain !== settings.panel_domain) {
+                                setSslStream(prev => ({
+                                    ...prev,
+                                    logs: prev.logs + `\n${'─'.repeat(60)}\n>>> Subscription Domain: ${settings.subscription_domain}\n${'─'.repeat(60)}\n`
+                                }));
+                                await streamSSL(settings.subscription_domain, email);
+                            }
+
+                            setSslStream(prev => ({ ...prev, logs: prev.logs + '\n✅ All SSL requests completed.\n' }));
                         } catch (err) {
-                            setSslStream(prev => ({ ...prev, logs: prev.logs + `\nHTTP ERROR: ${err.message}` }));
+                            setSslStream(prev => ({
+                                ...prev,
+                                logs: prev.logs + `\nUNEXPECTED ERROR: ${err.message}\n`
+                            }));
                         } finally {
                             setSslStream(prev => ({ ...prev, loading: false }));
                         }
@@ -760,10 +809,13 @@ const Settings = () => {
                     "Request SSL Certificate",
                     "purple"
                 )}
-                    disabled={!settings.panel_domain}
-                    className={`w-full ${settings.panel_domain ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-gray-700 text-gray-500 cursor-not-allowed'} px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors`}>
+                    disabled={!settings.panel_domain || !settings.ssl_email}
+                    className={`w-full ${(settings.panel_domain && settings.ssl_email) ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-gray-700 text-gray-500 cursor-not-allowed'} px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors`}>
                     <Shield className="w-4 h-4" /> Issue Let's Encrypt SSL
                 </button>
+                {!settings.ssl_email && (
+                    <p className="text-yellow-400 text-xs mt-2 text-center">⚠️ Please enter your Admin Email above before requesting SSL.</p>
+                )}
             </div>
         </div>
     );
