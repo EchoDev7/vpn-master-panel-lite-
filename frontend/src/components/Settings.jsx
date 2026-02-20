@@ -680,237 +680,408 @@ const Settings = () => {
         </div>
     );
 
+    // ===== Shared SSL stream helper (used in Domain & SSL tab) =====
+    const streamSSL = async (domain, email, httpsPort) => {
+        const token = localStorage.getItem('access_token');
+        const apiBase = import.meta.env.VITE_API_URL || '';
+        const url = `${apiBase}/api/v1/settings/ssl/request`;
+
+        setSslStream(prev => ({
+            ...prev,
+            logs: prev.logs + `INFO: Requesting SSL for ${domain} (port ${httpsPort})...\n`
+        }));
+
+        let response;
+        try {
+            response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'text/plain',
+                    'X-Accel-Buffering': 'no',
+                    'Cache-Control': 'no-cache',
+                },
+                body: JSON.stringify({ domain, email, https_port: httpsPort }),
+            });
+        } catch (networkErr) {
+            setSslStream(prev => ({
+                ...prev,
+                logs: prev.logs +
+                    `\nNETWORK ERROR: Could not reach the backend.\n` +
+                    `  Detail: ${networkErr.message}\n\n` +
+                    `  ── Troubleshooting Checklist ──────────────────\n` +
+                    `  1. Run on server: sudo bash /opt/vpn-master-panel/diagnose.sh\n` +
+                    `  2. Backend up?  systemctl status vpnmaster-backend\n` +
+                    `  3. Nginx up?    systemctl status nginx\n` +
+                    `  4. Timeout ok?  grep proxy_read_timeout /etc/nginx/sites-enabled/*\n` +
+                    `     → Must be ≥ 300s for SSL issuance\n`
+            }));
+            return false;
+        }
+
+        if (!response.ok) {
+            let errBody = '';
+            try { errBody = await response.text(); } catch (_) { }
+            setSslStream(prev => ({
+                ...prev,
+                logs: prev.logs +
+                    `\nHTTP ${response.status} ERROR: ${response.statusText}\n` +
+                    (errBody ? `  Server: ${errBody.slice(0, 400)}\n` : '') +
+                    (response.status === 401 ? `  → Session expired — please log out and back in.\n` :
+                     response.status === 422 ? `  → Invalid domain/email format.\n` :
+                     response.status >= 500   ? `  → Backend error. Check: journalctl -u vpnmaster-backend -n 50\n` : '')
+            }));
+            return false;
+        }
+
+        if (!response.body) {
+            setSslStream(prev => ({
+                ...prev,
+                logs: prev.logs + `\nERROR: Browser does not support streaming. Try Chrome/Edge 85+.\n`
+            }));
+            return false;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let accum = '';
+        while (true) {
+            let done, value;
+            try {
+                ({ done, value } = await reader.read());
+            } catch (readErr) {
+                setSslStream(prev => ({
+                    ...prev,
+                    logs: prev.logs + `\nSTREAM ERROR: ${readErr.message}\n` +
+                        `  Connection interrupted — Nginx may have timed out.\n`
+                }));
+                return false;
+            }
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            accum += chunk;
+            setSslStream(prev => ({ ...prev, logs: prev.logs + chunk }));
+        }
+        return accum.includes('DONE:');
+    };
+
     // ===== General Tabs =====
-    const renderDomainSsl = () => (
+    const renderDomainSsl = () => {
+        const panelPort   = parseInt(settings.panel_https_port  || '8443', 10);
+        const subPort     = parseInt(settings.sub_https_port    || '443',  10);
+        const panelDomain = settings.panel_domain || '';
+        const subDomain   = settings.subscription_domain || '';
+        const panelUrl    = panelDomain
+            ? (panelPort === 443 ? `https://${panelDomain}` : `https://${panelDomain}:${panelPort}`)
+            : '';
+        const subUrl      = subDomain
+            ? (subPort === 443 ? `https://${subDomain}` : `https://${subDomain}:${subPort}`)
+            : '';
+
+        return (
         <div className="space-y-6">
+            {/* ── Architecture info ── */}
             <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4">
                 <div className="flex items-start gap-3">
                     <Globe className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
                     <div>
-                        <p className="text-purple-300 font-semibold text-sm">3-Domain Separation Architecture</p>
-                        <p className="text-gray-400 text-xs mt-1">For maximum anti-filtering resistance, we use 3 separate domains:</p>
-                        <ul className="text-gray-400 text-xs mt-2 list-disc ml-4 space-y-1">
-                            <li><b>Panel Domain:</b> Used only by YOU to access this dashboard. (Proxy: ON 🟠)</li>
-                            <li><b>Subscription Domain:</b> Given to users to update their configs. (Proxy: ON 🟠)</li>
-                            <li><b>VPN Config Domain:</b> Configured in <i>OpenVPN &gt; Server Network &gt; Custom Domain</i>. This is the raw connection core. (Proxy: OFF ⚪). <span className="text-amber-400">Note: OpenVPN does NOT need Let's Encrypt for this; it uses intrinsic TLS.</span></li>
-                        </ul>
+                        <p className="text-purple-300 font-semibold text-sm">Domain Architecture (3-Domain Separation)</p>
+                        <div className="mt-2 space-y-1.5">
+                            <div className="flex items-start gap-2">
+                                <span className="text-amber-400 text-xs mt-0.5 shrink-0">🟠</span>
+                                <p className="text-gray-300 text-xs"><b className="text-white">Panel Domain</b> — Only YOU use this to log in. Cloudflare Proxy ON is fine.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <span className="text-amber-400 text-xs mt-0.5 shrink-0">⚪</span>
+                                <p className="text-gray-300 text-xs"><b className="text-white">Subscription Domain</b> — Given to users for config updates. Must be DNS-only during SSL issuance.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <span className="text-gray-400 text-xs mt-0.5 shrink-0">🔵</span>
+                                <p className="text-gray-300 text-xs"><b className="text-white">VPN Domain</b> — Set in OpenVPN → Network → Custom Domain. Uses its own TLS, no Let's Encrypt needed.</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <SectionTitle>Domain Setup (Proxy ON 🟠)</SectionTitle>
-            <div className="grid grid-cols-2 gap-4">
-                <S_Input {...sp} settingKey="panel_domain" label="1. Admin Panel Domain" placeholder="panel.yourdomain.com" tip="Used to access this dashboard securely." />
-                <S_Input {...sp} settingKey="subscription_domain" label="2. Subscription Domain" placeholder="sub.yourdomain.com" tip="Used for user subscription update links." />
+            {/* ── Panel domain + port ── */}
+            <SectionTitle>Admin Panel</SectionTitle>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="sm:col-span-2">
+                    <S_Input {...sp} settingKey="panel_domain"
+                        label="Panel Domain"
+                        placeholder="panel.yourdomain.com"
+                        tip="Your admin dashboard domain. DNS A record must point to this server." />
+                </div>
+                <div>
+                    <S_Select {...sp} settingKey="panel_https_port"
+                        label="Panel HTTPS Port"
+                        tip="Port 8443 = OpenVPN uses 443. Change to 443 only if OpenVPN is on another port."
+                        options={[
+                            { value: '8443', label: '8443 (OpenVPN on 443)' },
+                            { value: '443',  label: '443  (standard)' },
+                            { value: '8444', label: '8444 (custom)' },
+                        ]} />
+                </div>
+            </div>
+            {panelUrl && (
+                <div className="flex items-center gap-2 mt-1 bg-gray-800/50 rounded px-3 py-2 border border-gray-700">
+                    <span className="text-gray-400 text-xs shrink-0">📌 Panel URL:</span>
+                    <a href={panelUrl} target="_blank" rel="noopener noreferrer"
+                       className="text-green-400 text-xs font-mono hover:underline break-all">{panelUrl}</a>
+                </div>
+            )}
+
+            {/* ── Subscription domain + port ── */}
+            <SectionTitle>Subscription Domain</SectionTitle>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="sm:col-span-2">
+                    <S_Input {...sp} settingKey="subscription_domain"
+                        label="Subscription Domain"
+                        placeholder="sub.yourdomain.com"
+                        tip="Given to VPN users for auto-updating configs. Can be the same server, different subdomain." />
+                </div>
+                <div>
+                    <S_Select {...sp} settingKey="sub_https_port"
+                        label="Sub HTTPS Port"
+                        tip="Port 443 works for subscription because OpenVPN and Nginx don't conflict on this endpoint."
+                        options={[
+                            { value: '443',  label: '443  (standard ✅)' },
+                            { value: '8443', label: '8443 (if 443 busy)' },
+                            { value: '8444', label: '8444 (custom)' },
+                        ]} />
+                </div>
+            </div>
+            {subUrl && (
+                <div className="flex items-center gap-2 mt-1 bg-gray-800/50 rounded px-3 py-2 border border-gray-700">
+                    <span className="text-gray-400 text-xs shrink-0">📌 Sub URL:</span>
+                    <a href={subUrl} target="_blank" rel="noopener noreferrer"
+                       className="text-blue-400 text-xs font-mono hover:underline break-all">{subUrl}/sub/YOUR_UUID</a>
+                </div>
+            )}
+
+            {/* ── Port conflict notice ── */}
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                <p className="text-amber-300 text-xs font-semibold mb-1">⚠️ Why port 8443 for panel?</p>
+                <p className="text-gray-300 text-xs">
+                    OpenVPN is configured on <b>TCP/443</b> (best Iran anti-censorship setting).
+                    Both Nginx and OpenVPN cannot listen on 443 simultaneously.
+                    So the admin panel uses <b>8443</b>. Port 8443 is already open in the firewall.
+                    Subscription uses 443 because it goes through FastAPI, not Nginx directly.
+                </p>
             </div>
 
-            <SectionTitle>Let's Encrypt SSL (ZeroSSL / Certbot)</SectionTitle>
-            <S_Input {...sp} settingKey="ssl_email" label="Admin Email (For SSL Expiration Alerts)" placeholder="admin@yourdomain.com" />
+            {/* ── SSL email ── */}
+            <SectionTitle>Let's Encrypt SSL</SectionTitle>
+            <S_Input {...sp} settingKey="ssl_email"
+                label="Admin Email (SSL expiry alerts)"
+                placeholder="admin@yourdomain.com"
+                tip="Let's Encrypt will email you 30 days before cert expiry." />
 
-            <div className="mt-6 pt-6 border-t border-gray-700">
-                <button onClick={() => confirmAction(
-                    "Request Let's Encrypt SSL",
-                    "This will request certificates for BOTH your Panel Domain and Subscription Domain.\n\nPrerequisites:\n1. BOTH domains MUST point to this server's IP (Cloudflare Proxy OFF / DNS-only).\n2. Port 80 will be opened automatically by the panel if needed.\n\nContinue?",
-                    async () => {
-                        setConfirmation(prev => ({ ...prev, isOpen: false }));
-                        setSslStream({ isOpen: true, logs: 'Initializing Let\'s Encrypt client...\n', loading: true });
+            {/* ── Prerequisites ── */}
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                <p className="text-blue-300 font-semibold text-sm mb-2">📋 Before clicking "Issue SSL":</p>
+                <ol className="text-gray-300 text-xs space-y-1.5 list-decimal ml-4">
+                    <li>DNS <b>A record</b> for each domain must point to this server's IP</li>
+                    <li><b>Cloudflare</b>: set to <b className="text-gray-100">"DNS only" ⚪</b> (NOT Proxied 🟠) during issuance</li>
+                    <li><b>Port 80</b> must be reachable from internet (check cloud/hosting firewall)</li>
+                    <li>After cert is issued, you can turn Cloudflare proxy back ON if you want</li>
+                    <li>Re-issuing for a domain that <b>already has a cert is safe</b> — certbot skips it</li>
+                </ol>
+            </div>
 
-                        /**
-                         * Helper: POST /settings/ssl/request and stream the text response
-                         * into the log window line by line.
-                         * Returns true if the stream ended with "DONE:" (success indicator).
-                         */
-                        /**
-                         * streamSSL — POST to the SSL endpoint and stream live output.
-                         *
-                         * The SSL process can take 60–180 s (certbot + DNS check + cert download).
-                         * We use fetch() with no timeout so the browser waits as long as needed.
-                         * Nginx MUST have proxy_read_timeout ≥ 300s and proxy_buffering off.
-                         */
-                        const streamSSL = async (domain, email) => {
-                            const token = localStorage.getItem('access_token');
-
-                            // Build the URL — use VITE_API_URL if set, else use a relative path
-                            // that works whether the browser is on port 3000 (Nginx) or 8000.
-                            const apiBase = import.meta.env.VITE_API_URL || '';
-                            const url = `${apiBase}/api/v1/settings/ssl/request`;
-
-                            // Show diagnostic curl command in the log so the user can test manually
-                            setSslStream(prev => ({
-                                ...prev,
-                                logs: prev.logs +
-                                    `INFO: Sending request to: ${url}\n` +
-                                    `INFO: (Test manually on server with diagnose.sh)\n`
-                            }));
-
-                            // AbortController lets us add a manual "Cancel" button later
-                            const controller = new AbortController();
-
-                            let response;
-                            try {
-                                response = await fetch(url, {
-                                    method: 'POST',
-                                    signal: controller.signal,
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                        'Authorization': `Bearer ${token}`,
-                                        'Accept': 'text/plain',
-                                        // Hint to any proxy/CDN: do not buffer this response
-                                        'X-Accel-Buffering': 'no',
-                                        'Cache-Control': 'no-cache',
-                                    },
-                                    body: JSON.stringify({ domain, email }),
-                                });
-                            } catch (networkErr) {
-                                // Network-level failure — connection refused, DNS fail, CORS, etc.
-                                setSslStream(prev => ({
-                                    ...prev,
-                                    logs: prev.logs +
-                                        `\nNETWORK ERROR: Could not reach the backend.\n` +
-                                        `  Detail: ${networkErr.message}\n\n` +
-                                        `  ── Troubleshooting Checklist ──────────────────────────\n` +
-                                        `  1. Run on server:  sudo bash /opt/vpn-master-panel/diagnose.sh\n` +
-                                        `  2. Is backend up?  systemctl status vpnmaster-backend\n` +
-                                        `  3. Is Nginx up?    systemctl status nginx\n` +
-                                        `  4. Nginx timeout?  grep proxy_read_timeout /etc/nginx/sites-enabled/*\n` +
-                                        `     → Must be ≥ 300s for SSL issuance\n` +
-                                        `  5. Buffering off?  grep proxy_buffering /etc/nginx/sites-enabled/*\n` +
-                                        `     → Must be: proxy_buffering off\n` +
-                                        `  6. Quick fix:      nginx -t && systemctl reload nginx\n`
-                                }));
-                                return false;
-                            }
-
-                            if (!response.ok) {
-                                // HTTP error (4xx / 5xx) — try to read body for details
-                                let errBody = '';
-                                try { errBody = await response.text(); } catch (_) { }
-                                setSslStream(prev => ({
-                                    ...prev,
-                                    logs: prev.logs +
-                                        `\nHTTP ${response.status} ERROR: ${response.statusText}\n` +
-                                        (errBody ? `  Server says: ${errBody.slice(0, 500)}\n` : '') +
-                                        (response.status === 401
-                                            ? `  → Session expired. Please log out and log in again.\n`
-                                            : response.status === 422
-                                            ? `  → Invalid request body (domain/email format check failed).\n`
-                                            : response.status >= 500
-                                            ? `  → Backend error. Check: journalctl -u vpnmaster-backend -n 50\n`
-                                            : '')
-                                }));
-                                return false;
-                            }
-
-                            // ── Stream the response body chunk by chunk ──────────────
-                            // Each chunk is a line (or several lines) from certbot output.
-                            // We append them to the log as they arrive.
-                            if (!response.body) {
-                                setSslStream(prev => ({
-                                    ...prev,
-                                    logs: prev.logs + `\nERROR: Browser does not support streaming (ReadableStream API).\n` +
-                                        `  Try Chrome/Edge 85+ or Firefox 65+.\n`
-                                }));
-                                return false;
-                            }
-
-                            const reader = response.body.getReader();
-                            const decoder = new TextDecoder('utf-8');
-                            let accum = '';
-
-                            // eslint-disable-next-line no-constant-condition
-                            while (true) {
-                                let done, value;
-                                try {
-                                    ({ done, value } = await reader.read());
-                                } catch (readErr) {
-                                    setSslStream(prev => ({
-                                        ...prev,
-                                        logs: prev.logs + `\nSTREAM ERROR: ${readErr.message}\n` +
-                                            `  The connection was interrupted. Nginx may have timed out.\n` +
-                                            `  Increase proxy_read_timeout in /etc/nginx/sites-available/vpnmaster\n`
-                                    }));
-                                    return false;
-                                }
-                                if (done) break;
-                                const chunk = decoder.decode(value, { stream: true });
-                                accum += chunk;
-                                setSslStream(prev => ({ ...prev, logs: prev.logs + chunk }));
-                            }
-
-                            return accum.includes('DONE:');
-                        };
-
-                        try {
+            {/* ── SSL buttons — separate for panel and sub ── */}
+            <div className="space-y-3 pt-4 border-t border-gray-700">
+                {/* Panel SSL */}
+                <button
+                    onClick={() => confirmAction(
+                        `Issue SSL for Panel (${panelDomain || '—'})`,
+                        `This will request a Let's Encrypt certificate for:\n  ${panelDomain}\n\nAfter success, your panel will be at:\n  ${panelUrl || `https://${panelDomain}:${panelPort}`}\n\nPrerequisites:\n• DNS A record → this server's IP\n• Cloudflare: DNS-only ⚪\n• Port 80 open in hosting firewall\n\nContinue?`,
+                        async () => {
+                            setConfirmation(prev => ({ ...prev, isOpen: false }));
+                            setSslStream({ isOpen: true, logs: '▶ Starting SSL for Panel domain...\n', loading: true });
                             const email = settings.ssl_email || 'admin@example.com';
-
-                            // Panel domain
-                            if (settings.panel_domain) {
-                                setSslStream(prev => ({
-                                    ...prev,
-                                    logs: prev.logs + `\n${'─'.repeat(60)}\n>>> Panel Domain: ${settings.panel_domain}\n${'─'.repeat(60)}\n`
-                                }));
-                                await streamSSL(settings.panel_domain, email);
+                            try {
+                                await streamSSL(panelDomain, email, panelPort);
+                                setSslStream(prev => ({ ...prev, loading: false,
+                                    logs: prev.logs + `\n✅ Done!\n📌 Panel: ${panelUrl}\n💡 Bookmark this URL!\n` }));
+                            } catch (e) {
+                                setSslStream(prev => ({ ...prev, loading: false,
+                                    logs: prev.logs + `\nERROR: ${e.message}\n` }));
                             }
-
-                            // Subscription domain (only if different from panel domain)
-                            if (settings.subscription_domain && settings.subscription_domain !== settings.panel_domain) {
-                                setSslStream(prev => ({
-                                    ...prev,
-                                    logs: prev.logs + `\n${'─'.repeat(60)}\n>>> Subscription Domain: ${settings.subscription_domain}\n${'─'.repeat(60)}\n`
-                                }));
-                                await streamSSL(settings.subscription_domain, email);
-                            }
-
-                            setSslStream(prev => ({ ...prev, logs: prev.logs + '\n✅ All SSL requests completed.\n' }));
-                        } catch (err) {
-                            setSslStream(prev => ({
-                                ...prev,
-                                logs: prev.logs + `\nUNEXPECTED ERROR: ${err.message}\n`
-                            }));
-                        } finally {
-                            setSslStream(prev => ({ ...prev, loading: false }));
-                        }
-                    },
-                    "Request SSL Certificate",
-                    "purple"
-                )}
-                    disabled={!settings.panel_domain || !settings.ssl_email}
-                    className={`w-full ${(settings.panel_domain && settings.ssl_email) ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-gray-700 text-gray-500 cursor-not-allowed'} px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors`}>
-                    <Shield className="w-4 h-4" /> Issue Let's Encrypt SSL
+                        },
+                        'Issue Panel SSL', 'purple'
+                    )}
+                    disabled={!panelDomain || !settings.ssl_email}
+                    className={`w-full px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors
+                        ${(panelDomain && settings.ssl_email)
+                            ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                            : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}>
+                    <Shield className="w-4 h-4" />
+                    Issue SSL for Panel Domain
+                    {panelDomain && <span className="text-xs opacity-70 ml-1">({panelDomain} → port {panelPort})</span>}
                 </button>
+
+                {/* Sub SSL */}
+                <button
+                    onClick={() => confirmAction(
+                        `Issue SSL for Subscription (${subDomain || '—'})`,
+                        `This will request a Let's Encrypt certificate for:\n  ${subDomain}\n\nAfter success, subscription links will use:\n  ${subUrl || `https://${subDomain}`}\n\nPrerequisites:\n• DNS A record → this server's IP\n• Cloudflare: DNS-only ⚪\n• Port 80 open in hosting firewall\n\nNote: This will NOT affect the panel certificate.\n\nContinue?`,
+                        async () => {
+                            setConfirmation(prev => ({ ...prev, isOpen: false }));
+                            setSslStream({ isOpen: true, logs: '▶ Starting SSL for Subscription domain...\n', loading: true });
+                            const email = settings.ssl_email || 'admin@example.com';
+                            try {
+                                await streamSSL(subDomain, email, subPort);
+                                setSslStream(prev => ({ ...prev, loading: false,
+                                    logs: prev.logs + `\n✅ Done!\n📌 Sub: ${subUrl}/sub/YOUR_UUID\n` }));
+                            } catch (e) {
+                                setSslStream(prev => ({ ...prev, loading: false,
+                                    logs: prev.logs + `\nERROR: ${e.message}\n` }));
+                            }
+                        },
+                        'Issue Sub SSL', 'blue'
+                    )}
+                    disabled={!subDomain || !settings.ssl_email}
+                    className={`w-full px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors
+                        ${(subDomain && settings.ssl_email)
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                            : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}>
+                    <Lock className="w-4 h-4" />
+                    Issue SSL for Subscription Domain
+                    {subDomain && <span className="text-xs opacity-70 ml-1">({subDomain} → port {subPort})</span>}
+                </button>
+
+                {/* Issue both */}
+                <button
+                    onClick={() => confirmAction(
+                        'Issue SSL for Both Domains',
+                        `This will request certificates for:\n  1. ${panelDomain} (port ${panelPort})\n  2. ${subDomain} (port ${subPort})\n\nExisting certs will be safely skipped.\n\nPrerequisites:\n• DNS A records for both → this server's IP\n• Cloudflare: DNS-only ⚪\n• Port 80 open in hosting firewall\n\nContinue?`,
+                        async () => {
+                            setConfirmation(prev => ({ ...prev, isOpen: false }));
+                            setSslStream({ isOpen: true, logs: '▶ Starting SSL for both domains...\n', loading: true });
+                            const email = settings.ssl_email || 'admin@example.com';
+                            try {
+                                if (panelDomain) {
+                                    setSslStream(prev => ({ ...prev, logs: prev.logs + `\n${'─'.repeat(50)}\n>>> Panel: ${panelDomain}\n${'─'.repeat(50)}\n` }));
+                                    await streamSSL(panelDomain, email, panelPort);
+                                }
+                                if (subDomain && subDomain !== panelDomain) {
+                                    setSslStream(prev => ({ ...prev, logs: prev.logs + `\n${'─'.repeat(50)}\n>>> Sub: ${subDomain}\n${'─'.repeat(50)}\n` }));
+                                    await streamSSL(subDomain, email, subPort);
+                                }
+                                setSslStream(prev => ({ ...prev, loading: false,
+                                    logs: prev.logs +
+                                        '\n✅ All SSL requests completed.\n' +
+                                        '─────────────────────────────────────────\n' +
+                                        (panelUrl ? `📌 Panel: ${panelUrl}\n` : '') +
+                                        (subUrl   ? `📌 Sub:   ${subUrl}/sub/YOUR_UUID\n` : '') +
+                                        '─────────────────────────────────────────\n' +
+                                        '💡 Bookmark your panel URL before closing!\n'
+                                }));
+                            } catch (e) {
+                                setSslStream(prev => ({ ...prev, loading: false,
+                                    logs: prev.logs + `\nERROR: ${e.message}\n` }));
+                            }
+                        },
+                        'Issue SSL for Both', 'green'
+                    )}
+                    disabled={(!panelDomain && !subDomain) || !settings.ssl_email}
+                    className={`w-full px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors border
+                        ${((panelDomain || subDomain) && settings.ssl_email)
+                            ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400 border-green-600/40'
+                            : 'bg-gray-700/30 text-gray-500 cursor-not-allowed border-gray-700'}`}>
+                    <Shield className="w-4 h-4" /> Issue SSL for Both Domains at Once
+                </button>
+
                 {!settings.ssl_email && (
-                    <p className="text-yellow-400 text-xs mt-2 text-center">⚠️ Please enter your Admin Email above before requesting SSL.</p>
+                    <p className="text-yellow-400 text-xs text-center">⚠️ Enter your Admin Email above to enable SSL buttons.</p>
                 )}
             </div>
         </div>
-    );
+        );
+    };
 
-    const renderSubscription = () => (
+    const renderSubscription = () => {
+        const subDomain  = settings.subscription_domain || '';
+        const subPort    = parseInt(settings.sub_https_port || '443', 10);
+        const subBaseUrl = subDomain
+            ? (subPort === 443 ? `https://${subDomain}` : `https://${subDomain}:${subPort}`)
+            : 'https://sub.yourdomain.com';
+        const previewUrl = `${subBaseUrl}/sub/YOUR_UUID_HERE`;
+
+        return (
         <div className="space-y-6">
+            {/* ── Info ── */}
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
                 <div className="flex items-start gap-3">
                     <Link className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
                     <div>
                         <p className="text-blue-300 font-semibold text-sm">Subscription Links</p>
-                        <p className="text-gray-400 text-xs mt-1">Auto-updating config links for clients. Like 3x-ui, Marzban, and Hiddify panels.</p>
-                        <p className="text-gray-400 text-xs mt-1">Note: The Base URL is now mapped to your <b>Subscription Domain</b> (configured in the Domain & SSL tab).</p>
+                        <p className="text-gray-400 text-xs mt-1">
+                            Users paste a subscription URL in their VPN client (Clash, v2rayNG, Shadowrocket, etc.)
+                            and configs auto-update. Works like <b>3x-ui</b>, <b>Marzban</b>, and <b>Hiddify</b>.
+                        </p>
+                        <p className="text-gray-400 text-xs mt-1">
+                            Subscription domain and port are configured in the <b>Domain & SSL</b> tab.
+                        </p>
                     </div>
                 </div>
             </div>
+
+            {/* ── Link preview ── */}
+            <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-3">
+                <p className="text-gray-400 text-xs mb-1 font-semibold">🔗 Subscription Link Preview:</p>
+                <p className="text-green-400 text-xs font-mono break-all">{previewUrl}</p>
+                <p className="text-gray-500 text-xs mt-1">
+                    Replace <code className="text-yellow-400">YOUR_UUID_HERE</code> with the user's actual UUID (shown in Users tab).
+                </p>
+            </div>
+
+            {/* ── Settings ── */}
             <SectionTitle>Subscription Settings</SectionTitle>
-            <S_Check {...sp} settingKey="subscription_enabled" label="Enable Subscription Links" tip="Allow users to get auto-updating config URLs." />
-            <S_Input {...sp} settingKey="subscription_domain" label="Subscription Domain Base" placeholder="sub.yourdomain.com" disabled tip="Configured in the Domain & SSL tab." />
-            <S_Select {...sp} settingKey="subscription_format" label="Link Format" options={[
-                { value: 'v2ray', label: 'V2Ray/Clash URI' },
-                { value: 'base64', label: 'Base64 Encoded' },
-                { value: 'json', label: 'JSON Config' },
-            ]} />
-            <S_Input {...sp} settingKey="subscription_update_interval" label="Auto-Update Interval (hours)" placeholder="24" type="number" tip="How often clients refresh their config." />
-            <SectionTitle>Config Export</SectionTitle>
-            <S_Check {...sp} settingKey="config_export_qr" label="Include QR Code in Exports" tip="Generate QR codes for easy mobile import." />
-            <S_Check {...sp} settingKey="config_export_uri" label="Include URI Links in Exports" tip="Generate one-click import URIs." />
+            <S_Check {...sp} settingKey="subscription_enabled"
+                label="Enable Subscription Links"
+                tip="Allow users to get auto-updating config URLs. Disable to block all subscription access." />
+
+            <div className="grid grid-cols-2 gap-4">
+                <S_Input {...sp} settingKey="subscription_domain"
+                    label="Subscription Domain"
+                    placeholder="sub.yourdomain.com"
+                    tip="The domain users use to fetch their configs. Configure SSL for this domain in Domain & SSL tab." />
+                <S_Input {...sp} settingKey="sub_https_port"
+                    label="HTTPS Port"
+                    placeholder="443"
+                    type="number"
+                    tip="443 = standard. Use 8443 if port 443 is busy. Set in Domain & SSL tab." />
+            </div>
+
+            <S_Select {...sp} settingKey="subscription_format"
+                label="Config Format"
+                tip="Format of the generated subscription content. V2Ray/Clash is most compatible."
+                options={[
+                    { value: 'v2ray',  label: 'V2Ray / Clash URI (recommended)' },
+                    { value: 'base64', label: 'Base64 Encoded (legacy clients)' },
+                    { value: 'json',   label: 'JSON (advanced)' },
+                ]} />
+
+            <S_Input {...sp} settingKey="subscription_update_interval"
+                label="Client Auto-Update Interval (hours)"
+                placeholder="24"
+                type="number"
+                tip="How often VPN clients refresh their config. 24h is the industry standard. Lower = more server load." />
+
+            <SectionTitle>Config Export Options</SectionTitle>
+            <S_Check {...sp} settingKey="config_export_qr"
+                label="Include QR Code in User Exports"
+                tip="Generate QR codes so users can scan with mobile apps (v2rayNG, Shadowrocket)." />
+            <S_Check {...sp} settingKey="config_export_uri"
+                label="Include One-click Import URI"
+                tip="Generate vless:// or vmess:// URIs for direct import into clients." />
         </div>
-    );
+        );
+    };
 
     const renderTelegram = () => (
         <div className="space-y-6">
