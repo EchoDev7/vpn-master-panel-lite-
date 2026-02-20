@@ -5,6 +5,19 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsToolti
 import ConfirmationModal from './ConfirmationModal';
 import Toast from './Toast';
 
+const getDefaultSubscriptionBaseUrl = () => {
+    const configured = import.meta.env.VITE_API_URL;
+    if (configured) {
+        return configured.replace(/\/$/, '');
+    }
+
+    if (window.location.port === '5173') {
+        return `${window.location.protocol}//${window.location.hostname}:8001`;
+    }
+
+    return window.location.origin;
+};
+
 const Users = () => {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -59,6 +72,10 @@ const Users = () => {
     useEffect(() => {
         loadUsers();
     }, [page, pageSize, filterStatus]);
+
+    useEffect(() => {
+        loadSubscriptionBaseUrl();
+    }, []);
 
     const loadUsers = async () => {
         try {
@@ -244,6 +261,26 @@ const Users = () => {
     const [showRegenerateModal, setShowRegenerateModal] = useState(false); // Deprecated
     // const [userToRegenerate, setUserToRegenerate] = useState(null); // Deprecated
     const [copiedUserId, setCopiedUserId] = useState(null);
+    const [subscriptionBaseUrl, setSubscriptionBaseUrl] = useState(getDefaultSubscriptionBaseUrl());
+
+    const loadSubscriptionBaseUrl = async () => {
+        try {
+            const response = await apiService.getSettings();
+            const allSettings = response?.data || {};
+            const domain = (allSettings.subscription_domain || '').trim();
+            const port = parseInt(allSettings.sub_https_port || '443', 10);
+
+            if (domain) {
+                const resolved = port === 443 ? `https://${domain}` : `https://${domain}:${port}`;
+                setSubscriptionBaseUrl(resolved);
+                return;
+            }
+        } catch (error) {
+            console.warn('Failed to load subscription domain settings, using default URL:', error);
+        }
+
+        setSubscriptionBaseUrl(getDefaultSubscriptionBaseUrl());
+    };
 
     const handleDeleteClick = (user) => {
         confirmAction(
@@ -379,22 +416,41 @@ const Users = () => {
         );
     };
 
-    const handleCopySubscription = (user) => {
+    const handleCopySubscription = async (user) => {
         if (!user.subscription_token) {
             showToast('User does not have a subscription token.', 'error');
             return;
         }
-        const link = `${window.location.protocol}//${window.location.host}/sub/${user.subscription_token}`;
-        navigator.clipboard.writeText(link)
-            .then(() => {
-                showToast('لینک اشتراک کپی شد', 'success');
-                setCopiedUserId(user.id);
-                setTimeout(() => setCopiedUserId(null), 2000);
-            })
-            .catch((err) => {
-                console.error('Copy failed:', err);
-                showToast('کپی لینک ناموفق بود', 'error');
-            });
+
+        const base = (subscriptionBaseUrl || getDefaultSubscriptionBaseUrl()).replace(/\/$/, '');
+        const link = `${base}/sub/${user.subscription_token}`;
+
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(link);
+            } else {
+                const temp = document.createElement('textarea');
+                temp.value = link;
+                temp.style.position = 'fixed';
+                temp.style.opacity = '0';
+                document.body.appendChild(temp);
+                temp.focus();
+                temp.select();
+                const copied = document.execCommand('copy');
+                document.body.removeChild(temp);
+
+                if (!copied) {
+                    throw new Error('execCommand copy failed');
+                }
+            }
+
+            showToast('لینک اشتراک کپی شد', 'success');
+            setCopiedUserId(user.id);
+            setTimeout(() => setCopiedUserId(null), 2000);
+        } catch (err) {
+            console.error('Copy failed:', err);
+            showToast('کپی لینک ناموفق بود', 'error');
+        }
     };
 
     const handleOpenRegenerate = (user) => {
