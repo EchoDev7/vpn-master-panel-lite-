@@ -160,7 +160,11 @@ install_dependencies() {
     print_info "Installing Certbot (Let's Encrypt SSL)..."
     apt install -y certbot python3-certbot-nginx --no-install-recommends > /dev/null 2>&1
     print_success "Certbot installed ($(certbot --version 2>&1 | head -1))"
-    
+
+    print_info "Installing sqlite3 CLI (used by update.sh to read panel settings)..."
+    apt install -y sqlite3 --no-install-recommends > /dev/null 2>&1
+    print_success "sqlite3 installed"
+
     print_info "Installing Python 3.11 (latest)..."
     add-apt-repository ppa:deadsnakes/ppa -y > /dev/null 2>&1
     apt install -y python3.11 python3.11-venv python3.11-dev python3-pip --no-install-recommends > /dev/null 2>&1
