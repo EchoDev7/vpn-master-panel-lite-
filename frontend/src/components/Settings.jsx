@@ -669,15 +669,22 @@ const Settings = () => {
                 <div className="flex items-start gap-3">
                     <Globe className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
                     <div>
-                        <p className="text-purple-300 font-semibold text-sm">Panel Domain & SSL</p>
-                        <p className="text-gray-400 text-xs mt-1">This domain is used strictly for accessing this Admin Panel and Subscription Links. It is securely separated from your VPN connection domains.</p>
-                        <p className="text-amber-400 text-xs font-bold mt-2">⚠️ IMPORTANT: Point your domain's DNS to your server IP (Proxy ON for Cloudflare) BEFORE requesting SSL.</p>
+                        <p className="text-purple-300 font-semibold text-sm">3-Domain Separation Architecture</p>
+                        <p className="text-gray-400 text-xs mt-1">For maximum anti-filtering resistance, we use 3 separate domains:</p>
+                        <ul className="text-gray-400 text-xs mt-2 list-disc ml-4 space-y-1">
+                            <li><b>Panel Domain:</b> Used only by YOU to access this dashboard. (Proxy: ON 🟠)</li>
+                            <li><b>Subscription Domain:</b> Given to users to update their configs. (Proxy: ON 🟠)</li>
+                            <li><b>VPN Config Domain:</b> Configured in <i>OpenVPN &gt; Server Network &gt; Custom Domain</i>. This is the raw connection core. (Proxy: OFF ⚪). <span className="text-amber-400">Note: OpenVPN does NOT need Let's Encrypt for this; it uses intrinsic TLS.</span></li>
+                        </ul>
                     </div>
                 </div>
             </div>
 
-            <SectionTitle>Domain Setup</SectionTitle>
-            <S_Input {...sp} settingKey="panel_domain" label="Panel & Subscription Domain" placeholder="panel.yourdomain.com" tip="The domain used to access this dashboard and user subscriptions." />
+            <SectionTitle>Domain Setup (Proxy ON 🟠)</SectionTitle>
+            <div className="grid grid-cols-2 gap-4">
+                <S_Input {...sp} settingKey="panel_domain" label="1. Admin Panel Domain" placeholder="panel.yourdomain.com" tip="Used to access this dashboard securely." />
+                <S_Input {...sp} settingKey="subscription_domain" label="2. Subscription Domain" placeholder="sub.yourdomain.com" tip="Used for user subscription update links." />
+            </div>
 
             <SectionTitle>Let's Encrypt SSL (ZeroSSL / Certbot)</SectionTitle>
             <S_Input {...sp} settingKey="ssl_email" label="Admin Email (For SSL Expiration Alerts)" placeholder="admin@yourdomain.com" />
@@ -685,7 +692,7 @@ const Settings = () => {
             <div className="mt-6 pt-6 border-t border-gray-700">
                 <button onClick={() => confirmAction(
                     "Request Let's Encrypt SSL",
-                    "This will request a certificate for your Panel Domain.\n\nPrerequisites:\n1. Your domain MUST point to this server's IP.\n2. Port 80 must be open.\n\nContinue?",
+                    "This will request certificates for BOTH your Panel Domain and Subscription Domain.\n\nPrerequisites:\n1. BOTH domains MUST point to this server's IP in Cloudflare (Proxy ON).\n2. Port 80 must be open.\n\nContinue?",
                     async () => {
                         setConfirmation(prev => ({ ...prev, isOpen: false }));
                         setSslStream({ isOpen: true, logs: 'Initializing Let\'s Encrypt client...\n', loading: true });
@@ -693,28 +700,38 @@ const Settings = () => {
                             const token = localStorage.getItem('access_token');
                             const baseURL = (import.meta.env.VITE_API_URL || '') + '/api/v1/settings/ssl/request';
 
-                            const response = await fetch(baseURL, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${token}`
-                                },
-                                body: JSON.stringify({
-                                    domain: settings.panel_domain,
-                                    email: settings.ssl_email || 'admin@example.com'
-                                })
-                            });
+                            // Request for Panel Domain
+                            if (settings.panel_domain) {
+                                setSslStream(prev => ({ ...prev, logs: prev.logs + `>>> Starting SSL process for Panel Domain: ${settings.panel_domain}\n` }));
+                                const response1 = await fetch(baseURL, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                    body: JSON.stringify({ domain: settings.panel_domain, email: settings.ssl_email || 'admin@example.com' })
+                                });
+                                const reader1 = response1.body.getReader();
+                                const decoder1 = new TextDecoder('utf-8');
+                                while (true) {
+                                    const { done, value } = await reader1.read();
+                                    if (done) break;
+                                    setSslStream(prev => ({ ...prev, logs: prev.logs + decoder1.decode(value, { stream: true }) }));
+                                }
+                            }
 
-                            if (!response.body) throw new Error('ReadableStream not supported by browser');
-
-                            const reader = response.body.getReader();
-                            const decoder = new TextDecoder('utf-8');
-
-                            while (true) {
-                                const { done, value } = await reader.read();
-                                if (done) break;
-                                const chunk = decoder.decode(value, { stream: true });
-                                setSslStream(prev => ({ ...prev, logs: prev.logs + chunk }));
+                            // Request for Subscription Domain
+                            if (settings.subscription_domain) {
+                                setSslStream(prev => ({ ...prev, logs: prev.logs + `\n>>> Starting SSL process for Subscription Domain: ${settings.subscription_domain}\n` }));
+                                const response2 = await fetch(baseURL, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                    body: JSON.stringify({ domain: settings.subscription_domain, email: settings.ssl_email || 'admin@example.com' })
+                                });
+                                const reader2 = response2.body.getReader();
+                                const decoder2 = new TextDecoder('utf-8');
+                                while (true) {
+                                    const { done, value } = await reader2.read();
+                                    if (done) break;
+                                    setSslStream(prev => ({ ...prev, logs: prev.logs + decoder2.decode(value, { stream: true }) }));
+                                }
                             }
                         } catch (err) {
                             setSslStream(prev => ({ ...prev, logs: prev.logs + `\nHTTP ERROR: ${err.message}` }));
@@ -741,12 +758,13 @@ const Settings = () => {
                     <div>
                         <p className="text-blue-300 font-semibold text-sm">Subscription Links</p>
                         <p className="text-gray-400 text-xs mt-1">Auto-updating config links for clients. Like 3x-ui, Marzban, and Hiddify panels.</p>
+                        <p className="text-gray-400 text-xs mt-1">Note: The Base URL is now mapped to your <b>Subscription Domain</b> (configured in the Domain & SSL tab).</p>
                     </div>
                 </div>
             </div>
             <SectionTitle>Subscription Settings</SectionTitle>
             <S_Check {...sp} settingKey="subscription_enabled" label="Enable Subscription Links" tip="Allow users to get auto-updating config URLs." />
-            <S_Input {...sp} settingKey="subscription_base_url" label="Base URL" placeholder="https://your-panel.com" tip="Public URL of your panel for subscription links." />
+            <S_Input {...sp} settingKey="subscription_domain" label="Subscription Domain Base" placeholder="sub.yourdomain.com" disabled tip="Configured in the Domain & SSL tab." />
             <S_Select {...sp} settingKey="subscription_format" label="Link Format" options={[
                 { value: 'v2ray', label: 'V2Ray/Clash URI' },
                 { value: 'base64', label: 'Base64 Encoded' },
