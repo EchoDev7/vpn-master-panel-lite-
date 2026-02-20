@@ -51,6 +51,15 @@ const GENERAL_TABS = [
     { id: 'gen_traffic', label: '📊 Traffic Limits' },
 ];
 
+const ALLOWED_SSL_PORT_OPTIONS = [
+    { value: '2053', label: '2053 (Cloudflare-compatible HTTPS)' },
+    { value: '2083', label: '2083 (Cloudflare-compatible HTTPS)' },
+    { value: '2087', label: '2087 (Cloudflare-compatible HTTPS)' },
+    { value: '2096', label: '2096 (Cloudflare-compatible HTTPS)' },
+    { value: '8443', label: '8443 (recommended for panel)' },
+];
+const ALLOWED_SSL_PORT_SET = new Set(ALLOWED_SSL_PORT_OPTIONS.map((o) => o.value));
+
 // ===== Helper: setting field wrappers =====
 const S_Input = ({ settings, onChange, settingKey, ...props }) => (
     <InputField value={settings[settingKey]} onChange={(v) => onChange(settingKey, v)} {...props} />
@@ -93,7 +102,20 @@ const Settings = () => {
     const loadSettings = async () => {
         try {
             const response = await apiService.getSettings();
-            setSettings(response.data);
+            const incoming = response.data || {};
+            const normalized = { ...incoming };
+
+            if (!ALLOWED_SSL_PORT_SET.has(String(normalized.panel_https_port || ''))) {
+                normalized.panel_https_port = '8443';
+            }
+            if (!ALLOWED_SSL_PORT_SET.has(String(normalized.sub_https_port || ''))) {
+                normalized.sub_https_port = '2053';
+            }
+            if (normalized.panel_https_port === normalized.sub_https_port) {
+                normalized.sub_https_port = normalized.panel_https_port === '2053' ? '2083' : '2053';
+            }
+
+            setSettings(normalized);
         } catch (error) {
             console.error("Failed to load settings:", error);
         } finally {
@@ -109,7 +131,20 @@ const Settings = () => {
     };
 
     const handleChange = useCallback((key, value) => {
-        setSettings(prev => ({ ...prev, [key]: value }));
+        setSettings(prev => {
+            const next = { ...prev, [key]: value };
+
+            if (key === 'panel_https_port' && String(value) === String(prev.sub_https_port)) {
+                const fallback = ALLOWED_SSL_PORT_OPTIONS.find((opt) => opt.value !== String(value));
+                if (fallback) next.sub_https_port = fallback.value;
+            }
+            if (key === 'sub_https_port' && String(value) === String(prev.panel_https_port)) {
+                const fallback = ALLOWED_SSL_PORT_OPTIONS.find((opt) => opt.value !== String(value));
+                if (fallback) next.panel_https_port = fallback.value;
+            }
+
+            return next;
+        });
     }, []);
 
     const showToast = (message, type = 'success') => setToast({ message, type });
@@ -125,7 +160,8 @@ const Settings = () => {
             await apiService.updateSettings(settings);
             showToast("Settings saved successfully!");
         } catch (error) {
-            showToast("Failed to save settings", "error");
+            const detail = error?.response?.data?.detail;
+            showToast(detail ? `Failed to save settings: ${detail}` : "Failed to save settings", "error");
         } finally {
             setSaving(false);
         }
@@ -768,16 +804,28 @@ const Settings = () => {
 
     // ===== General Tabs =====
     const renderDomainSsl = () => {
-        const panelPort   = parseInt(settings.panel_https_port  || '8443', 10);
-        const subPort     = parseInt(settings.sub_https_port    || '443',  10);
+        const panelPortValue = String(settings.panel_https_port || '8443');
+        const subPortValue = String(settings.sub_https_port || '2053');
+        const panelPort = parseInt(panelPortValue, 10);
+        const subPort = parseInt(subPortValue, 10);
         const panelDomain = settings.panel_domain || '';
         const subDomain   = settings.subscription_domain || '';
         const panelUrl    = panelDomain
-            ? (panelPort === 443 ? `https://${panelDomain}` : `https://${panelDomain}:${panelPort}`)
+            ? `https://${panelDomain}:${panelPort}`
             : '';
         const subUrl      = subDomain
-            ? (subPort === 443 ? `https://${subDomain}` : `https://${subDomain}:${subPort}`)
+            ? `https://${subDomain}:${subPort}`
             : '';
+        const hasPortConflict = panelPortValue === subPortValue;
+
+        const panelPortOptions = ALLOWED_SSL_PORT_OPTIONS.map((opt) => ({
+            ...opt,
+            label: opt.value === subPortValue ? `${opt.label} (already used by Subscription)` : opt.label,
+        }));
+        const subPortOptions = ALLOWED_SSL_PORT_OPTIONS.map((opt) => ({
+            ...opt,
+            label: opt.value === panelPortValue ? `${opt.label} (already used by Panel)` : opt.label,
+        }));
 
         return (
         <div className="space-y-6">
@@ -786,24 +834,30 @@ const Settings = () => {
                 <div className="flex items-start gap-3">
                     <Globe className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
                     <div>
-                        <p className="text-purple-300 font-semibold text-sm">Domain Architecture (3-Domain Separation)</p>
+                        <p className="text-purple-300 font-semibold text-sm">Production Domain Topology</p>
                         <div className="mt-2 space-y-1.5">
                             <div className="flex items-start gap-2">
                                 <span className="text-amber-400 text-xs mt-0.5 shrink-0">🟠</span>
-                                <p className="text-gray-300 text-xs"><b className="text-white">Panel Domain</b> — Only YOU use this to log in. Cloudflare Proxy ON is fine.</p>
+                                <p className="text-gray-300 text-xs"><b className="text-white">Panel Domain</b> — Admin-only control plane endpoint.</p>
                             </div>
                             <div className="flex items-start gap-2">
                                 <span className="text-amber-400 text-xs mt-0.5 shrink-0">⚪</span>
-                                <p className="text-gray-300 text-xs"><b className="text-white">Subscription Domain</b> — Given to users for config updates. Must be DNS-only during SSL issuance.</p>
+                                <p className="text-gray-300 text-xs"><b className="text-white">Subscription Domain</b> — Public self-service portal for /sub/&lt;token&gt;.</p>
                             </div>
                             <div className="flex items-start gap-2">
                                 <span className="text-gray-400 text-xs mt-0.5 shrink-0">🔵</span>
-                                <p className="text-gray-300 text-xs"><b className="text-white">VPN Domain</b> — Set in OpenVPN → Network → Custom Domain. Uses its own TLS, no Let's Encrypt needed.</p>
+                                <p className="text-gray-300 text-xs"><b className="text-white">VPN Domain</b> — Data-plane endpoint configured in OpenVPN/WireGuard network settings.</p>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
+
+            {hasPortConflict && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                    <p className="text-red-300 text-xs font-semibold">Panel and Subscription HTTPS ports cannot be the same.</p>
+                </div>
+            )}
 
             {/* ── Panel domain + port ── */}
             <SectionTitle>Admin Panel</SectionTitle>
@@ -817,12 +871,8 @@ const Settings = () => {
                 <div>
                     <S_Select {...sp} settingKey="panel_https_port"
                         label="Panel HTTPS Port"
-                        tip="Port 8443 = OpenVPN uses 443. Change to 443 only if OpenVPN is on another port."
-                        options={[
-                            { value: '8443', label: '8443 (OpenVPN on 443)' },
-                            { value: '443',  label: '443  (standard)' },
-                            { value: '8444', label: '8444 (custom)' },
-                        ]} />
+                        tip="Allowed edge ports: 2053, 2083, 2087, 2096, 8443. Must differ from Subscription port."
+                        options={panelPortOptions} />
                 </div>
             </div>
             {panelUrl && (
@@ -845,30 +895,24 @@ const Settings = () => {
                 <div>
                     <S_Select {...sp} settingKey="sub_https_port"
                         label="Sub HTTPS Port"
-                        tip="Port 443 works for subscription because OpenVPN and Nginx don't conflict on this endpoint."
-                        options={[
-                            { value: '443',  label: '443  (standard ✅)' },
-                            { value: '8443', label: '8443 (if 443 busy)' },
-                            { value: '8444', label: '8444 (custom)' },
-                        ]} />
+                        tip="Allowed edge ports: 2053, 2083, 2087, 2096, 8443. Must differ from Panel port."
+                        options={subPortOptions} />
                 </div>
             </div>
             {subUrl && (
                 <div className="flex items-center gap-2 mt-1 bg-gray-800/50 rounded px-3 py-2 border border-gray-700">
                     <span className="text-gray-400 text-xs shrink-0">📌 Sub URL:</span>
                     <a href={subUrl} target="_blank" rel="noopener noreferrer"
-                       className="text-blue-400 text-xs font-mono hover:underline break-all">{subUrl}/sub/YOUR_UUID</a>
+                       className="text-blue-400 text-xs font-mono hover:underline break-all">{subUrl}/sub/YOUR_TOKEN</a>
                 </div>
             )}
 
             {/* ── Port conflict notice ── */}
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
-                <p className="text-amber-300 text-xs font-semibold mb-1">⚠️ Why port 8443 for panel?</p>
+                <p className="text-amber-300 text-xs font-semibold mb-1">Operational policy</p>
                 <p className="text-gray-300 text-xs">
-                    OpenVPN is configured on <b>TCP/443</b> (best Iran anti-censorship setting).
-                    Both Nginx and OpenVPN cannot listen on 443 simultaneously.
-                    So the admin panel uses <b>8443</b>. Port 8443 is already open in the firewall.
-                    Subscription uses 443 because it goes through FastAPI, not Nginx directly.
+                    This panel enforces a controlled SSL edge-port set: <b>2053, 2083, 2087, 2096, 8443</b>.
+                    Panel and Subscription cannot share the same HTTPS port. Selected ports are auto-opened in the server firewall when settings are saved.
                 </p>
             </div>
 
@@ -886,6 +930,7 @@ const Settings = () => {
                     <li>DNS <b>A record</b> for each domain must point to this server's IP</li>
                     <li><b>Cloudflare</b>: set to <b className="text-gray-100">"DNS only" ⚪</b> (NOT Proxied 🟠) during issuance</li>
                     <li><b>Port 80</b> must be reachable from internet (check cloud/hosting firewall)</li>
+                    <li>Your selected HTTPS edge port must be open in hosting/cloud firewall</li>
                     <li>After cert is issued, you can turn Cloudflare proxy back ON if you want</li>
                     <li>Re-issuing for a domain that <b>already has a cert is safe</b> — certbot skips it</li>
                 </ol>
@@ -913,7 +958,7 @@ const Settings = () => {
                         },
                         'Issue Panel SSL', 'purple'
                     )}
-                    disabled={!panelDomain || !settings.ssl_email}
+                    disabled={!panelDomain || !settings.ssl_email || hasPortConflict}
                     className={`w-full px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors
                         ${(panelDomain && settings.ssl_email)
                             ? 'bg-purple-600 hover:bg-purple-700 text-white'
@@ -943,7 +988,7 @@ const Settings = () => {
                         },
                         'Issue Sub SSL', 'blue'
                     )}
-                    disabled={!subDomain || !settings.ssl_email}
+                    disabled={!subDomain || !settings.ssl_email || hasPortConflict}
                     className={`w-full px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors
                         ${(subDomain && settings.ssl_email)
                             ? 'bg-blue-600 hover:bg-blue-700 text-white'
@@ -987,7 +1032,7 @@ const Settings = () => {
                         },
                         'Issue SSL for Both', 'green'
                     )}
-                    disabled={(!panelDomain && !subDomain) || !settings.ssl_email}
+                    disabled={(!panelDomain && !subDomain) || !settings.ssl_email || hasPortConflict}
                     className={`w-full px-4 py-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors border
                         ${((panelDomain || subDomain) && settings.ssl_email)
                             ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400 border-green-600/40'
@@ -1005,9 +1050,9 @@ const Settings = () => {
 
     const renderSubscription = () => {
         const subDomain  = settings.subscription_domain || '';
-        const subPort    = parseInt(settings.sub_https_port || '443', 10);
+        const subPort    = parseInt(settings.sub_https_port || '2053', 10);
         const subBaseUrl = subDomain
-            ? (subPort === 443 ? `https://${subDomain}` : `https://${subDomain}:${subPort}`)
+            ? `https://${subDomain}:${subPort}`
             : 'https://sub.yourdomain.com';
         const previewUrl = `${subBaseUrl}/sub/YOUR_UUID_HERE`;
 
@@ -1050,11 +1095,10 @@ const Settings = () => {
                     label="Subscription Domain"
                     placeholder="sub.yourdomain.com"
                     tip="The domain users use to fetch their configs. Configure SSL for this domain in Domain & SSL tab." />
-                <S_Input {...sp} settingKey="sub_https_port"
+                <S_Select {...sp} settingKey="sub_https_port"
                     label="HTTPS Port"
-                    placeholder="443"
-                    type="number"
-                    tip="443 = standard. Use 8443 if port 443 is busy. Set in Domain & SSL tab." />
+                    tip="Managed by Domain & SSL policy. Allowed: 2053, 2083, 2087, 2096, 8443."
+                    options={ALLOWED_SSL_PORT_OPTIONS} />
             </div>
 
             <S_Select {...sp} settingKey="subscription_format"
