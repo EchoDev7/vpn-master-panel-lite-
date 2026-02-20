@@ -706,19 +706,40 @@ post_update_fixes() {
     PANEL_DOMAIN=$(read_setting "panel_domain" "")
     SUB_DOMAIN=$(read_setting "subscription_domain" "")
     PANEL_PORT=$(read_setting "panel_https_port" "8443")
-    SUB_PORT=$(read_setting "sub_https_port" "443")
+    SUB_PORT=$(read_setting "sub_https_port" "2053")
     EFFECTIVE_SUB_PORT="$SUB_PORT"
 
-    # If sub HTTPS is configured as 443 but that port is occupied (typically OpenVPN),
-    # move subscription HTTPS to 8443 and persist setting so UI-generated links stay correct.
-    if [ "$EFFECTIVE_SUB_PORT" = "443" ]; then
-        if ss -tlnp 2>/dev/null | grep -q ':443 '; then
-            EFFECTIVE_SUB_PORT="8443"
-            echo -e "${YELLOW}⚠ sub_https_port=443 is busy. Switching subscription HTTPS to 8443.${NC}"
-            if [ -f "$DB_FILE" ]; then
-                sqlite3 "$DB_FILE" "UPDATE settings SET value='8443' WHERE key='sub_https_port';" 2>/dev/null || true
+    # Managed SSL edge-port policy
+    ALLOWED_SSL_PORTS="2053 2083 2087 2096 8443"
+    is_allowed_ssl_port() {
+        local p="$1"
+        for allowed in $ALLOWED_SSL_PORTS; do
+            [ "$p" = "$allowed" ] && return 0
+        done
+        return 1
+    }
+
+    if ! is_allowed_ssl_port "$PANEL_PORT"; then
+        echo -e "${YELLOW}⚠ panel_https_port=${PANEL_PORT} is outside policy. Resetting to 8443.${NC}"
+        PANEL_PORT="8443"
+        [ -f "$DB_FILE" ] && sqlite3 "$DB_FILE" "UPDATE settings SET value='8443' WHERE key='panel_https_port';" 2>/dev/null || true
+    fi
+
+    if ! is_allowed_ssl_port "$EFFECTIVE_SUB_PORT"; then
+        echo -e "${YELLOW}⚠ sub_https_port=${EFFECTIVE_SUB_PORT} is outside policy. Resetting to 2053.${NC}"
+        EFFECTIVE_SUB_PORT="2053"
+        [ -f "$DB_FILE" ] && sqlite3 "$DB_FILE" "UPDATE settings SET value='2053' WHERE key='sub_https_port';" 2>/dev/null || true
+    fi
+
+    if [ "$PANEL_PORT" = "$EFFECTIVE_SUB_PORT" ]; then
+        for candidate in 2053 2083 2087 2096 8443; do
+            if [ "$candidate" != "$PANEL_PORT" ]; then
+                EFFECTIVE_SUB_PORT="$candidate"
+                break
             fi
-        fi
+        done
+        echo -e "${YELLOW}⚠ Panel/Sub HTTPS ports were identical. Reassigned sub_https_port to ${EFFECTIVE_SUB_PORT}.${NC}"
+        [ -f "$DB_FILE" ] && sqlite3 "$DB_FILE" "UPDATE settings SET value='${EFFECTIVE_SUB_PORT}' WHERE key='sub_https_port';" 2>/dev/null || true
     fi
 
     echo -e "${CYAN}   Panel domain:  ${PANEL_DOMAIN:-'(not set)'}  port ${PANEL_PORT}${NC}"
@@ -727,7 +748,10 @@ post_update_fixes() {
     # ── 2. Ensure firewall ports are open ─────────────────────────────────────
     echo -e "${CYAN}   Opening firewall ports...${NC}"
     ufw allow 8443/tcp > /dev/null 2>&1
-    ufw allow 443/tcp  > /dev/null 2>&1
+    ufw allow 2053/tcp > /dev/null 2>&1
+    ufw allow 2083/tcp > /dev/null 2>&1
+    ufw allow 2087/tcp > /dev/null 2>&1
+    ufw allow 2096/tcp > /dev/null 2>&1
     ufw allow 80/tcp   > /dev/null 2>&1
     # Open whatever port the admin has chosen
     [ -n "$PANEL_PORT" ] && ufw allow ${PANEL_PORT}/tcp > /dev/null 2>&1
