@@ -156,6 +156,10 @@ install_dependencies() {
     print_info "Installing VPN Core Services (Latest)..."
     apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent --no-install-recommends > /dev/null 2>&1
     print_success "OpenVPN & WireGuard installed"
+
+    print_info "Installing Certbot (Let's Encrypt SSL)..."
+    apt install -y certbot python3-certbot-nginx --no-install-recommends > /dev/null 2>&1
+    print_success "Certbot installed ($(certbot --version 2>&1 | head -1))"
     
     print_info "Installing Python 3.11 (latest)..."
     add-apt-repository ppa:deadsnakes/ppa -y > /dev/null 2>&1
