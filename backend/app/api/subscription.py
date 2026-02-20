@@ -19,7 +19,7 @@ router = APIRouter()
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -74,7 +74,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <h2><i class="fas fa-shield-alt"></i> پنل اشتراک</h2>
+            <h2><i class="fas fa-shield-alt"></i> Subscription Portal</h2>
             <div style="font-size: 1.1em; margin: 10px 0;" id="username">User</div>
             <span id="status" class="badge">Loading...</span>
         </div>
@@ -82,45 +82,45 @@ HTML_TEMPLATE = """
         <div class="stats-grid">
             <div class="stat-card">
                 <span class="stat-val" id="days">--</span>
-                <span class="stat-label">روز باقی‌مانده</span>
+                <span class="stat-label">Days Remaining</span>
             </div>
             <div class="stat-card">
                 <span class="stat-val" id="usage">--</span>
-                <span class="stat-label">گیگابایت مصرف</span>
+                <span class="stat-label">Data Used (GB)</span>
             </div>
         </div>
 
         <div class="progress-container">
             <div style="display:flex; justify-content:space-between; font-size:0.85em; margin-bottom:5px;">
-                <span>مصرف دیتا</span>
+                <span>Data Usage</span>
                 <span><span id="percent">0</span>%</span>
             </div>
             <div class="progress-bar">
                 <div id="progress" class="progress-fill" style="width: 0%"></div>
             </div>
-            <div style="text-align:right; font-size:0.8em; color:#666; margin-top:3px;">
-                کل اعتبار: <span id="limit">--</span> GB
+            <div style="text-align:left; font-size:0.8em; color:#666; margin-top:3px;">
+                Data Limit: <span id="limit">--</span> GB
             </div>
         </div>
 
         <div class="actions">
             <button class="btn btn-ovpn" onclick="installConfig('openvpn')">
-                <i class="fab fa-android"></i> <i class="fab fa-apple"></i> اتصال OpenVPN
+                <i class="fab fa-android"></i> <i class="fab fa-apple"></i> Download OpenVPN Profile
             </button>
             <button class="btn btn-wg" onclick="installConfig('wireguard')">
-                <i class="fas fa-bolt"></i> اتصال WireGuard
+                <i class="fas fa-bolt"></i> Download WireGuard Profile
             </button>
         </div>
 
         <div id="wg-qr" class="qr-section">
-            <h3 style="font-size:1em; margin-bottom:15px; color:#444;">اسکن با نرم‌افزار WireGuard</h3>
+            <h3 style="font-size:1em; margin-bottom:15px; color:#444;">Scan with the WireGuard App</h3>
             <div id="qrcode"></div>
         </div>
         
         <div class="guide-section">
             <div class="guide-title" onclick="toggleGuide()">
-                <i class="fas fa-book-reader"></i> راهنمای اتصال
-                <span style="margin-right:auto; font-size:0.8em;">▼</span>
+                <i class="fas fa-book-reader"></i> Connection Guide
+                <span style="margin-left:auto; font-size:0.8em;">▼</span>
             </div>
             <div id="guide-content" class="guide-content">
                 <div style="margin-bottom:10px; display:flex; gap:5px; flex-wrap:wrap;">
@@ -130,21 +130,21 @@ HTML_TEMPLATE = """
                 </div>
                 
                 <div id="guide-android">
-                    1. برنامه <b>OpenVPN Connect</b> را از گوگل پلی دانلود کنید.<br>
-                    2. دکمه "اتصال OpenVPN" در بالا را بزنید.<br>
-                    3. فایل کانفیگ دانلود شده را در برنامه وارد (Import) کنید.<br>
-                    4. دکمه اتصال را بزنید.
+                    1. Install <b>OpenVPN Connect</b> from Google Play.<br>
+                    2. Tap <b>Download OpenVPN Profile</b> above.<br>
+                    3. Import the downloaded profile into the app.<br>
+                    4. Connect.
                 </div>
                 <div id="guide-ios" style="display:none">
-                    1. برنامه <b>OpenVPN Connect</b> را از اپ استور دانلود کنید.<br>
-                    2. دکمه "اتصال OpenVPN" در بالا را بزنید (لینک خودکار باز می‌شود).<br>
-                    3. در برنامه گزینه ADD را بزنید.<br>
-                    4. دکمه اتصال را بزنید.
+                    1. Install <b>OpenVPN Connect</b> from the App Store.<br>
+                    2. Tap <b>Download OpenVPN Profile</b> above.<br>
+                    3. Tap <b>ADD</b> in the app to import.<br>
+                    4. Connect.
                 </div>
                 <div id="guide-windows" style="display:none">
-                    1. برنامه <b>OpenVPN Connect</b> نسخه ویندوز را نصب کنید.<br>
-                    2. فایل کانفیگ را با دکمه بالا دانلود کنید.<br>
-                    3. فایل را روی آیکون برنامه در Taskbar بکشید یا Import کنید.<br>
+                    1. Install <b>OpenVPN Connect</b> for Windows.<br>
+                    2. Download the profile with the button above.<br>
+                    3. Import it into OpenVPN Connect and connect.<br>
                 </div>
             </div>
         </div>
@@ -154,8 +154,8 @@ HTML_TEMPLATE = """
         const DATA = {{DATA_JSON}};
 
         // Hydrate Data
-        document.getElementById('username').innerText = DATA.username + ' خوش آمدید';
-        document.getElementById('status').innerText = DATA.status === 'active' ? 'فعال' : 'غیرفعال';
+        document.getElementById('username').innerText = `Welcome, ${DATA.username}`;
+        document.getElementById('status').innerText = DATA.status === 'active' ? 'Active' : 'Expired';
         document.getElementById('status').className = 'badge ' + (DATA.status === 'active' ? 'badge-active' : 'badge-expired');
         document.getElementById('days').innerText = DATA.days_remaining;
         document.getElementById('usage').innerText = DATA.data_used_gb;
@@ -199,13 +199,13 @@ HTML_TEMPLATE = """
                      qrDiv.style.display = 'block';
                      if (!qrDiv.querySelector('canvas') && !qrDiv.querySelector('img')) {
                         if(DATA.wg_config) {
-                             new QRCode(document.getElementById("qrcode"), {
-                                 text: DATA.wg_config,
-                                 width: 180,
-                                 height: 180
-                             });
+                            new QRCode(document.getElementById("qrcode"), {
+                                text: DATA.wg_config,
+                                width: 180,
+                                height: 180
+                            });
                         } else {
-                            document.getElementById("qrcode").innerText = "کانفیگ وایرگارد موجود نیست";
+                            document.getElementById("qrcode").innerText = "WireGuard configuration is not available.";
                         }
                      }
                      // Also download
