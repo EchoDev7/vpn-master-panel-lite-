@@ -803,6 +803,44 @@ post_update_fixes() {
         fi
     fi
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+    # ── 7. Health checks (deployment verification) ───────────────────────────
+    echo -e "${CYAN}🔎 Running health checks...${NC}"
+
+    if [ -n "$BACKEND_SERVICE" ] && systemctl is-active --quiet "$BACKEND_SERVICE"; then
+        print_success "Backend service active (${BACKEND_SERVICE})"
+    else
+        print_warning "Backend service is not active or unknown"
+    fi
+
+    if systemctl is-active --quiet nginx; then
+        print_success "Nginx service active"
+    else
+        print_warning "Nginx service is not active"
+    fi
+
+    HEALTH_HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:8001/health" 2>/dev/null || echo "000")
+    if [ "$HEALTH_HTTP_CODE" = "200" ]; then
+        print_success "Backend /health reachable on 127.0.0.1:8001"
+    else
+        print_warning "Backend /health check failed on 127.0.0.1:8001 (HTTP ${HEALTH_HTTP_CODE})"
+    fi
+
+    if [ -n "$SUB_DOMAIN" ]; then
+        if [ "$SUB_PORT" = "443" ]; then
+            SUB_URL="https://${SUB_DOMAIN}/sub/INVALID_TOKEN"
+        else
+            SUB_URL="https://${SUB_DOMAIN}:${SUB_PORT}/sub/INVALID_TOKEN"
+        fi
+
+        SUB_HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "$SUB_URL" 2>/dev/null || echo "000")
+        if [ "$SUB_HTTP_CODE" = "200" ] || [ "$SUB_HTTP_CODE" = "403" ] || [ "$SUB_HTTP_CODE" = "404" ]; then
+            print_success "Subscription endpoint reachable (${SUB_URL} -> HTTP ${SUB_HTTP_CODE})"
+        else
+            print_warning "Subscription endpoint check failed (${SUB_URL} -> HTTP ${SUB_HTTP_CODE})"
+            echo -e "${YELLOW}   Check DNS (A record), firewall port ${SUB_PORT}, and Nginx SSL site for ${SUB_DOMAIN}.${NC}"
+        fi
+    fi
 }
 
 post_update_fixes
