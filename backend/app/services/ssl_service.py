@@ -311,7 +311,8 @@ class SSLService:
 
     # ──────────────────────────────────────────────── public entry point ──────
 
-    def stream_letsencrypt_cert(self, domain: str, email: str) -> Iterator[str]:
+    def stream_letsencrypt_cert(self, domain: str, email: str,
+                                https_port: Optional[int] = None) -> Iterator[str]:
         """
         Generator that yields live progress lines suitable for StreamingResponse.
         Call with:
@@ -330,6 +331,19 @@ class SSLService:
             return
 
         yield f"INFO: Starting SSL request for domain: {domain}\n"
+
+        # ── Resolve HTTPS port ────────────────────────────────────────────────
+        # Priority: 1) caller-supplied https_port  2) auto-detect port conflict
+        if https_port is not None:
+            self._https_port_override = https_port
+            yield f"INFO: HTTPS port set by caller: {https_port}\n"
+        else:
+            detected = self._detect_https_port()
+            self._https_port_override = detected
+            if detected == 8443:
+                yield "INFO: Port 443 is in use (OpenVPN?) — HTTPS will use port 8443.\n"
+            else:
+                yield "INFO: Port 443 is free — HTTPS will use port 443.\n"
 
         # ── Ensure certbot is available ───────────────────────────────────────
         if not self.certbot_path:
@@ -395,9 +409,15 @@ class SSLService:
         """Actions after a certificate is successfully issued."""
         yield f"\nSUCCESS: Certificate issued for {domain}\n"
         yield "EXEC: Writing Nginx SSL reverse-proxy config...\n"
+
+        # Detect which HTTPS port will be used before writing config
+        https_port = self._detect_https_port()
         written = self._update_nginx_config(domain)
         if written:
-            yield "INFO: Nginx SSL config written.\n"
+            yield f"INFO: Nginx SSL config written (HTTPS port: {https_port}).\n"
+            if https_port == 8443:
+                yield "INFO: Port 8443 used because OpenVPN occupies port 443.\n"
+                yield f"INFO: Make sure port 8443 is open: ufw allow 8443/tcp\n"
         else:
             yield "WARN: Could not write Nginx config (permission denied?). Review manually.\n"
 
@@ -413,20 +433,66 @@ class SSLService:
         yield f"INFO:   Cert → /etc/letsencrypt/live/{domain}/fullchain.pem\n"
         yield f"INFO:   Key  → /etc/letsencrypt/live/{domain}/privkey.pem\n"
         yield "INFO: Auto-renewal is handled by certbot's systemd timer.\n"
-        yield "DONE: Panel is now protected with HTTPS.\n"
+        if https_port == 8443:
+            yield f"DONE: Panel is now protected with HTTPS.\n"
+            yield f"DONE: Access your panel at: https://{domain}:8443\n"
+        else:
+            yield f"DONE: Panel is now protected with HTTPS.\n"
+            yield f"DONE: Access your panel at: https://{domain}\n"
 
     # ─────────────────────────────────────────────── Nginx config writer ──────
+
+    @staticmethod
+    def _detect_https_port() -> int:
+        """
+        Detect which HTTPS port to use for the panel.
+
+        Port 443 is commonly used by OpenVPN (TCP/443 is the default anti-censorship
+        setting for Iran). If anything is already listening on 443, we fall back to
+        8443 which is pre-opened in the firewall by install.sh.
+
+        Returns 443 if free, else 8443.
+        """
+        import socket
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                result = s.connect_ex(("127.0.0.1", 443))
+                if result == 0:
+                    # Something is already bound to 443 (likely OpenVPN)
+                    return 8443
+        except Exception:
+            pass
+        return 443
 
     def _update_nginx_config(self, domain: str) -> bool:
         """
         Write a production Nginx reverse-proxy config for the given domain.
-        Ports: FastAPI backend = 8001, React frontend = 3000 (static served by Nginx itself).
+
+        Port selection (in priority order):
+          1. self._https_port_override — set by stream_letsencrypt_cert() from
+             the caller-supplied value (user setting panel_https_port / sub_https_port)
+          2. Auto-detect: if port 443 is free → 443, else → 8443
+
+        React frontend is served directly by Nginx from /frontend/dist.
+        FastAPI backend runs on 127.0.0.1:8001 (internal).
         """
+        https_port = getattr(self, "_https_port_override", None) or self._detect_https_port()
         config_path  = f"/etc/nginx/sites-available/vpn_panel_{domain}"
         symlink_path = f"/etc/nginx/sites-enabled/vpn_panel_{domain}"
 
+        # Build the redirect URL — include port only when non-standard
+        if https_port == 443:
+            redirect_target = f"https://$host$request_uri"
+            listen_directive = "443 ssl http2"
+        else:
+            redirect_target = f"https://$host:{https_port}$request_uri"
+            listen_directive = f"{https_port} ssl http2"
+
         nginx_conf = f"""# VPN Master Panel — generated by ssl_service.py
-# Domain: {domain}  |  Generated automatically — do not edit by hand.
+# Domain: {domain}  |  HTTPS port: {https_port}
+# NOTE: Port {https_port} is used because {'port 443 is occupied (OpenVPN)' if https_port == 8443 else 'port 443 is available'}.
+# Generated automatically — do not edit by hand.
 
 # ── HTTP: redirect to HTTPS + ACME renewal ───────────────────────────────────
 server {{
@@ -434,27 +500,28 @@ server {{
     listen [::]:80;
     server_name {domain};
 
-    # Certbot renewal (webroot method)
+    # Certbot renewal — webroot challenge (zero-downtime)
     location /.well-known/acme-challenge/ {{
         root {_WEBROOT};
+        try_files $uri =404;
     }}
 
-    # Redirect everything else to HTTPS
+    # All other HTTP → HTTPS redirect
     location / {{
-        return 301 https://$host$request_uri;
+        return 301 {redirect_target};
     }}
 }}
 
-# ── HTTPS: main panel ─────────────────────────────────────────────────────────
+# ── HTTPS: main panel (port {https_port}) ─────────────────────────────────────
 server {{
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen {listen_directive};
+    listen [::]:{https_port} ssl http2;
     server_name {domain};
 
     ssl_certificate     /etc/letsencrypt/live/{domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;
 
-    # Let's Encrypt recommended TLS options (written by certbot)
+    # Let's Encrypt recommended TLS options
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
