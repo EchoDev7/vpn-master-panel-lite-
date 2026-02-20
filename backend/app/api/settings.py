@@ -37,22 +37,48 @@ async def update_settings(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
-    """Update multiple settings"""
+    """
+    Update multiple settings.
+    Returns changed_categories so the frontend knows which services need a restart.
+    """
+    changed_categories: set = set()
+
     for key, value in settings_data.items():
         setting = db.query(Setting).filter(Setting.key == key).first()
         if setting:
-            setting.value = value
+            if setting.value != str(value):   # only track actual changes
+                setting.value = str(value)
+                changed_categories.add(setting.category or "general")
         else:
-            # Create if not exists (auto-register)
+            # Auto-register new keys
             category = "general"
-            if key.startswith("ovpn_"): category = "openvpn"
+            if key.startswith("ovpn_"):  category = "openvpn"
             elif key.startswith("wg_"): category = "wireguard"
-            
+
             new_setting = Setting(key=key, value=str(value), category=category)
             db.add(new_setting)
-            
+            changed_categories.add(category)
+
     db.commit()
-    return {"message": "Settings updated successfully"}
+
+    # Build a human-readable restart hint for the frontend
+    restart_hints = []
+    if "openvpn" in changed_categories:
+        restart_hints.append(
+            "OpenVPN settings changed — click 'Generate & Apply' to write "
+            "server.conf and restart the service."
+        )
+    if "wireguard" in changed_categories:
+        restart_hints.append(
+            "WireGuard settings changed — click 'Generate & Apply' to write "
+            "wg0.conf and restart the service."
+        )
+
+    return {
+        "message": "Settings saved successfully",
+        "changed_categories": list(changed_categories),
+        "restart_hints": restart_hints,
+    }
 
 # Initialize default settings
 def init_default_settings(db: Session):
@@ -94,7 +120,7 @@ def init_default_settings(db: Session):
         "ovpn_explicit_exit_notify": "0",
 
         # ─── Cryptography & Security ───────────────────────────────────
-        "ovpn_cipher":               "AES-256-GCM",
+        # NOTE: ovpn_cipher is removed — use ovpn_data_ciphers (NCP negotiation, OpenVPN 2.4+)
         "ovpn_data_ciphers":         "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
         "ovpn_data_ciphers_fallback":"AES-256-GCM",
         "ovpn_auth_digest":          "SHA256",
@@ -125,16 +151,16 @@ def init_default_settings(db: Session):
         "ovpn_tun_mtu":   "1500",
         "ovpn_mssfix":    "1450",
         "ovpn_fragment":  "0",       # Fragment not needed for TCP; use for UDP only
-        "ovpn_mtu_disc":  "no",      # MTU discovery unreliable through Iran NAT
+        # NOTE: mtu-test/mtu-disc removed — unreliable through Iran NAT, breaks TCP/443
 
         # ─── Routing & DNS ──────────────────────────────────────────────
-        "ovpn_redirect_gateway":  "1",
-        "ovpn_dns":               "1.1.1.1,8.8.8.8",
-        "ovpn_block_outside_dns": "1",     # Windows DNS leak protection — ENABLED
-        "ovpn_client_to_client":  "0",
-        "ovpn_inter_client":      "0",     # UI alias for client_to_client
-        "ovpn_push_routes":       "",
-        "ovpn_push_remove_routes":"",
+        "ovpn_redirect_gateway":   "1",
+        "ovpn_dns":                "1.1.1.1,8.8.8.8",
+        "ovpn_block_outside_dns":  "1",    # Windows DNS leak protection — ENABLED
+        # Client-to-client: one canonical key used by both UI and backend
+        "ovpn_client_to_client":   "0",
+        "ovpn_push_routes":        "",
+        "ovpn_push_remove_routes": "",
 
         # ─── Logging & Management ──────────────────────────────────────
         "ovpn_verb":           "3",
@@ -150,14 +176,6 @@ def init_default_settings(db: Session):
         # ─── Compression ────────────────────────────────────────────────
         "ovpn_compress":          "",        # DISABLED — VORACLE + DPI risk
         "ovpn_allow_compression": "0",       # whether to allow client-initiated compression
-
-        # ─── TLS certificate profile ────────────────────────────────────
-        "ovpn_tls_cert_profile":  "preferred",  # preferred | legacy | suiteb
-
-        # ─── Proxy (domain fronting / HTTP CONNECT) ─────────────────────
-        "ovpn_proxy_type":    "none",
-        "ovpn_proxy_address": "",
-        "ovpn_proxy_port":    "",
 
         # ─── HTTP Proxy / Domain Fronting (native OpenVPN) ───────────────
         # Lets OpenVPN Connect route through an HTTP CONNECT proxy with a
@@ -271,13 +289,22 @@ def init_default_settings(db: Session):
         "traffic_warning_percent": "80",
     }
     
+    # Fetch all existing keys in a single query to avoid N+1 on every startup.
+    existing_keys = {row.key for row in db.query(Setting.key).all()}
+
+    new_settings = []
     for key, value in defaults.items():
-        if not db.query(Setting).filter(Setting.key == key).first():
+        if key not in existing_keys:
             category = "general"
-            if key.startswith("ovpn_"): category = "openvpn"
-            elif key.startswith("wg_"): category = "wireguard"
-            db.add(Setting(key=key, value=value, category=category))
-    db.commit()
+            if key.startswith("ovpn_"):
+                category = "openvpn"
+            elif key.startswith("wg_"):
+                category = "wireguard"
+            new_settings.append(Setting(key=key, value=value, category=category))
+
+    if new_settings:
+        db.bulk_save_objects(new_settings)
+        db.commit()
 
 
 # =============================================
@@ -312,13 +339,14 @@ async def get_pki_info(
 
 @router.get("/server-config/preview")
 async def preview_server_config(
+    db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
     """Preview the generated OpenVPN server.conf (includes validation warnings)"""
     from ..services.openvpn import openvpn_service
     try:
-        s       = openvpn_service._load_settings()
-        config  = openvpn_service.generate_server_config()
+        s        = openvpn_service._load_settings(db=db)
+        config   = openvpn_service.generate_server_config(db=db)
         warnings = openvpn_service.validate_config(s)
         return {"content": config, "filename": "server.conf", "warnings": warnings}
     except Exception as e:
@@ -327,35 +355,36 @@ async def preview_server_config(
 
 @router.post("/server-config/apply")
 async def apply_server_config(
+    db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
     """Generate and write server.conf to /etc/openvpn/server.conf"""
     from ..services.openvpn import openvpn_service
     import os
-    
+
     try:
-        config = openvpn_service.generate_server_config()
-        
+        config = openvpn_service.generate_server_config(db=db)
+
         # Write to standard OpenVPN location
         config_path = "/etc/openvpn/server.conf"
-        
+
         # Also save a copy in our data dir
         backup_path = os.path.join(openvpn_service.DATA_DIR, "server.conf")
         os.makedirs(os.path.dirname(backup_path), exist_ok=True)
-        
+
         with open(backup_path, "w") as f:
             f.write(config)
-        
+
         # Try to write to system path (may need root)
         try:
             # SAFETY CHECK: Ensure we are NOT overwriting keys
             if "BEGIN PRIVATE KEY" in config:
                 raise ValueError("Security violation: Attempted to write private key to server.conf")
-                
+
             with open(config_path, "w") as f:
                 f.write(config)
             system_written = True
-            
+
             # Auto-Restart Service
             try:
                 import subprocess
@@ -363,13 +392,13 @@ async def apply_server_config(
                 restart_status = "Service restarted successfully."
             except Exception as e:
                 restart_status = f"Service restart failed: {str(e)}"
-                
+
         except PermissionError:
             system_written = False
-            restart_status = "Permission denied: Cannot specific system path."
-        
+            restart_status = "Permission denied: Cannot write to system path."
+
         # Include validation warnings in the response
-        s = openvpn_service._load_settings()
+        s = openvpn_service._load_settings(db=db)
         warnings = openvpn_service.validate_config(s)
 
         return {
