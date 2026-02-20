@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from pydantic import BaseModel, EmailStr, field_validator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from ..database import get_db
@@ -158,10 +158,10 @@ async def create_user(
                 detail="Email already exists"
             )
     
-    # Calculate expiry date
+    # Calculate expiry date (timezone-aware UTC)
     expiry_date = None
     if user_data.expiry_days and user_data.expiry_days > 0:
-        expiry_date = datetime.utcnow() + timedelta(days=user_data.expiry_days)
+        expiry_date = datetime.now(timezone.utc) + timedelta(days=user_data.expiry_days)
     
     # Create user
     new_user = User(
@@ -310,9 +310,9 @@ async def update_user(
     if "expiry_days" in update_data:
         days = update_data.pop("expiry_days")
         if days is not None and days > 0:
-            update_data["expiry_date"] = datetime.utcnow() + timedelta(days=days)
+            update_data["expiry_date"] = datetime.now(timezone.utc) + timedelta(days=days)
         elif days == 0:
-            update_data["expiry_date"] = None # Unlimited
+            update_data["expiry_date"] = None  # Unlimited
     
     for field, value in update_data.items():
         setattr(user, field, value)
@@ -608,7 +608,10 @@ async def get_user_details(
         "stats": {
             "total_traffic_gb": user.total_traffic_gb,
             "avg_daily_usage_gb": 0, # Placeholder for now
-            "days_until_expiry": (user.expiry_date - datetime.utcnow()).days if user.expiry_date else None
+            "days_until_expiry": (
+                (user.expiry_date.replace(tzinfo=timezone.utc) if user.expiry_date.tzinfo is None else user.expiry_date)
+                - datetime.now(timezone.utc)
+            ).days if user.expiry_date else None
         }
     }
 
