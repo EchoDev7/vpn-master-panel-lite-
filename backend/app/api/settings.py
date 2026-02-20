@@ -61,90 +61,100 @@ def init_default_settings(db: Session):
         # OpenVPN — Iran Anti-Censorship Defaults
         # =============================================
 
-        # --- Network & Server ---
-        "ovpn_protocol": "udp",
-        "ovpn_port": "1194",
-        "ovpn_dev": "tun",
-        "ovpn_dev_type": "tun",
-        "ovpn_topology": "subnet",
-        "ovpn_server_subnet": "10.8.0.0",
-        "ovpn_server_netmask": "255.255.255.0",
-        "ovpn_max_clients": "100",
-        "ovpn_server_ip": "",                # Override public IP
+        # ─── Network & Server ──────────────────────────────────────────
+        # TCP/443: best for Iran — HTTPS port, passes most firewalls and DPI
+        "ovpn_protocol":        "tcp",
+        "ovpn_port":            "443",
+        "ovpn_dev":             "tun",
+        "ovpn_dev_type":        "tun",
+        "ovpn_topology":        "subnet",
+        "ovpn_server_subnet":   "10.8.0.0",
+        "ovpn_server_netmask":  "255.255.255.0",
+        "ovpn_max_clients":     "100",
+        "ovpn_server_ip":       "",            # Override detected public IP
 
-        # --- Connectivity & Reliability ---
+        # ─── Connectivity & Reliability ────────────────────────────────
         "ovpn_keepalive_interval": "10",
-        "ovpn_keepalive_timeout": "60",
-        "ovpn_float": "1",                   # Allow client IP float
-        "ovpn_comp_lzo": "no",               # Deprecated but kept for legacy
-        "ovpn_compress": "",                 # "lzo", "lz4", "lz4-v2" or empty to disable
-        "ovpn_allow_compression": "no",      # Security: disable checking compression
-        "ovpn_pers_tun": "1",
-        "ovpn_pers_key": "1",
-        "ovpn_user": "nobody",
-        "ovpn_group": "nogroup",
+        "ovpn_keepalive_timeout":  "60",
+        "ovpn_float":              "1",        # Allow client IP to float (mobile networks)
+        "ovpn_compress":           "",         # DISABLED — VORACLE + DPI fingerprint risk
+        "ovpn_allow_compression":  "no",
+        "ovpn_pers_tun":           "1",
+        "ovpn_pers_key":           "1",
+        "ovpn_user":               "nobody",
+        "ovpn_group":              "nogroup",
 
-        # --- Interaction & Timeouts ---
-        "ovpn_reneg_sec": "3600",            # TLS renegotiation
-        "ovpn_hand_window": "60",            # Handshake window
-        "ovpn_tran_window": "3600",          # Transition window
-        "ovpn_tls_timeout": "2",             # Packet retransmit timeout
-        "ovpn_connect_retry": "5",
-        "ovpn_connect_retry_max": "0",
-        "ovpn_server_poll_timeout": "10",
-        "ovpn_explicit_exit_notify": "1",    # Notify server on disconnect (UDP)
+        # ─── Timeouts ──────────────────────────────────────────────────
+        "ovpn_reneg_sec":            "3600",
+        "ovpn_hand_window":          "60",
+        "ovpn_tran_window":          "3600",
+        "ovpn_tls_timeout":          "2",
+        "ovpn_connect_retry":        "5",
+        "ovpn_connect_retry_max":    "0",
+        "ovpn_server_poll_timeout":  "10",
+        # explicit-exit-notify is UDP-only; omit for TCP (will be ignored anyway)
+        "ovpn_explicit_exit_notify": "0",
 
-        # --- Cryptography & Security ---
-        "ovpn_cipher": "AES-256-GCM",        # Main cipher (NCP)
-        "ovpn_data_ciphers": "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
-        "ovpn_data_ciphers_fallback": "AES-256-GCM",
-        "ovpn_auth_digest": "SHA256",
-        "ovpn_tls_version_min": "1.2",
-        "ovpn_tls_cert_profile": "preferred",
-        "ovpn_tls_ciphers": "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384",
-        "ovpn_tls_cipher_suites": "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
-        "ovpn_ecdh_curve": "secp384r1",      # Strong curve
-        "ovpn_dh_file": "none",              # Disable DH (use ECDH)
-        "ovpn_crl_verify": "crl.pem",        # Certificate Revocation List
+        # ─── Cryptography & Security ───────────────────────────────────
+        "ovpn_cipher":               "AES-256-GCM",
+        "ovpn_data_ciphers":         "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
+        "ovpn_data_ciphers_fallback":"AES-256-GCM",
+        "ovpn_auth_digest":          "SHA256",
+        "ovpn_tls_version_min":      "1.2",
+        "ovpn_tls_cert_profile":     "preferred",
+        # TLS 1.2 cipher suites — match modern HTTPS browser fingerprint
+        "ovpn_tls_ciphers": (
+            "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:"
+            "TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384:"
+            "TLS-ECDHE-ECDSA-WITH-CHACHA20-POLY1305-SHA256:"
+            "TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256"
+        ),
+        # TLS 1.3 cipher suites (OpenVPN 2.5+)
+        "ovpn_tls_cipher_suites":    "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
+        "ovpn_ecdh_curve":           "secp384r1",
+        "ovpn_dh_file":              "none",   # Pure ECDHE — no static DH needed
+        "ovpn_crl_verify":           "crl.pem",
 
-        # --- TLS Control Channel Obfuscation ---
-        "ovpn_tls_control_channel": "tls-crypt", # none, tls-auth, tls-crypt, tls-crypt-v2
-        "ovpn_auth_nocache": "1",            # Don't cache passwords in memory
+        # ─── TLS Control Channel (Iran DPI bypass core) ─────────────────
+        # tls-crypt wraps the entire TLS handshake in an HMAC envelope,
+        # making it indistinguishable from random data to DPI.
+        "ovpn_tls_control_channel":  "tls-crypt",
+        "ovpn_auth_nocache":         "1",
 
-        # --- Anti-Censorship & DPI Evasion ---
-        "ovpn_scramble": "1",                # XOR Scramble (Unofficial patch)
-        "ovpn_scramble_password": "vpnmaster", 
-        "ovpn_fragment": "0",                # Fragment packets
-        "ovpn_mssfix": "1380",               # Adjust based on MTU
-        "ovpn_tun_mtu": "1420",
-        "ovpn_mtu_disc": "yes",              # MTU discovery
+        # ─── MTU / MSS — TCP/443 over Ethernet ─────────────────────────
+        # tun-mtu 1500: full Ethernet MTU; mssfix 1450 leaves room for
+        # OpenVPN+TLS headers when running TCP-in-TCP (TCP/443).
+        "ovpn_tun_mtu":   "1500",
+        "ovpn_mssfix":    "1450",
+        "ovpn_fragment":  "0",       # Fragment not needed for TCP; use for UDP only
+        "ovpn_mtu_disc":  "no",      # MTU discovery unreliable through Iran NAT
 
-        # --- Routing & DNS (Push Options) ---
-        "ovpn_redirect_gateway": "1",        # def1 bypass-dhcp
-        "ovpn_dns": "1.1.1.1,8.8.8.8",
-        "ovpn_block_outside_dns": "0",       # Windows leak protection
-        "ovpn_client_to_client": "0",
-        "ovpn_push_routes": "",              # e.g. "192.168.1.0 255.255.255.0"
-        "ovpn_push_remove_routes": "",       # Remove specific routes
+        # ─── Routing & DNS ──────────────────────────────────────────────
+        "ovpn_redirect_gateway":  "1",
+        "ovpn_dns":               "1.1.1.1,8.8.8.8",
+        "ovpn_block_outside_dns": "1",     # Windows DNS leak protection — ENABLED
+        "ovpn_client_to_client":  "0",
+        "ovpn_push_routes":       "",
+        "ovpn_push_remove_routes":"",
 
-        # --- Logging & Management ---
-        "ovpn_verb": "3",                    # 0-9
-        "ovpn_mute": "20",                   # Silence repeating messages
-        "ovpn_status_log": "/var/log/openvpn/openvpn-status.log",
-        "ovpn_status_version": "2",          # Status file format version
-        "ovpn_management": "127.0.0.1 7505", # Management interface
-        
-        # --- Proxy Configuration ---
-        "ovpn_proxy_type": "none",           # none / socks / http
+        # ─── Logging & Management ──────────────────────────────────────
+        "ovpn_verb":           "3",
+        "ovpn_mute":           "20",
+        "ovpn_status_log":     "/var/log/openvpn/openvpn-status.log",
+        "ovpn_status_version": "2",          # CLIENT_LIST format for monitoring.py
+        "ovpn_management":     "127.0.0.1 7505",
+
+        # ─── Proxy (domain fronting / HTTP CONNECT) ─────────────────────
+        "ovpn_proxy_type":    "none",
         "ovpn_proxy_address": "",
-        "ovpn_proxy_port": "",
-        
-        # --- Multi-Remote (Failover) ---
-        "ovpn_remote_servers": "",           # ip:port:proto, ip:port:proto
-        
-        # --- Advanced Custom Config ---
-        "ovpn_custom_client_config": "",     # Raw text
-        "ovpn_custom_server_config": "",     # Raw text
+        "ovpn_proxy_port":    "",
+
+        # ─── Multi-Remote Failover ──────────────────────────────────────
+        "ovpn_remote_servers": "",           # "ip:port:proto,ip:port:proto"
+
+        # ─── Custom Config Append ──────────────────────────────────────
+        "ovpn_custom_client_config": "",
+        "ovpn_custom_server_config": "",
 
         # =============================================
         # WireGuard — Iran Anti-Censorship Defaults
