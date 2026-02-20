@@ -14,6 +14,7 @@ from typing import Dict, Any
 from .config import settings
 from .database import init_db, engine
 from . import models
+from .utils.security import get_current_admin
 
 # Setup logging
 logging.basicConfig(
@@ -210,18 +211,19 @@ async def root():
     }
 
 
-# System info endpoint
+# System info endpoint — admin only
 @app.get("/api/system/info")
-async def system_info():
-    """Get system information"""
+async def system_info(
+    current_admin=Depends(get_current_admin)
+):
+    """Get system information (Admin only)"""
     import psutil
     import platform
-    
+
     return {
         "platform": platform.system(),
         "platform_release": platform.release(),
         "architecture": platform.machine(),
-        "hostname": platform.node(),
         "cpu_count": psutil.cpu_count(),
         "cpu_percent": psutil.cpu_percent(interval=1),
         "memory": {
