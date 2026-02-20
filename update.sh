@@ -95,8 +95,9 @@ fi
 echo -e "${CYAN}📦 Updating System Packages...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt update -qq
-# Ensure critical packages are present - Added fail2ban and npm
-apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs npm python3-pip openssl fail2ban
+# Ensure critical packages are present (certbot added for SSL)
+apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs npm python3-pip openssl fail2ban certbot python3-certbot-nginx
+echo -e "${GREEN}✓ certbot: $(certbot --version 2>&1 | head -1)${NC}"
 
 # Configure Fail2Ban if missing
 if [ ! -f "/etc/fail2ban/jail.local" ]; then
