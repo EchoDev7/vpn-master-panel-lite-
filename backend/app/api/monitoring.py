@@ -25,12 +25,15 @@ async def get_dashboard_stats(
         total_users = db.query(User).count()
         active_users = db.query(User).filter(User.status == "active").count()
         
-        # Active connections
+        # Active connections: users seen in the last 3 minutes
+        # ConnectionLog.is_active is not reliably maintained; use last_connection instead.
         try:
-            active_connections = db.query(ConnectionLog).filter(
-                ConnectionLog.is_active == True
+            from datetime import timezone as _tz
+            three_min_ago = datetime.now(_tz.utc) - timedelta(minutes=3)
+            active_connections = db.query(User).filter(
+                User.last_connection >= three_min_ago
             ).count()
-        except:
+        except Exception:
             active_connections = 0
         
         # Total traffic (last 24h)
@@ -99,11 +102,23 @@ async def get_active_connections(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
-    """Get list of active connections"""
-    connections = db.query(ConnectionLog).filter(
-        ConnectionLog.is_active == True
-    ).all()
-    
+    """Get list of active connections (users seen in the last 3 minutes)"""
+    from datetime import timezone as _tz
+    three_min_ago = datetime.now(_tz.utc) - timedelta(minutes=3)
+
+    # Find open ConnectionLog entries that have no disconnected_at
+    # and whose user was active recently.
+    connections = (
+        db.query(ConnectionLog)
+        .join(User, ConnectionLog.user_id == User.id)
+        .filter(
+            ConnectionLog.disconnected_at == None,
+            User.last_connection >= three_min_ago,
+        )
+        .order_by(ConnectionLog.connected_at.desc())
+        .all()
+    )
+
     result = []
     for conn in connections:
         result.append({
@@ -111,10 +126,9 @@ async def get_active_connections(
             "username": conn.user.username if conn.user else None,
             "protocol": conn.protocol,
             "client_ip": conn.client_ip,
-            "virtual_ip": conn.virtual_ip,
-            "connected_at": conn.connected_at.isoformat() if conn.connected_at else None
+            "connected_at": conn.connected_at.isoformat() if conn.connected_at else None,
         })
-    
+
     return result
 
 
