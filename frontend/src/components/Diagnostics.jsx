@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef } from 'react';
 import { Activity, Shield, Server, Box, AlertTriangle, CheckCircle, RefreshCw, Terminal, GitBranch, Globe, Database, Link, Clock, Play, Pause } from 'lucide-react';
 import apiService from '../services/api';
 
@@ -371,7 +371,7 @@ export default function Diagnostics() {
                                 const isRequired = pkg.required === true;
 
                                 return (
-                                    <React.Fragment key={pkg.name}>
+                                    <Fragment key={pkg.name}>
                                         {/* Main package row */}
                                         <tr className={`hover:bg-gray-700/10 ${isRequired && isMissing ? 'bg-red-900/20' : ''}`}>
                                             <td className="p-3 font-bold flex items-center gap-2">
@@ -439,7 +439,7 @@ export default function Diagnostics() {
                                                 </td>
                                             </tr>
                                         )}
-                                    </React.Fragment>
+                                    </Fragment>
                                 );
                             })}
                         </tbody>
