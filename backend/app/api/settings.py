@@ -538,11 +538,38 @@ async def request_letsencrypt_ssl(
     req: SSLRequest,
     current_admin: User = Depends(get_current_admin)
 ):
-    """Trigger Certbot to issue an SSL certificate for the panel domain (Streaming)"""
+    """
+    Issue a Let's Encrypt SSL certificate for a domain.
+    Streams live certbot output so the UI can display progress in real time.
+
+    The response uses:
+      - Content-Type: text/event-stream  (SSE-compatible, never buffered)
+      - X-Accel-Buffering: no            (disables Nginx proxy buffering)
+      - Cache-Control: no-cache          (prevents any intermediary caching)
+    """
     from ..services.ssl_service import SSLService
-    
+
     ssl_service = SSLService()
+
+    headers = {
+        "X-Accel-Buffering": "no",       # Nginx: disable proxy_buffering for this response
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    }
+
     return StreamingResponse(
-        ssl_service.stream_letsencrypt_cert(req.domain, req.email), 
-        media_type="text/plain"
+        ssl_service.stream_letsencrypt_cert(req.domain, req.email),
+        media_type="text/plain; charset=utf-8",
+        headers=headers,
     )
+
+
+@router.get("/ssl/status")
+async def get_ssl_status(
+    domain: str,
+    current_admin: User = Depends(get_current_admin)
+):
+    """Check the SSL certificate status for a domain."""
+    from ..services.ssl_service import SSLService
+    ssl_service = SSLService()
+    return ssl_service.check_ssl_status(domain)
