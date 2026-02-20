@@ -200,24 +200,21 @@ class OpenVPNService:
         # --- Connection Reliability ---
         conf.append("\n# --- Reliability ---")
         conf.append(f"keepalive {s.get('keepalive_interval', '10')} {s.get('keepalive_timeout', '60')}")
-        
-        # Explicit Topology
-        conf.append("topology subnet")
-        
+
         if s.get("duplicate_cn") == "1":
             conf.append("duplicate-cn")
             
         if s.get("explicit_exit_notify", "0") != "0" and "udp" in s.get("protocol", ""):
-             conf.append(f"explicit-exit-notify {s['explicit_exit_notify']}")
+            conf.append(f"explicit-exit-notify {s['explicit_exit_notify']}")
 
         if s.get("float", "1") == "1":
             conf.append("float")
 
         # Optimization for VPS/Cloud (Fixes packet drops)
-        conf.append(f"tun-mtu {s.get('tun_mtu', '1420')}") 
-        conf.append(f"mssfix {s.get('mssfix', '1380')}") # Leave room for headers
-        
-        # Buffer Optimization (Requested)
+        conf.append(f"tun-mtu {s.get('tun_mtu', '1420')}")
+        conf.append(f"mssfix {s.get('mssfix', '1380')}")
+
+        # Buffer Optimization
         conf.append("sndbuf 0")
         conf.append("rcvbuf 0")
         
@@ -240,22 +237,15 @@ class OpenVPNService:
 
         # --- Anti-Censorship ---
         conf.append("\n# --- Anti-Censorship ---")
-        
+
         # Port Sharing (HTTPS Camouflage)
         port_share = s.get("port_share")
         if port_share:
             conf.append(f"port-share {port_share}")
-            
+
+        # Fragment: only emit if explicitly set (mssfix/tun-mtu already emitted above)
         if s.get("fragment", "0") != "0":
             conf.append(f"fragment {s['fragment']}")
-            conf.append(f"mssfix {s['fragment']}")
-        else:
-             # MSSFix is standard
-             if s.get("mssfix"):
-                 conf.append(f"mssfix {s['mssfix']}")
-        
-        if s.get("tun_mtu"):
-            conf.append(f"tun-mtu {s['tun_mtu']}")
 
         # --- System & Logging ---
         conf.append("\n# --- System ---")
@@ -270,9 +260,10 @@ class OpenVPNService:
         if s.get("mute"):
             conf.append(f"mute {s['mute']}")
             
-        # Status Log
+        # Status Log — version 2 uses comma-delimited fields (CLIENT_LIST prefix)
+        # which the monitoring service parses. Keep consistent with the DB default.
         conf.append(f"status {s.get('status_log', '/var/log/openvpn/openvpn-status.log')}")
-        conf.append(f"status-version {s.get('status_version', '1')}") # v1 needed for monitoring.py
+        conf.append(f"status-version {s.get('status_version', '2')}")
         
         # Management Interface (F1 Support)
         mgmt = s.get("management", "127.0.0.1 7505")
@@ -687,13 +678,20 @@ class OpenVPNService:
                 "-extfile", ext_path
             ], check=True)
 
-            # 5. Generate Diffie-Hellman (DH)
-            # openssl dhparam -out dh.pem 2048
+            # 5. Generate Diffie-Hellman (DH) — 2048-bit minimum; 4096 for long-term security
+            # If ECDH is preferred (dh none), skip DH generation entirely.
             subprocess.run(["openssl", "dhparam", "-out", self.DH_PATH, "2048"], check=True)
+            # NOTE: For maximum security, consider "dh none" + "ecdh-curve secp384r1" in server.conf
+            #       to skip DH entirely and rely solely on ECDHE.
 
-            # 6. Generate TLS-Auth Key (TA)
-            # openvpn --genkey tls-auth ta.key
-            subprocess.run(["openvpn", "--genkey", "tls-auth", self.TA_KEY], check=True)
+            # 6. Generate TLS-Auth/TLS-Crypt Key (TA)
+            # OpenVPN 2.5+: --genkey secret <file>
+            # OpenVPN 2.4:  --genkey --secret <file>  (legacy syntax)
+            try:
+                subprocess.run(["openvpn", "--genkey", "secret", self.TA_KEY], check=True)
+            except subprocess.CalledProcessError:
+                # Fallback for OpenVPN 2.4 and older
+                subprocess.run(["openvpn", "--genkey", "--secret", self.TA_KEY], check=True)
 
             # 7. Set Permissions (Security Fix)
             # chmod 600 server.key ta.key ca.key
