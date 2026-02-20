@@ -15,33 +15,33 @@ CERT_DIR="/etc/letsencrypt/live/${DOMAIN}"
 WEBROOT="/var/www/html"
 FRONTEND="/opt/vpn-master-panel/frontend/dist"
 BACKEND="127.0.0.1:8001"
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
-# Auto-detect HTTPS port: use 8443 if 443 is busy (OpenVPN), else 443
+ALLOWED_SSL_PORTS="2053 2083 2087 2096 8443"
+
+is_allowed_port() {
+    local p="$1"
+    for allowed in $ALLOWED_SSL_PORTS; do
+        if [ "$p" = "$allowed" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Resolve HTTPS port according to managed edge-port policy
 if [ -n "$2" ]; then
     HTTPS_PORT="$2"
-    if [ "$HTTPS_PORT" = "443" ]; then
-        if ss -tlnp 2>/dev/null | grep -q ':443 ' || netstat -tlnp 2>/dev/null | grep -q ':443 '; then
-            HTTPS_PORT=8443
-            echo -e "${YELLOW}⚠ Requested port 443 is busy — using 8443 for HTTPS${NC}"
-        fi
+    if ! is_allowed_port "$HTTPS_PORT"; then
+        echo -e "${YELLOW}⚠ Requested port ${HTTPS_PORT} is not allowed. Using 8443.${NC}"
+        HTTPS_PORT=8443
     fi
 else
-    if ss -tlnp 2>/dev/null | grep -q ':443 ' || netstat -tlnp 2>/dev/null | grep -q ':443 '; then
-        HTTPS_PORT=8443
-        echo -e "${YELLOW}⚠ Port 443 is busy (OpenVPN?) — using port 8443 for HTTPS${NC}"
-    else
-        HTTPS_PORT=443
-    fi
+    HTTPS_PORT=8443
 fi
 
 # Redirect URL — include port only when non-standard
-if [ "$HTTPS_PORT" = "443" ]; then
-    REDIRECT_URL="https://\$host\$request_uri"
-else
-    REDIRECT_URL="https://\$host:${HTTPS_PORT}\$request_uri"
-fi
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+REDIRECT_URL="https://\$host:${HTTPS_PORT}\$request_uri"
 
 echo -e "${CYAN}▶ Restoring Nginx SSL config for: ${DOMAIN}${NC}"
 
