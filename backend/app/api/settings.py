@@ -77,8 +77,6 @@ def init_default_settings(db: Session):
         "ovpn_keepalive_interval": "10",
         "ovpn_keepalive_timeout":  "60",
         "ovpn_float":              "1",        # Allow client IP to float (mobile networks)
-        "ovpn_compress":           "",         # DISABLED — VORACLE + DPI fingerprint risk
-        "ovpn_allow_compression":  "no",
         "ovpn_pers_tun":           "1",
         "ovpn_pers_key":           "1",
         "ovpn_user":               "nobody",
@@ -134,6 +132,7 @@ def init_default_settings(db: Session):
         "ovpn_dns":               "1.1.1.1,8.8.8.8",
         "ovpn_block_outside_dns": "1",     # Windows DNS leak protection — ENABLED
         "ovpn_client_to_client":  "0",
+        "ovpn_inter_client":      "0",     # UI alias for client_to_client
         "ovpn_push_routes":       "",
         "ovpn_push_remove_routes":"",
 
@@ -144,17 +143,51 @@ def init_default_settings(db: Session):
         "ovpn_status_version": "2",          # CLIENT_LIST format for monitoring.py
         "ovpn_management":     "127.0.0.1 7505",
 
+        # ─── Authentication ─────────────────────────────────────────────
+        "ovpn_auth_mode":    "password",    # password | cert | 2fa
+        "ovpn_duplicate_cn": "0",           # allow same cert from multiple devices
+
+        # ─── Compression ────────────────────────────────────────────────
+        "ovpn_compress":          "",        # DISABLED — VORACLE + DPI risk
+        "ovpn_allow_compression": "0",       # whether to allow client-initiated compression
+
+        # ─── TLS certificate profile ────────────────────────────────────
+        "ovpn_tls_cert_profile":  "preferred",  # preferred | legacy | suiteb
+
         # ─── Proxy (domain fronting / HTTP CONNECT) ─────────────────────
         "ovpn_proxy_type":    "none",
         "ovpn_proxy_address": "",
         "ovpn_proxy_port":    "",
 
+        # ─── HTTP Proxy / Domain Fronting (native OpenVPN) ───────────────
+        # Lets OpenVPN Connect route through an HTTP CONNECT proxy with a
+        # spoofed Host header — effective against Iran SNI filtering.
+        "ovpn_http_proxy_enabled":       "0",
+        "ovpn_http_proxy_host":          "",   # Proxy IP / CDN edge IP
+        "ovpn_http_proxy_port":          "80",
+        "ovpn_http_proxy_custom_header": "",   # Spoofed Host domain for DPI bypass
+
         # ─── Multi-Remote Failover ──────────────────────────────────────
-        "ovpn_remote_servers": "",           # "ip:port:proto,ip:port:proto"
+        "ovpn_remote_servers":       "",   # "ip:port:proto,ip:port:proto"
+        "ovpn_remote_address_type":  "auto",   # auto | custom_ip | domain
+        "ovpn_remote_domain":        "",       # custom domain for clients
+
+        # ─── Port Sharing (HTTPS camouflage) ────────────────────────────
+        # Forward non-VPN probes on port 443 to a real HTTPS server.
+        # e.g. "127.0.0.1 8443"
+        "ovpn_port_share": "",
+
+        # ─── Block Iranian IPs (server-side) ────────────────────────────
+        # Script-based — see custom_server_config for iptables rules
+        "ovpn_block_iran_ips": "0",
 
         # ─── Custom Config Append ──────────────────────────────────────
         "ovpn_custom_client_config": "",
         "ovpn_custom_server_config": "",
+
+        # ─── General panel settings ─────────────────────────────────────
+        "panel_domain":        "",         # Admin panel domain (proxy ON)
+        "ssl_email":           "",         # Email for Let's Encrypt alerts
 
         # =============================================
         # WireGuard — Iran Anti-Censorship Defaults
@@ -281,11 +314,13 @@ async def get_pki_info(
 async def preview_server_config(
     current_admin: User = Depends(get_current_admin)
 ):
-    """Preview the generated OpenVPN server.conf"""
+    """Preview the generated OpenVPN server.conf (includes validation warnings)"""
     from ..services.openvpn import openvpn_service
     try:
-        config = openvpn_service.generate_server_config()
-        return {"content": config, "filename": "server.conf"}
+        s       = openvpn_service._load_settings()
+        config  = openvpn_service.generate_server_config()
+        warnings = openvpn_service.validate_config(s)
+        return {"content": config, "filename": "server.conf", "warnings": warnings}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -333,13 +368,18 @@ async def apply_server_config(
             system_written = False
             restart_status = "Permission denied: Cannot specific system path."
         
+        # Include validation warnings in the response
+        s = openvpn_service._load_settings()
+        warnings = openvpn_service.validate_config(s)
+
         return {
             "message": "Server config generated",
             "system_path": config_path if system_written else None,
             "backup_path": backup_path,
             "system_written": system_written,
             "restart_status": restart_status,
-            "hint": "Configuration applied." if system_written else 
+            "warnings": warnings,
+            "hint": "Configuration applied." if system_written else
                     f"Copy manually: sudo cp {backup_path} {config_path} && sudo systemctl restart openvpn@server"
         }
     except Exception as e:
@@ -352,10 +392,18 @@ async def get_openvpn_version(
     """Get OpenVPN version installed on system"""
     import subprocess
     try:
-        cleanup = subprocess.check_output("openvpn --version | head -n 1", shell=True).decode().strip()
-        return {"version": cleanup}
-    except:
-        return {"version": "Not Found / Not Installed"}
+        result = subprocess.run(
+            ["openvpn", "--version"],
+            capture_output=True, text=True, timeout=5
+        )
+        # openvpn --version exits with code 1 but still prints to stdout
+        output = (result.stdout or result.stderr or "").strip()
+        first_line = output.splitlines()[0] if output else ""
+        return {"version": first_line or "Unknown"}
+    except FileNotFoundError:
+        return {"version": "Not Installed"}
+    except Exception as exc:
+        return {"version": f"Error: {exc}"}
 
 
 # =============================================
