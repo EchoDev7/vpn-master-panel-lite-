@@ -203,9 +203,22 @@ echo -e "${GREEN}✓ Symlink created${NC}"
 # ── Test and reload ───────────────────────────────────────
 echo -e "${CYAN}▶ Testing Nginx config...${NC}"
 if nginx -t 2>&1; then
-    systemctl reload nginx
+    if systemctl is-active --quiet nginx; then
+        if systemctl reload nginx; then
+            echo -e "${GREEN}✓ Nginx reloaded successfully${NC}"
+        else
+            echo -e "${RED}✗ Nginx reload failed${NC}"
+            exit 1
+        fi
+    else
+        if systemctl start nginx; then
+            echo -e "${GREEN}✓ Nginx started successfully${NC}"
+        else
+            echo -e "${RED}✗ Nginx start failed${NC}"
+            exit 1
+        fi
+    fi
     sleep 1
-    echo -e "${GREEN}✓ Nginx reloaded successfully${NC}"
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
     echo -e "${GREEN}  ✅ Panel is now live at:${NC}"
