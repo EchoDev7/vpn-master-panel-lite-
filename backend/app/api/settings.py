@@ -216,7 +216,7 @@ def init_default_settings(db: Session):
 
         # ─── Connectivity & Reliability ────────────────────────────────
         "ovpn_keepalive_interval": "10",
-        "ovpn_keepalive_timeout":  "60",
+        "ovpn_keepalive_timeout":  "90",
         "ovpn_float":              "1",        # Allow client IP to float (mobile networks)
         "ovpn_pers_tun":           "1",
         "ovpn_pers_key":           "1",
@@ -260,6 +260,7 @@ def init_default_settings(db: Session):
         # making it indistinguishable from random data to DPI.
         "ovpn_tls_control_channel":  "tls-crypt",
         "ovpn_auth_nocache":         "1",
+        "ovpn_client_auth_nocache":  "0",  # Keep creds for mobile reconnects
 
         # ─── MTU / MSS — conservative DPI-safe defaults ─────────────────
         # 1420/1380 performs better across restrictive Iranian ISP/NAT paths.
