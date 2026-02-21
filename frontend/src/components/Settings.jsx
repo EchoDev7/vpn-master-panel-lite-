@@ -417,12 +417,12 @@ const Settings = () => {
             </div>
 
             <SectionTitle>Native HTTP Proxy Payload (Domain Fronting)</SectionTitle>
-            <S_Check {...sp} settingKey="ovpn_http_proxy_enabled" label="Enable HTTP CONNECT Proxy Camouflage" iranBadge tip="Routes OpenVPN through an HTTP proxy and can send custom Host header to reduce direct VPN fingerprinting. Example: ON when direct TCP/443 is reset by mobile ISP." />
+            <S_Check {...sp} settingKey="ovpn_http_proxy_enabled" label="Enable HTTP CONNECT Proxy Camouflage" iranBadge tip="Client connects to the PROXY first (http-proxy), then the proxy CONNECTs to the OpenVPN server (remote). Use when direct TCP/443 is reset by mobile ISP." />
             <div className="grid grid-cols-2 gap-4">
                 <S_Input {...sp} settingKey="ovpn_http_proxy_host" label="Proxy IP / CDN Edge IP" placeholder="e.g. 104.16.x.x" tip="IP or hostname of the CONNECT proxy. Example: 104.16.10.20" />
                 <S_Input {...sp} settingKey="ovpn_http_proxy_port" label="Proxy Port" placeholder="80" type="number" tip="Example: 80 or 8080" />
             </div>
-            <S_Input {...sp} settingKey="ovpn_http_proxy_custom_header" label="Spoofed Host Domain (HTTP Host Header)" placeholder="www.shaparak.ir" iranBadge tip="Inserted as HTTP Host header for proxy requests (not TLS SNI). Example: www.aparat.com" />
+            <S_Input {...sp} settingKey="ovpn_http_proxy_custom_header" label="Spoofed Host Domain (HTTP Host Header)" placeholder="www.shaparak.ir" iranBadge tip="Sent as HTTP Host header to the proxy (not TLS SNI). Some OpenVPN Connect iOS builds may ignore this option. Example: www.aparat.com" />
 
             <SectionTitle>HTTPS Camouflage (Port Sharing)</SectionTitle>
             <S_Input {...sp} settingKey="ovpn_port_share" label="Port Share (Forward non-VPN to Web Server)" placeholder="127.0.0.1 8443" tip="TCP server mode only. If DPI probes 443 as HTTPS, OpenVPN forwards non-VPN traffic to real web server. Example: 127.0.0.1 8443" />

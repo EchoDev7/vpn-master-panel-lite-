@@ -779,10 +779,11 @@ class OpenVPNService:
                 conf += [
                     "",
                     "# ── HTTP Proxy (domain fronting) ─────────────────────",
+                    "# NOTE: OpenVPN Connect (iOS/OpenVPN3 core) may ignore http-proxy-option lines.",
                     f"http-proxy {proxy_host} {proxy_port}",
                 ]
                 custom_host_header = s.get("http_proxy_custom_header", "")
-                if custom_host_header:
+                if custom_host_header and not is_ios:
                     conf.append(f"http-proxy-option CUSTOM-HEADER Host {custom_host_header}")
                     conf.append("http-proxy-option VERSION 1.1")
 
