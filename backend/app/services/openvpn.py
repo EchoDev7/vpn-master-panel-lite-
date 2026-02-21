@@ -225,6 +225,30 @@ class OpenVPNService:
                 "Enable tls-crypt for Iran bypass."
             )
 
+        if settings.get("tls_control_channel") == "tls-crypt-v2":
+            warnings.append(
+                "tls-crypt-v2 requires per-client key provisioning which is not generated "
+                "by this panel. Current implementation falls back to tls-crypt."
+            )
+
+        if settings.get("port_share", "").strip() and proto != "tcp":
+            warnings.append("port-share is only valid in TCP server mode.")
+
+        if settings.get("http_proxy_enabled") == "1" and not settings.get("http_proxy_host", "").strip():
+            warnings.append("HTTP proxy is enabled but proxy host is empty.")
+
+        if settings.get("fragment", "0") not in ("", "0"):
+            warnings.append(
+                "fragment is unsupported by official OpenVPN Connect mobile apps (iOS/Android) "
+                "and can break profile compatibility. Keep fragment=0 for mobile profiles."
+            )
+
+        if settings.get("block_iran_ips") == "1":
+            warnings.append(
+                "block_iran_ips is an external firewall policy and is not enforced by OpenVPN "
+                "directives alone. Configure host firewall/IP sets to make it effective."
+            )
+
         compress = settings.get("compress", "")
         if compress and compress not in ("", "none"):
             warnings.append(
@@ -604,6 +628,7 @@ class OpenVPNService:
         if platform not in ("generic", "ios", "android"):
             platform = "generic"
         is_ios = platform == "ios"
+        is_mobile = platform in ("ios", "android")
 
         conf: List[str] = [
             f"# OpenVPN client config — {username}",
@@ -676,7 +701,7 @@ class OpenVPNService:
 
         conf += [f"tun-mtu {s.get('tun_mtu','1420')}", f"mssfix {s.get('mssfix','1380')}"]
         fragment = s.get("fragment", "0")
-        if fragment and fragment != "0":
+        if fragment and fragment != "0" and not is_mobile:
             conf.append(f"fragment {fragment}")
 
         conf += ["sndbuf 0", "rcvbuf 0"]
