@@ -377,7 +377,7 @@ const Settings = () => {
             <SectionTitle>Keepalive</SectionTitle>
             <div className="grid grid-cols-2 gap-4">
                 <S_Input {...sp} settingKey="ovpn_keepalive_interval" label="Ping Interval (sec)" placeholder="10" type="number" />
-                <S_Input {...sp} settingKey="ovpn_keepalive_timeout" label="Ping Timeout (sec)" placeholder="60" type="number" />
+                <S_Input {...sp} settingKey="ovpn_keepalive_timeout" label="Ping Timeout (sec)" placeholder="90" type="number" iranBadge tip="90 is safer on unstable mobile links. Increase if sessions drop with KEEPALIVE_TIMEOUT." />
             </div>
             <SectionTitle>Retry & Timeout</SectionTitle>
             <div className="grid grid-cols-4 gap-4">
@@ -394,6 +394,7 @@ const Settings = () => {
                     { value: '4', label: '4 — Debug' },
                     { value: '6', label: '6 — Verbose' },
                 ]} />
+                <S_Check {...sp} settingKey="ovpn_client_auth_nocache" label="Client auth-nocache" iranBadge tip="Disable for iOS/Android to keep credentials for auto-reconnect on mobile network changes. Enable only for stricter credential hygiene." />
                 <S_Select {...sp} settingKey="ovpn_compress" label="Compression" tip="Disabled is recommended for stealth (VORACLE attack)." options={[
                     { value: '', label: 'Disabled (Recommended)' },
                     { value: 'lz4-v2', label: 'LZ4-v2 (New)' },
