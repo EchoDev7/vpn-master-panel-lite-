@@ -175,6 +175,7 @@ const Users = () => {
     const [showConfigModal, setShowConfigModal] = useState(false);
     const [selectedConfigUser, setSelectedConfigUser] = useState(null);
     const [configType, setConfigType] = useState('openvpn');
+    const [configPlatform, setConfigPlatform] = useState('ios');
     const [configContent, setConfigContent] = useState(null);
     const [configLoading, setConfigLoading] = useState(false);
 
@@ -183,18 +184,22 @@ const Users = () => {
         setShowConfigModal(true);
         setConfigContent(null);
         setConfigType('openvpn');
-        loadConfig(user.id, 'openvpn');
+        setConfigPlatform('ios');
+        loadConfig(user.id, 'openvpn', 'ios');
     };
 
-    const loadConfig = async (userId, type) => {
+    const loadConfig = async (userId, type, platform = 'generic') => {
         try {
             setConfigLoading(true);
             setConfigType(type);
+            if (type === 'openvpn') {
+                setConfigPlatform(platform);
+            }
             setConfigContent(null);
 
             let response;
             if (type === 'openvpn') {
-                response = await apiService.getUserConfigOpenVPN(userId);
+                response = await apiService.getUserConfigOpenVPN(userId, platform);
             } else {
                 response = await apiService.getUserConfigWireGuard(userId);
             }
@@ -981,7 +986,7 @@ const Users = () => {
 
                             <div className="flex gap-2 mb-4">
                                 <button
-                                    onClick={() => loadConfig(selectedConfigUser.id, 'openvpn')}
+                                    onClick={() => loadConfig(selectedConfigUser.id, 'openvpn', configPlatform)}
                                     className={`px-4 py-2 rounded-lg flex-1 font-medium ${configType === 'openvpn' ? 'bg-primary-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                                 >
                                     OpenVPN
@@ -993,6 +998,29 @@ const Users = () => {
                                     WireGuard
                                 </button>
                             </div>
+
+                            {configType === 'openvpn' && (
+                                <div className="flex gap-2 mb-4">
+                                    <button
+                                        onClick={() => loadConfig(selectedConfigUser.id, 'openvpn', 'ios')}
+                                        className={`px-3 py-2 rounded-lg text-sm font-medium ${configPlatform === 'ios' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                                    >
+                                        Download iOS
+                                    </button>
+                                    <button
+                                        onClick={() => loadConfig(selectedConfigUser.id, 'openvpn', 'android')}
+                                        className={`px-3 py-2 rounded-lg text-sm font-medium ${configPlatform === 'android' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                                    >
+                                        Download Android
+                                    </button>
+                                    <button
+                                        onClick={() => loadConfig(selectedConfigUser.id, 'openvpn', 'generic')}
+                                        className={`px-3 py-2 rounded-lg text-sm font-medium ${configPlatform === 'generic' ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                                    >
+                                        Download Generic
+                                    </button>
+                                </div>
+                            )}
 
                             <div className="flex-1 overflow-hidden bg-gray-900 rounded-lg border border-gray-700 relative">
                                 {configLoading ? (
