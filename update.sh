@@ -15,6 +15,86 @@ print_info()    { echo -e "${CYAN}ℹ $1${NC}"; }
 print_warning() { echo -e "${YELLOW}⚠ $1${NC}"; }
 print_error()   { echo -e "${RED}✗ $1${NC}"; }
 
+declare -a UPDATE_SUMMARY
+
+record_summary() {
+    local item="$1"
+    local result="$2"
+    local details="$3"
+    UPDATE_SUMMARY+=("${item}|${result}|${details}")
+}
+
+unit_active_state() {
+    local unit="$1"
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+        echo "active"
+    else
+        local state
+        state=$(systemctl is-active "$unit" 2>/dev/null || echo "unknown")
+        echo "$state"
+    fi
+}
+
+print_update_summary() {
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  Update Operation Summary${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    if [ ${#UPDATE_SUMMARY[@]} -eq 0 ]; then
+        echo -e "${YELLOW}No summary entries recorded.${NC}"
+        return
+    fi
+    for row in "${UPDATE_SUMMARY[@]}"; do
+        IFS='|' read -r item result details <<< "$row"
+        if [ "$result" = "ok" ]; then
+            echo -e "  ${GREEN}✓${NC} ${item}: ${details}"
+        elif [ "$result" = "warn" ]; then
+            echo -e "  ${YELLOW}⚠${NC} ${item}: ${details}"
+        else
+            echo -e "  ${RED}✗${NC} ${item}: ${details}"
+        fi
+    done
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+restart_unit_if_exists() {
+    local unit="$1"
+    local label="$2"
+    if systemctl list-unit-files | grep -q "^${unit}"; then
+        if systemctl restart "$unit" > /dev/null 2>&1; then
+            local state
+            state=$(unit_active_state "$unit")
+            print_success "${label} restarted (${unit})"
+            record_summary "$label" "ok" "restarted (${unit}) -> ${state}"
+        else
+            local state
+            state=$(unit_active_state "$unit")
+            print_warning "${label} restart failed (${unit})"
+            record_summary "$label" "warn" "restart failed (${unit}) -> ${state}"
+        fi
+        return 0
+    fi
+    record_summary "$label" "warn" "unit not found (${unit})"
+    return 1
+}
+
+reload_or_restart_nginx() {
+    if ! command -v nginx > /dev/null 2>&1; then
+        print_warning "nginx binary not found"
+        record_summary "Nginx" "warn" "binary not found"
+        return 1
+    fi
+    if nginx -t > /dev/null 2>&1; then
+        systemctl reload nginx > /dev/null 2>&1 || systemctl restart nginx > /dev/null 2>&1
+        print_success "Nginx config verified and reloaded"
+        record_summary "Nginx" "ok" "config test passed; reload/restart attempted"
+    else
+        print_warning "Nginx config test failed, trying repair"
+        record_summary "Nginx" "warn" "config test failed; repair triggered"
+        repair_nginx
+    fi
+}
+
 # Check Root
 if [[ $EUID -ne 0 ]]; then
    echo -e "${RED}This script must be run as root${NC}"
@@ -111,6 +191,7 @@ apt update -qq
 # sqlite3 is needed by post_update_fixes() to read settings from DB
 apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs npm python3-pip openssl fail2ban certbot python3-certbot-nginx sqlite3
 echo -e "${GREEN}✓ certbot: $(certbot --version 2>&1 | head -1)${NC}"
+record_summary "System packages" "ok" "dependencies install completed"
 
 # Configure Fail2Ban if missing
 if [ ! -f "/etc/fail2ban/jail.local" ]; then
@@ -366,8 +447,10 @@ npm run build
 if [ ! -f "dist/index.html" ]; then
     echo -e "${RED}❌ Frontend Build Failed! 'dist/index.html' not found.${NC}"
     echo -e "${YELLOW}Check npm logs above.${NC}"
+    record_summary "Frontend build" "error" "dist/index.html not found"
     exit 1
 fi
+record_summary "Frontend build" "ok" "dist assets generated"
 
 # Fix Permissions (Critical for Nginx)
 chmod -R 755 dist
@@ -655,28 +738,19 @@ elif systemctl list-unit-files | grep -q '^vpnmaster-backend.service'; then
 fi
 
 if [ -n "$BACKEND_SERVICE" ]; then
-    systemctl restart "$BACKEND_SERVICE"
-    print_success "Backend restarted ($BACKEND_SERVICE)"
+    restart_unit_if_exists "${BACKEND_SERVICE}.service" "Backend"
 else
     print_warning "No backend service unit found (vpn-panel-backend/vpnmaster-backend). Attempting to install service..."
     if [ -x "/opt/vpn-master-panel/backend/install_service.sh" ]; then
         /opt/vpn-master-panel/backend/install_service.sh || true
-        systemctl restart vpn-panel-backend || true
+        restart_unit_if_exists "vpn-panel-backend.service" "Backend" || true
     fi
 fi
 # Restart OpenVPN to apply changes
-if systemctl list-units --full -all | grep -q "openvpn@server.service"; then
-    systemctl restart openvpn@server
-else
-    systemctl restart openvpn
-fi
+restart_unit_if_exists "openvpn@server.service" "OpenVPN" || restart_unit_if_exists "openvpn.service" "OpenVPN" || true
 
 # Check Nginx Config
-if ! nginx -t > /dev/null 2>&1; then
-    repair_nginx
-else
-    systemctl restart nginx
-fi
+reload_or_restart_nginx
 
 # ════════════════════════════════════════════════════════════
 #  POST-UPDATE: Auto-apply all settings that previously
@@ -846,21 +920,27 @@ post_update_fixes() {
 
     if [ -n "$BACKEND_SERVICE" ] && systemctl is-active --quiet "$BACKEND_SERVICE"; then
         print_success "Backend service active (${BACKEND_SERVICE})"
+        record_summary "Backend health" "ok" "service active (${BACKEND_SERVICE})"
     else
         print_warning "Backend service is not active or unknown"
+        record_summary "Backend health" "warn" "service not active or unknown"
     fi
 
     if systemctl is-active --quiet nginx; then
         print_success "Nginx service active"
+        record_summary "Nginx health" "ok" "service active"
     else
         print_warning "Nginx service is not active"
+        record_summary "Nginx health" "warn" "service not active"
     fi
 
     HEALTH_HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:8001/health" 2>/dev/null || echo "000")
     if [ "$HEALTH_HTTP_CODE" = "200" ]; then
         print_success "Backend /health reachable on 127.0.0.1:8001"
+        record_summary "Backend /health" "ok" "HTTP ${HEALTH_HTTP_CODE}"
     else
         print_warning "Backend /health check failed on 127.0.0.1:8001 (HTTP ${HEALTH_HTTP_CODE})"
+        record_summary "Backend /health" "warn" "HTTP ${HEALTH_HTTP_CODE}"
     fi
 
     if [ -n "$SUB_DOMAIN" ]; then
@@ -873,14 +953,39 @@ post_update_fixes() {
         SUB_HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "$SUB_URL" 2>/dev/null || echo "000")
         if [ "$SUB_HTTP_CODE" = "200" ] || [ "$SUB_HTTP_CODE" = "403" ] || [ "$SUB_HTTP_CODE" = "404" ]; then
             print_success "Subscription endpoint reachable (${SUB_URL} -> HTTP ${SUB_HTTP_CODE})"
+            record_summary "Subscription endpoint" "ok" "${SUB_URL} -> HTTP ${SUB_HTTP_CODE}"
         else
             print_warning "Subscription endpoint check failed (${SUB_URL} -> HTTP ${SUB_HTTP_CODE})"
             echo -e "${YELLOW}   Check DNS (A record), firewall port ${EFFECTIVE_SUB_PORT}, and Nginx SSL site for ${SUB_DOMAIN}.${NC}"
+            record_summary "Subscription endpoint" "warn" "${SUB_URL} -> HTTP ${SUB_HTTP_CODE}"
         fi
     fi
+
+    # ── 8. Always-run service operations (permanent update policy) ───────────
+    # These commands run on every update so operator never needs manual restarts.
+    echo -e "${CYAN}♻️  Running permanent post-update service operations...${NC}"
+    systemctl daemon-reload > /dev/null 2>&1 || true
+    systemctl reset-failed > /dev/null 2>&1 || true
+
+    if [ -n "$BACKEND_SERVICE" ]; then
+        restart_unit_if_exists "${BACKEND_SERVICE}.service" "Backend"
+    else
+        restart_unit_if_exists "vpnmaster-backend.service" "Backend" || restart_unit_if_exists "vpn-panel-backend.service" "Backend" || true
+    fi
+
+    restart_unit_if_exists "openvpn@server.service" "OpenVPN" || restart_unit_if_exists "openvpn.service" "OpenVPN" || true
+    restart_unit_if_exists "wg-quick@wg0.service" "WireGuard" || true
+    restart_unit_if_exists "fail2ban.service" "Fail2Ban" || true
+
+    systemctl enable certbot.timer > /dev/null 2>&1 || true
+    systemctl start certbot.timer > /dev/null 2>&1 || true
+
+    reload_or_restart_nginx
 }
 
 post_update_fixes
+
+print_update_summary
 
 # Ensure check_status.sh is executable
 if [ -f "check_status.sh" ]; then
