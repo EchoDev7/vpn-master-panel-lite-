@@ -241,6 +241,9 @@ class OpenVPNService:
         if settings.get("http_proxy_enabled") == "1" and not settings.get("http_proxy_host", "").strip():
             warnings.append("HTTP proxy is enabled but proxy host is empty.")
 
+        if settings.get("http_proxy_enabled") == "1" and proto != "tcp":
+            warnings.append("HTTP proxy camouflage is supported only with TCP transport.")
+
         if settings.get("remote_random_hostname", "0") == "1":
             addr_type = settings.get("remote_address_type", "auto")
             remote_domain = settings.get("remote_domain", "").strip()
@@ -768,7 +771,8 @@ class OpenVPNService:
             conf.append("auth-nocache")
 
         # ── HTTP proxy (domain fronting / Iran bypass) ────────────────
-        if s.get("http_proxy_enabled") == "1":
+        # Only applicable for TCP transport.
+        if s.get("http_proxy_enabled") == "1" and remote_proto.startswith("tcp"):
             proxy_host = s.get("http_proxy_host", "")
             proxy_port = s.get("http_proxy_port", "80")
             if proxy_host:
