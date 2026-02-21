@@ -582,6 +582,7 @@ class OpenVPNService:
         """
         self._ensure_pki()
         s = self._load_settings(db=db)
+        runtime_hints = self._load_runtime_server_hints()
 
         # ── Resolve remote address ───────────────────────────────────
         addr_type = s.get("remote_address_type", "auto")
@@ -594,8 +595,8 @@ class OpenVPNService:
         else:
             remote_ip = self._get_public_ip()
 
-        remote_port  = str(port_override) if port_override else s.get("port", "443")
-        remote_proto = protocol_override or s.get("protocol", "tcp")
+        remote_port  = str(port_override) if port_override else runtime_hints.get("port", s.get("port", "443"))
+        remote_proto = protocol_override or runtime_hints.get("proto", s.get("protocol", "tcp"))
         if remote_proto == "both":
             remote_proto = "tcp"
 
@@ -642,6 +643,7 @@ class OpenVPNService:
 
         conf += [
             "nobind",
+            "resolv-retry infinite",
             "remote-cert-tls server",
         ]
 
@@ -698,9 +700,11 @@ class OpenVPNService:
                 f"ping {ping_interval}",
                 f"ping-restart {ping_timeout}",
                 f"reneg-sec {s.get('reneg_sec', '3600')}",
-                f"connect-retry {s.get('connect_retry', '5')} {s.get('connect_retry_max_interval', '30')}",
-                f"connect-retry-max {s.get('connect_retry_max', '0')}",
             ]
+        conf += [
+            f"connect-retry {s.get('connect_retry', '5')} {s.get('connect_retry_max_interval', '30')}",
+            f"connect-retry-max {s.get('connect_retry_max', '0')}",
+        ]
         conf.append(f"server-poll-timeout {s.get('server_poll_timeout', '10')}")
 
         conf += [
@@ -729,7 +733,7 @@ class OpenVPNService:
         conf += ["", "<ca>", self._read_file(self.CA_PATH), "</ca>"]
 
         # ── Inline tls-crypt / tls-auth ──────────────────────────────
-        tls_mode = s.get("tls_control_channel", "tls-crypt")
+        tls_mode = runtime_hints.get("tls_control_channel", s.get("tls_control_channel", "tls-crypt"))
         if tls_mode != "none" and os.path.exists(self.TA_KEY):
             ta_content = self._read_file(self.TA_KEY)
             if "BEGIN" in ta_content:
@@ -792,6 +796,49 @@ class OpenVPNService:
             with open(path) as f:
                 return f.read().strip()
         return f"# MISSING FILE: {path}"
+
+    def _load_runtime_server_hints(self) -> Dict[str, str]:
+        """
+        Read critical runtime directives from live server.conf so generated client
+        profiles remain compatible even if DB settings drift from deployed config.
+        """
+        hints: Dict[str, str] = {}
+        candidates = [
+            "/etc/openvpn/server.conf",
+            os.path.join(self.DATA_DIR, "server.conf"),
+        ]
+
+        for path in candidates:
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                    for raw in fh:
+                        line = raw.strip()
+                        if not line or line.startswith("#") or line.startswith(";"):
+                            continue
+
+                        lower = line.lower()
+                        if lower.startswith("proto "):
+                            val = line.split(None, 1)[1].strip().lower()
+                            if val.startswith("tcp"):
+                                hints["proto"] = "tcp"
+                            elif val.startswith("udp"):
+                                hints["proto"] = "udp"
+                        elif lower.startswith("port "):
+                            hints["port"] = line.split(None, 1)[1].strip()
+                        elif lower.startswith("tls-crypt "):
+                            hints["tls_control_channel"] = "tls-crypt"
+                        elif lower.startswith("tls-auth "):
+                            hints["tls_control_channel"] = "tls-auth"
+            except Exception:
+                continue
+
+            # Prefer first readable config file with at least one parsed hint.
+            if hints:
+                break
+
+        return hints
 
     def _supports_random_hostname(self, host: str) -> bool:
         """
