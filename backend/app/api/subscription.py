@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
@@ -288,8 +288,11 @@ HTML_TEMPLATE = """
                         <p>Use separate direct links for each protocol. Download and import manually for best reliability.</p>
 
                         <div class="btn-row" style="margin-top:10px;">
-                            <a id="btn-ovpn" class="btn ovpn" href="#" download>
-                                <i class="fa-solid fa-file-arrow-down"></i> Download OpenVPN (.ovpn)
+                            <a id="btn-ovpn-ios" class="btn ovpn" href="#" download>
+                                <i class="fa-solid fa-file-arrow-down"></i> Download iOS OpenVPN (.ovpn)
+                            </a>
+                            <a id="btn-ovpn-android" class="btn ovpn" href="#" download>
+                                <i class="fa-solid fa-file-arrow-down"></i> Download Android OpenVPN (.ovpn)
                             </a>
                             <a id="btn-wg" class="btn wg" href="#" download>
                                 <i class="fa-solid fa-file-arrow-down"></i> Download WireGuard (.conf)
@@ -301,8 +304,12 @@ HTML_TEMPLATE = """
 
                         <div class="link-list">
                             <div class="link-item">
-                                <code id="ovpn-link">/sub/token/openvpn</code>
-                                <button class="btn ghost" style="padding:6px 10px; width:auto;" type="button" onclick="copyText('ovpn-link')">Copy</button>
+                                <code id="ovpn-link-ios">/sub/token/openvpn?platform=ios</code>
+                                <button class="btn ghost" style="padding:6px 10px; width:auto;" type="button" onclick="copyText('ovpn-link-ios')">Copy iOS link</button>
+                            </div>
+                            <div class="link-item">
+                                <code id="ovpn-link-android">/sub/token/openvpn?platform=android</code>
+                                <button class="btn ghost" style="padding:6px 10px; width:auto;" type="button" onclick="copyText('ovpn-link-android')">Copy Android link</button>
                             </div>
                             <div class="link-item">
                                 <code id="wg-link">/sub/token/wireguard</code>
@@ -490,6 +497,8 @@ HTML_TEMPLATE = """
 
         function hydrate() {
             const ovpnUrl = window.location.origin + DATA.ovpn_url;
+            const ovpnUrlIos = `${ovpnUrl}?platform=ios`;
+            const ovpnUrlAndroid = `${ovpnUrl}?platform=android`;
             const wgUrl = window.location.origin + DATA.wg_url;
             const isActive = DATA.status === 'active';
             const usagePercent = Math.round(DATA.data_percent || 0);
@@ -514,16 +523,21 @@ HTML_TEMPLATE = """
             if (!isActive) document.getElementById('notice-expired').style.display = 'block';
             if (usagePercent >= 80) document.getElementById('notice-traffic').style.display = 'block';
 
-            const ovpnBtn = document.getElementById('btn-ovpn');
+            const ovpnBtnIos = document.getElementById('btn-ovpn-ios');
+            const ovpnBtnAndroid = document.getElementById('btn-ovpn-android');
             const wgBtn = document.getElementById('btn-wg');
 
-            ovpnBtn.href = ovpnUrl;
+            ovpnBtnIos.href = ovpnUrlIos;
+            ovpnBtnAndroid.href = ovpnUrlAndroid;
             wgBtn.href = wgUrl;
 
             if (!DATA.openvpn_enabled) {
-                ovpnBtn.classList.add('disabled');
-                ovpnBtn.removeAttribute('href');
-                ovpnBtn.textContent = 'OpenVPN not enabled for your account';
+                ovpnBtnIos.classList.add('disabled');
+                ovpnBtnIos.removeAttribute('href');
+                ovpnBtnIos.textContent = 'OpenVPN not enabled';
+                ovpnBtnAndroid.classList.add('disabled');
+                ovpnBtnAndroid.removeAttribute('href');
+                ovpnBtnAndroid.textContent = 'OpenVPN not enabled';
             }
             if (!DATA.wireguard_enabled) {
                 wgBtn.classList.add('disabled');
@@ -532,7 +546,8 @@ HTML_TEMPLATE = """
                 document.getElementById('btn-wg-qr').classList.add('disabled');
             }
 
-            document.getElementById('ovpn-link').textContent = ovpnUrl;
+            document.getElementById('ovpn-link-ios').textContent = ovpnUrlIos;
+            document.getElementById('ovpn-link-android').textContent = ovpnUrlAndroid;
             document.getElementById('wg-link').textContent = wgUrl;
 
             renderOsTabs();
@@ -660,18 +675,25 @@ async def get_subscription_page(token: str, db: Session = Depends(get_db)):
     return html
 
 @router.get("/{token}/openvpn", response_class=PlainTextResponse)
-async def get_openvpn_config(token: str, db: Session = Depends(get_db)):
+async def get_openvpn_config(
+    token: str,
+    platform: str = Query("generic", description="OpenVPN profile platform: generic|ios|android"),
+    db: Session = Depends(get_db),
+):
     _ensure_subscription_enabled(db)
     user = _get_user_by_token(db, token)
         
     if not user.openvpn_enabled:
         raise HTTPException(status_code=400, detail="OpenVPN disabled for this user")
         
-    config = openvpn_service.generate_client_config(user.username, db=db)
+    config = openvpn_service.generate_client_config(user.username, platform=platform, db=db)
+    platform_suffix = ""
+    if platform in ("ios", "android"):
+        platform_suffix = f"-{platform}"
     return PlainTextResponse(
         content=config,
         media_type="application/x-openvpn-profile",
-        headers={"Content-Disposition": f"attachment; filename={user.username}.ovpn"},
+        headers={"Content-Disposition": f"attachment; filename={user.username}{platform_suffix}.ovpn"},
     )
 
 @router.get("/{token}/wireguard", response_class=PlainTextResponse)
