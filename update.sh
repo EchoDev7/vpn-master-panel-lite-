@@ -91,7 +91,12 @@ reload_or_restart_nginx() {
     else
         print_warning "Nginx config test failed, trying repair"
         record_summary "Nginx" "warn" "config test failed; repair triggered"
-        repair_nginx
+        if declare -f repair_nginx > /dev/null 2>&1; then
+            repair_nginx
+        else
+            # For quick-action mode we may not have defined repair_nginx yet.
+            systemctl restart nginx > /dev/null 2>&1 || true
+        fi
     fi
 }
 
@@ -103,6 +108,123 @@ fi
 
 INSTALL_DIR="/opt/vpn-master-panel"
 
+# If admin runs update.sh from a different folder (e.g. a separate clone in /root),
+# re-exec the installed copy so behavior matches the currently deployed version.
+SCRIPT_REAL=""
+if command -v readlink > /dev/null 2>&1; then
+    SCRIPT_REAL=$(readlink -f "$0" 2>/dev/null || true)
+fi
+INSTALLED_SCRIPT="${INSTALL_DIR}/update.sh"
+if [ -n "$SCRIPT_REAL" ] && [ -f "$INSTALLED_SCRIPT" ] && [ "$SCRIPT_REAL" != "$INSTALLED_SCRIPT" ]; then
+    echo -e "${YELLOW}⚠ Detected update.sh was launched from: ${SCRIPT_REAL}${NC}"
+    echo -e "${CYAN}➡ Re-running the installed updater: ${INSTALLED_SCRIPT}${NC}"
+    exec "$INSTALLED_SCRIPT" "$@"
+fi
+
+usage() {
+    echo ""
+    echo "Usage: sudo ./update.sh [command]"
+    echo ""
+    echo "Commands (no command = full update):"
+    echo "  restart-all           Restart backend + OpenVPN + WireGuard + Fail2Ban + Nginx"
+    echo "  reset-openvpn         Hard reset OpenVPN service (stop/kill/start + reset-failed)"
+    echo "  restart-openvpn       Restart OpenVPN service"
+    echo "  restart-backend       Restart backend service"
+    echo "  restart-nginx         Reload/restart Nginx (with config test)"
+    echo "  restart-frontend      Reload Nginx only (frontend is static)"
+    echo "  rebuild-frontend      npm install + npm run build + reload Nginx"
+    echo "  status                Show status (backend/openvpn/nginx)"
+    echo "  logs-openvpn          Tail OpenVPN logs"
+    echo "  logs-backend          Tail backend logs"
+    echo ""
+}
+
+detect_backend_service() {
+    if systemctl list-unit-files 2>/dev/null | grep -q '^vpn-panel-backend.service'; then
+        echo "vpn-panel-backend"
+    elif systemctl list-unit-files 2>/dev/null | grep -q '^vpnmaster-backend.service'; then
+        echo "vpnmaster-backend"
+    else
+        echo ""
+    fi
+}
+
+restart_openvpn() {
+    restart_unit_if_exists "openvpn@server.service" "OpenVPN" || restart_unit_if_exists "openvpn.service" "OpenVPN" || true
+}
+
+reset_openvpn() {
+    print_info "Hard resetting OpenVPN..."
+    systemctl daemon-reload > /dev/null 2>&1 || true
+    systemctl reset-failed openvpn@server openvpn > /dev/null 2>&1 || true
+    systemctl stop openvpn@server > /dev/null 2>&1 || true
+    systemctl stop openvpn > /dev/null 2>&1 || true
+    pkill -x openvpn > /dev/null 2>&1 || true
+    sleep 1
+    systemctl start openvpn@server > /dev/null 2>&1 || systemctl start openvpn > /dev/null 2>&1 || true
+    restart_openvpn
+}
+
+restart_backend() {
+    local svc
+    svc=$(detect_backend_service)
+    if [ -n "$svc" ]; then
+        restart_unit_if_exists "${svc}.service" "Backend"
+    else
+        print_warning "No backend service unit found (vpn-panel-backend/vpnmaster-backend)."
+    fi
+}
+
+restart_frontend() {
+    # Frontend is served as static files by Nginx in this project.
+    reload_or_restart_nginx
+}
+
+rebuild_frontend() {
+    if ! command -v npm > /dev/null 2>&1; then
+        print_error "npm not found. Install nodejs/npm first (or run full update with no args)."
+        return 1
+    fi
+    if [ ! -d "$INSTALL_DIR/frontend" ]; then
+        print_error "frontend directory not found at $INSTALL_DIR/frontend"
+        return 1
+    fi
+    print_info "Rebuilding frontend..."
+    (cd "$INSTALL_DIR/frontend" && npm install && npm run build) || return 1
+    chmod -R 755 "$INSTALL_DIR/frontend/dist" 2>/dev/null || true
+    reload_or_restart_nginx
+}
+
+show_status() {
+    local svc
+    svc=$(detect_backend_service)
+    echo ""
+    echo "=== Status ==="
+    [ -n "$svc" ] && systemctl status "${svc}.service" --no-pager -l || true
+    systemctl status openvpn@server.service --no-pager -l 2>/dev/null || systemctl status openvpn.service --no-pager -l 2>/dev/null || true
+    systemctl status nginx.service --no-pager -l 2>/dev/null || true
+}
+
+tail_logs_openvpn() {
+    if [ -f "/var/log/openvpn/openvpn.log" ]; then
+        tail -n 200 /var/log/openvpn/openvpn.log
+    fi
+    if [ -f "/var/log/openvpn/auth.log" ]; then
+        tail -n 200 /var/log/openvpn/auth.log
+    fi
+    journalctl -u openvpn@server.service -n 200 --no-pager 2>/dev/null || true
+}
+
+tail_logs_backend() {
+    local svc
+    svc=$(detect_backend_service)
+    if [ -n "$svc" ]; then
+        journalctl -u "${svc}.service" -n 200 --no-pager 2>/dev/null || true
+    else
+        print_warning "Backend unit not found."
+    fi
+}
+
 echo -e "${CYAN}🚀 Starting VPN Master Panel Update...${NC}"
 
 # 0. Verify Installation Directory
@@ -110,6 +232,73 @@ if [ ! -d "$INSTALL_DIR" ]; then
     echo -e "${RED}Error: Installation not found at $INSTALL_DIR${NC}"
     echo -e "${RED}Please run install.sh first.${NC}"
     exit 1
+fi
+
+echo -e "${CYAN}📌 Effective install dir: ${INSTALL_DIR}${NC}"
+if [ -d "${INSTALL_DIR}/.git" ]; then
+    CUR_SHA=$(cd "$INSTALL_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    echo -e "${CYAN}📌 Current installed version (before update): ${CUR_SHA}${NC}"
+fi
+
+# Quick action mode: allow update.sh to be used as an admin ops tool.
+if [ $# -gt 0 ]; then
+    case "$1" in
+        -h|--help|help)
+            usage
+            exit 0
+            ;;
+        restart-all)
+            systemctl daemon-reload > /dev/null 2>&1 || true
+            systemctl reset-failed > /dev/null 2>&1 || true
+            restart_backend
+            restart_openvpn
+            restart_unit_if_exists "wg-quick@wg0.service" "WireGuard" || true
+            restart_unit_if_exists "fail2ban.service" "Fail2Ban" || true
+            restart_frontend
+            exit 0
+            ;;
+        reset-openvpn)
+            reset_openvpn
+            exit 0
+            ;;
+        restart-openvpn)
+            restart_openvpn
+            exit 0
+            ;;
+        restart-backend)
+            restart_backend
+            exit 0
+            ;;
+        restart-nginx)
+            reload_or_restart_nginx
+            exit 0
+            ;;
+        restart-frontend)
+            restart_frontend
+            exit 0
+            ;;
+        rebuild-frontend)
+            rebuild_frontend
+            exit 0
+            ;;
+        status)
+            show_status
+            exit 0
+            ;;
+        logs-openvpn)
+            tail_logs_openvpn
+            exit 0
+            ;;
+        logs-backend)
+            tail_logs_backend
+            exit 0
+            ;;
+        *)
+            print_error "Unknown command: $1"
+            usage
+            exit 1
+            ;;
+    esac
 fi
 
 # 1. Update Source Code (Non-destructive)
