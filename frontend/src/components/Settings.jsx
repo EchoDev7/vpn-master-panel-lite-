@@ -281,7 +281,7 @@ const Settings = () => {
             <SectionTitle>TLS Control Channel Security</SectionTitle>
             <S_Select {...sp} settingKey="ovpn_tls_control_channel" label="TLS Control Channel Mode" iranBadge tip="tls-crypt encrypts the ENTIRE control channel, invisible to DPI." options={[
                 { value: 'tls-crypt', label: 'tls-crypt (Encrypt — Recommended)' },
-                { value: 'tls-crypt-v2', label: 'tls-crypt-v2 (Per-client, 2.5+)' },
+                { value: 'tls-crypt-v2', label: 'tls-crypt-v2 (Needs per-client key provisioning)' },
                 { value: 'tls-auth', label: 'tls-auth (Sign & Verify)' },
                 { value: 'none', label: 'None (Not Recommended)' },
             ]} />
@@ -330,25 +330,25 @@ const Settings = () => {
                     <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
                     <div>
                         <p className="text-amber-300 font-semibold text-sm">Official Client DPI Evasion (Native)</p>
-                        <p className="text-gray-400 text-xs mt-1">These settings are 100% supported natively by official OpenVPN Connect apps on iOS/Android/Windows, without needing 3rd-party obfuscators like Stunnel or HTTP custom apps.</p>
+                        <p className="text-gray-400 text-xs mt-1">Most settings below are native OpenVPN features. Note: some directives (e.g. fragment) are not supported by OpenVPN Connect on iOS/Android. Use mobile-specific profiles and keep fragment at 0 for phones.</p>
                     </div>
                 </div>
             </div>
 
             <SectionTitle>Native HTTP Proxy Payload (Domain Fronting)</SectionTitle>
-            <S_Check {...sp} settingKey="ovpn_http_proxy_enabled" label="Enable HTTP Proxy SNI Payload" iranBadge tip="Injects a custom Host header over an HTTP proxy connection to deceive DPI." />
+            <S_Check {...sp} settingKey="ovpn_http_proxy_enabled" label="Enable HTTP CONNECT Proxy Camouflage" iranBadge tip="Routes OpenVPN through an HTTP proxy and can send custom Host header to reduce direct VPN fingerprinting." />
             <div className="grid grid-cols-2 gap-4">
                 <S_Input {...sp} settingKey="ovpn_http_proxy_host" label="Proxy IP / CDN Edge IP" placeholder="e.g. 104.16.x.x" tip="IP address of the proxy routing the traffic." />
                 <S_Input {...sp} settingKey="ovpn_http_proxy_port" label="Proxy Port" placeholder="80" type="number" />
             </div>
-            <S_Input {...sp} settingKey="ovpn_http_proxy_custom_header" label="Spoofed Host Domain (SNI Payload)" placeholder="www.shaparack.ir" iranBadge tip="The domain inserted into the HTTP Host header. DPI assumes traffic is going to this local site." />
+            <S_Input {...sp} settingKey="ovpn_http_proxy_custom_header" label="Spoofed Host Domain (HTTP Host Header)" placeholder="www.shaparack.ir" iranBadge tip="Inserted as HTTP Host header for proxy requests (not TLS SNI)." />
             <SectionTitle>Packet Fragmentation</SectionTitle>
-            <S_Input {...sp} settingKey="ovpn_fragment" label="Fragment Size (0 = disabled)" placeholder="0" type="number" tip="Split packets to evade DPI (UDP only). Common: 1200." />
+            <S_Input {...sp} settingKey="ovpn_fragment" label="Fragment Size (0 = disabled)" placeholder="0" type="number" tip="UDP-only tuning. Keep 0 for iOS/Android OpenVPN Connect because fragment is unsupported there." />
 
             <SectionTitle>HTTPS Camouflage (Port Sharing)</SectionTitle>
-            <S_Input {...sp} settingKey="ovpn_port_share" label="Port Share (Forward non-VPN to Web Server)" placeholder="127.0.0.1 8443" tip="If DPI probes your port 443 with normal HTTPS requests, OpenVPN proxies them back to a real web server (e.g. Nginx on 8443)." />
+            <S_Input {...sp} settingKey="ovpn_port_share" label="Port Share (Forward non-VPN to Web Server)" placeholder="127.0.0.1 8443" tip="TCP server mode only. If DPI probes 443 as HTTPS, OpenVPN forwards non-VPN traffic to real web server (e.g. Nginx on 8443)." />
             <SectionTitle>Block Iranian IPs (Server-Side)</SectionTitle>
-            <S_Check {...sp} settingKey="ovpn_block_iran_ips" label="Block outgoing connections to Iranian IPs" iranBadge tip="Prevents server from initiating connections to Iran, which DPI monitors as suspicious behavior for a foreign web server." />
+            <S_Check {...sp} settingKey="ovpn_block_iran_ips" label="Block outgoing connections to Iranian IPs" iranBadge tip="Requires host firewall/IP sets to be configured. OpenVPN directive alone cannot enforce this." />
             <SectionTitle>Multi-Server Failover</SectionTitle>
             <S_Input {...sp} settingKey="ovpn_remote_servers" label="Remote Servers (comma-separated)" placeholder="1.2.3.4:443:tcp,5.6.7.8:443:tcp" tip="Backup servers if main is blocked." />
             <S_Check {...sp} settingKey="ovpn_remote_random_hostname" label="Randomize Hostname Prefix" iranBadge tip="Adds random hostname prefixes for domain remotes to reduce cache/fingerprint correlation." />
