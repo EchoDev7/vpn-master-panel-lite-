@@ -126,6 +126,8 @@ usage() {
     echo "Usage: sudo ./update.sh [command]"
     echo ""
     echo "Commands (no command = full update):"
+    echo "  update                Run full update (alias for no command)"
+    echo "  version               Print currently installed git version and exit"
     echo "  restart-all           Restart backend + OpenVPN + WireGuard + Fail2Ban + Nginx"
     echo "  reset-openvpn         Hard reset OpenVPN service (stop/kill/start + reset-failed)"
     echo "  restart-openvpn       Restart OpenVPN service"
@@ -246,6 +248,14 @@ if [ $# -gt 0 ]; then
         -h|--help|help)
             usage
             exit 0
+            ;;
+        version)
+            # Version is already printed above (when .git exists). Keep command for UX.
+            exit 0
+            ;;
+        update)
+            # Alias for full update (same behavior as running update.sh with no args)
+            shift
             ;;
         restart-all)
             systemctl daemon-reload > /dev/null 2>&1 || true
