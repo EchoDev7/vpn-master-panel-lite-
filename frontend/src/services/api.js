@@ -91,8 +91,8 @@ class APIService {
     return this.client.delete(`/users/${userId}`);
   }
 
-  async getUserConfigOpenVPN(userId) {
-    return this.client.get(`/users/${userId}/config/openvpn`);
+  async getUserConfigOpenVPN(userId, platform = 'generic') {
+    return this.client.get(`/users/${userId}/config/openvpn`, { params: { platform } });
   }
 
   async getUserConfigWireGuard(userId) {
