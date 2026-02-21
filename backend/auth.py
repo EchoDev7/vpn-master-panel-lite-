@@ -19,6 +19,7 @@ Security notes:
 import sys
 import os
 import logging
+import sqlite3
 from datetime import datetime, timezone
 
 # ── Logging ─────────────────────────────────────────────────────────────
@@ -30,13 +31,35 @@ logging.basicConfig(
 
 # ── Database path ─────────────────────────────────────────────────────────
 _DB_CANDIDATES = [
+    "/opt/vpn-master-panel/vpnmaster_lite.db",
     "/opt/vpn-master-panel/backend/vpnmaster_lite.db",
     os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "vpnmaster_lite.db",
     ),
 ]
-DB_PATH = next((p for p in _DB_CANDIDATES if os.path.exists(p)), _DB_CANDIDATES[0])
+
+
+def _resolve_db_path() -> str:
+    # Prefer a DB file that actually contains the expected users table.
+    for path in _DB_CANDIDATES:
+        if not os.path.exists(path):
+            continue
+        try:
+            with sqlite3.connect(path, timeout=1) as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
+                ).fetchone()
+                if row:
+                    return path
+        except Exception:
+            continue
+
+    # Fallback: first existing path, else canonical default.
+    return next((p for p in _DB_CANDIDATES if os.path.exists(p)), _DB_CANDIDATES[0])
+
+
+DB_PATH = _resolve_db_path()
 
 
 def _count_active_sessions(username: str) -> int:
