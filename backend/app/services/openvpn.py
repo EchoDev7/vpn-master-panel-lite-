@@ -21,6 +21,7 @@ Key anti-censorship techniques used:
 Adheres to OpenVPN 2.5/2.6 Reference Manual.
 """
 import os
+import socket
 import logging
 import subprocess
 from datetime import datetime
@@ -628,16 +629,12 @@ class OpenVPNService:
         conf.append(_remote_line(remote_ip, remote_port, remote_proto))
         if has_extra:
             conf.append("remote-random")
-        if s.get("remote_random_hostname", "1") == "1" and any(c.isalpha() for c in str(remote_ip)):
+        if s.get("remote_random_hostname", "1") == "1" and self._supports_random_hostname(remote_ip):
             conf.append("remote-random-hostname")
 
         conf += [
-            "resolv-retry infinite",
             "nobind",
-            "persist-key",
-            "persist-tun",
             "remote-cert-tls server",
-            "auth-retry interact",
         ]
 
         data_ciphers = s.get("data_ciphers", "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305")
@@ -665,8 +662,6 @@ class OpenVPNService:
         elif s.get("allow_compression", "0") == "1":
             conf.append("compress stub-v2")
             conf.append("allow-compression asym")
-        else:
-            conf.append("allow-compression no")
 
         conf += [f"tun-mtu {s.get('tun_mtu','1420')}", f"mssfix {s.get('mssfix','1380')}"]
         fragment = s.get("fragment", "0")
@@ -692,23 +687,14 @@ class OpenVPNService:
             f"ping {ping_interval}",
             f"ping-restart {ping_timeout}",
             f"reneg-sec {s.get('reneg_sec', '3600')}",
-            f"connect-retry {s.get('connect_retry', '5')} {s.get('connect_retry_max_interval', '30')}",
-            f"connect-retry-max {s.get('connect_retry_max', '0')}",
             f"server-poll-timeout {s.get('server_poll_timeout', '10')}",
         ]
 
         conf += [
-            "ignore-unknown-option data-ciphers",
-            "ignore-unknown-option data-ciphers-fallback",
-            "ignore-unknown-option block-outside-dns",
-            "setenv opt block-outside-dns",
             "auth-nocache",
             f"verb {s.get('verb','3')}",
             "auth-user-pass",
         ]
-
-        if s.get("block_outside_dns", "1") == "1":
-            conf.append("block-outside-dns")
 
         # ── HTTP proxy (domain fronting / Iran bypass) ────────────────
         if s.get("http_proxy_enabled") == "1":
@@ -792,6 +778,30 @@ class OpenVPNService:
             with open(path) as f:
                 return f.read().strip()
         return f"# MISSING FILE: {path}"
+
+    def _supports_random_hostname(self, host: str) -> bool:
+        """
+        remote-random-hostname is only safe when DNS wildcard exists for the
+        target domain. Otherwise clients (especially iOS) will repeatedly fail
+        DNS resolve on random prefixes.
+        """
+        host = str(host).strip()
+        if not host or not any(ch.isalpha() for ch in host):
+            return False
+        try:
+            # If host is an IP literal, random-hostname must not be used.
+            import ipaddress
+            ipaddress.ip_address(host)
+            return False
+        except Exception:
+            pass
+
+        probe = f"vpnprobe-{os.getpid()}.{host}"
+        try:
+            socket.getaddrinfo(probe, None)
+            return True
+        except Exception:
+            return False
 
     def _ensure_pki(self):
         """Warn (don't raise) if PKI files are missing."""
