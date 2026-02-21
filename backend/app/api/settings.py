@@ -304,7 +304,7 @@ def init_default_settings(db: Session):
         "ovpn_remote_servers":       "",   # "ip:port:proto,ip:port:proto"
         "ovpn_remote_address_type":  "auto",   # auto | custom_ip | domain
         "ovpn_remote_domain":        "",       # custom domain for clients
-        "ovpn_remote_random_hostname": "1",   # reduce cache/fingerprint correlation
+        "ovpn_remote_random_hostname": "0",   # enable only when wildcard DNS is configured
 
         # ─── Port Sharing (HTTPS camouflage) ────────────────────────────
         # Forward non-VPN probes on port 443 to a real HTTPS server.
