@@ -110,7 +110,7 @@ class OpenVPNService:
             "auth_nocache":  "1",
             # Reliability
             "keepalive_interval": "10",
-            "keepalive_timeout":  "60",
+            "keepalive_timeout":  "90",
             "float":              "1",
             "tun_mtu":            "1420",
             "mssfix":             "1380",
@@ -148,7 +148,8 @@ class OpenVPNService:
             "connect_retry_max_interval":"30",
             "connect_retry_max":        "0",
             "server_poll_timeout":      "10",
-            "remote_random_hostname":   "1",
+            "client_auth_nocache":      "0",
+            "remote_random_hostname":   "0",
             # Push routes
             "push_routes":              "",
             "push_remove_routes":       "",
@@ -559,6 +560,7 @@ class OpenVPNService:
         server_ip_override: str = None,
         port_override: int = None,
         protocol_override: str = None,
+        platform: str = "generic",
         db=None,
     ) -> str:
         """
@@ -597,9 +599,15 @@ class OpenVPNService:
         if remote_proto == "both":
             remote_proto = "tcp"
 
+        platform = (platform or "generic").strip().lower()
+        if platform not in ("generic", "ios", "android"):
+            platform = "generic"
+        is_ios = platform == "ios"
+
         conf: List[str] = [
             f"# OpenVPN client config — {username}",
             f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"# Profile: {platform}",
             "client",
             f"dev {s.get('dev') or s.get('dev_type', 'tun')}",
             f"proto {remote_proto}",
@@ -629,7 +637,7 @@ class OpenVPNService:
         conf.append(_remote_line(remote_ip, remote_port, remote_proto))
         if has_extra:
             conf.append("remote-random")
-        if s.get("remote_random_hostname", "1") == "1" and self._supports_random_hostname(remote_ip):
+        if s.get("remote_random_hostname", "0") == "1" and self._supports_random_hostname(remote_ip):
             conf.append("remote-random-hostname")
 
         conf += [
@@ -638,8 +646,9 @@ class OpenVPNService:
         ]
 
         data_ciphers = s.get("data_ciphers", "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305")
-        conf.append(f"data-ciphers {data_ciphers}")
-        conf.append(f"data-ciphers-fallback {s.get('data_ciphers_fallback','AES-256-GCM')}")
+        if not is_ios:
+            conf.append(f"data-ciphers {data_ciphers}")
+            conf.append(f"data-ciphers-fallback {s.get('data_ciphers_fallback','AES-256-GCM')}")
         # Legacy fallback for older OpenVPN clients that don't support data-ciphers.
         conf.append(f"cipher {s.get('data_ciphers_fallback','AES-256-GCM')}")
         conf.append(f"auth {s.get('auth_digest','SHA256')}")
@@ -670,31 +679,36 @@ class OpenVPNService:
 
         conf += ["sndbuf 0", "rcvbuf 0"]
 
-        if s.get("redirect_gateway", "1") == "1":
-            conf.append("redirect-gateway def1 bypass-dhcp")
+        if not is_ios:
+            if s.get("redirect_gateway", "1") == "1":
+                conf.append("redirect-gateway def1 bypass-dhcp")
 
-        dns_raw = s.get("dns", "1.1.1.1,8.8.8.8")
-        for dns_entry in dns_raw.replace(",", " ").split():
-            dns_entry = dns_entry.strip()
-            if dns_entry:
-                conf.append(f"dhcp-option DNS {dns_entry}")
-        conf.append("dhcp-option DNS6 2606:4700:4700::1111")
-        conf.append("dhcp-option DNS6 2001:4860:4860::8888")
+            dns_raw = s.get("dns", "1.1.1.1,8.8.8.8")
+            for dns_entry in dns_raw.replace(",", " ").split():
+                dns_entry = dns_entry.strip()
+                if dns_entry:
+                    conf.append(f"dhcp-option DNS {dns_entry}")
+            conf.append("dhcp-option DNS6 2606:4700:4700::1111")
+            conf.append("dhcp-option DNS6 2001:4860:4860::8888")
 
         ping_interval = s.get("keepalive_interval", "10")
         ping_timeout  = s.get("keepalive_timeout",  "60")
-        conf += [
-            f"ping {ping_interval}",
-            f"ping-restart {ping_timeout}",
-            f"reneg-sec {s.get('reneg_sec', '3600')}",
-            f"server-poll-timeout {s.get('server_poll_timeout', '10')}",
-        ]
+        if not is_ios:
+            conf += [
+                f"ping {ping_interval}",
+                f"ping-restart {ping_timeout}",
+                f"reneg-sec {s.get('reneg_sec', '3600')}",
+                f"connect-retry {s.get('connect_retry', '5')} {s.get('connect_retry_max_interval', '30')}",
+                f"connect-retry-max {s.get('connect_retry_max', '0')}",
+            ]
+        conf.append(f"server-poll-timeout {s.get('server_poll_timeout', '10')}")
 
         conf += [
-            "auth-nocache",
             f"verb {s.get('verb','3')}",
             "auth-user-pass",
         ]
+        if s.get("client_auth_nocache", "0") == "1":
+            conf.append("auth-nocache")
 
         # ── HTTP proxy (domain fronting / Iran bypass) ────────────────
         if s.get("http_proxy_enabled") == "1":
