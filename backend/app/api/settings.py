@@ -51,6 +51,88 @@ def _open_firewall_port(port: str) -> str:
 
     return f"ℹ Could not confirm managed firewall for tcp/{port}; verify cloud/security-group rules manually"
 
+
+def _open_firewall_tcp_port(port: str) -> str:
+    """Best-effort firewall opener for an arbitrary TCP port (used for managed CONNECT proxy)."""
+    p = str(port).strip()
+    if not p.isdigit():
+        return f"⚠ Invalid port '{port}'"
+    pn = int(p)
+    if pn < 1 or pn > 65535:
+        return f"⚠ Invalid port '{port}'"
+    return _open_firewall_port(p)
+
+
+def _manage_connect_proxy_service(
+    *, enabled: bool, listen_port: str, target_port: str
+) -> List[str]:
+    """Create/restart/stop a systemd service that runs backend/scripts/connect_proxy.py.
+
+    The proxy is deliberately locked down to only allow CONNECT to 127.0.0.1:<target_port>
+    to avoid creating an open proxy.
+    """
+    import subprocess
+
+    hints: List[str] = []
+    unit_name = "vpnmaster-connect-proxy.service"
+    unit_path = f"/etc/systemd/system/{unit_name}"
+
+    if not str(listen_port).strip().isdigit():
+        return [f"⚠ CONNECT proxy listen port is invalid: {listen_port}"]
+    if not str(target_port).strip().isdigit():
+        return [f"⚠ OpenVPN target port is invalid: {target_port}"]
+
+    listen_port_n = int(str(listen_port).strip())
+    target_port_n = int(str(target_port).strip())
+    if not (1 <= listen_port_n <= 65535):
+        return [f"⚠ CONNECT proxy listen port out of range: {listen_port_n}"]
+    if not (1 <= target_port_n <= 65535):
+        return [f"⚠ OpenVPN target port out of range: {target_port_n}"]
+
+    if not enabled:
+        subprocess.run(["systemctl", "stop", unit_name], check=False, timeout=15)
+        subprocess.run(["systemctl", "disable", unit_name], check=False, timeout=15)
+        hints.append("ℹ CONNECT proxy disabled (service stopped)")
+        return hints
+
+    py = "/opt/vpn-master-panel/backend/venv/bin/python"
+    script = "/opt/vpn-master-panel/backend/scripts/connect_proxy.py"
+    subprocess.run(["chmod", "+x", script], check=False, timeout=5)
+
+    unit = f"""[Unit]
+Description=VPN Master CONNECT Proxy (restricted)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart={py} {script} --listen-port {listen_port_n} --allowed-target 127.0.0.1:{target_port_n}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    try:
+        with open(unit_path, "w", encoding="utf-8") as f:
+            f.write(unit)
+    except Exception as exc:
+        return [f"⚠ Could not write {unit_path}: {exc}"]
+
+    subprocess.run(["systemctl", "daemon-reload"], check=False, timeout=15)
+    subprocess.run(["systemctl", "enable", unit_name], check=False, timeout=15)
+    subprocess.run(["systemctl", "restart", unit_name], check=False, timeout=20)
+
+    # Confirm active state (best-effort)
+    state = subprocess.run(
+        ["systemctl", "is-active", unit_name], capture_output=True, text=True, timeout=10
+    )
+    hints.append(
+        f"✓ CONNECT proxy service restarted ({unit_name}) -> {(state.stdout or '').strip() or 'unknown'}"
+    )
+    return hints
+
 class SettingUpdate(BaseModel):
     value: str
 
@@ -168,6 +250,29 @@ async def update_settings(
                 results.append(f"ℹ {domain}: cert exists but restore script not found")
         nginx_rebuild_result = results or None
 
+    # ── Auto-apply: managed CONNECT proxy for OpenVPN HTTP camouflage ─────────
+    # If admin enables HTTP proxy and points it to this server, they should not
+    # need manual ufw/service commands.
+    ops_hints: List[str] = []
+    if any(k in settings_data for k in {"ovpn_http_proxy_enabled", "ovpn_http_proxy_port", "ovpn_port"}):
+        from ..models.setting import Setting as SettingModel
+
+        def _get(key: str, default: str) -> str:
+            row = db.query(SettingModel).filter(SettingModel.key == key).first()
+            return row.value if row and row.value else default
+
+        enabled = _get("ovpn_http_proxy_enabled", "0") == "1"
+        listen_port = _get("ovpn_http_proxy_port", "8080")
+        ovpn_port = _get("ovpn_port", "443")
+
+        if enabled:
+            ops_hints.append(_open_firewall_tcp_port(listen_port))
+        ops_hints.extend(
+            _manage_connect_proxy_service(
+                enabled=enabled, listen_port=listen_port, target_port=ovpn_port
+            )
+        )
+
     # Build a human-readable restart hint for the frontend
     restart_hints = []
     if "openvpn" in changed_categories:
@@ -183,6 +288,9 @@ async def update_settings(
     if nginx_rebuild_result:
         for msg in nginx_rebuild_result:
             restart_hints.append(msg)
+
+    for msg in ops_hints:
+        restart_hints.append(msg)
 
     if nginx_rebuild_needed:
         for p in sorted({effective_panel_port, effective_sub_port}):

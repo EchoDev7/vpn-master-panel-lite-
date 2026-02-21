@@ -310,21 +310,21 @@ if [ -d ".git" ]; then
     echo -e "${CYAN}Fetching updates...${NC}"
     
     # Try standard fetch first
-    if ! git fetch origin; then
+    if ! GIT_TERMINAL_PROMPT=0 git fetch origin; then
         echo -e "${YELLOW}⚠️ Connection to GitHub failed (likely due to regional blocking).${NC}"
         echo -e "${CYAN}🔄 Attempting to use GitHub Proxy mirror (gh-proxy.com)...${NC}"
         
         # Determine the current remote URL
         CURRENT_REMOTE=$(git remote get-url origin)
         
-        # If it's already a proxied URL, we don't double proxy. But usually it's the standard github URL.
-        # Ensure we have the base repo name. We know it's EchoDev7/vpn-master-panel-lite.git
+        # If it's already a proxied URL, we don't double proxy.
+        # IMPORTANT: this project repo name includes a trailing dash: vpn-master-panel-lite-
         if [[ "$CURRENT_REMOTE" != *"gh-proxy "* && "$CURRENT_REMOTE" != *"ghproxy"* ]]; then
             # Temporarily set to mirror
-            git remote set-url origin "https://gh-proxy.com/https://github.com/EchoDev7/vpn-master-panel-lite.git"
+            git remote set-url origin "https://gh-proxy.com/https://github.com/EchoDev7/vpn-master-panel-lite-.git"
             
             # Fetch using proxy
-            if ! git fetch origin; then
+            if ! GIT_TERMINAL_PROMPT=0 git fetch origin; then
                 echo -e "${RED}❌ Failed to fetch from proxy as well. Check server internet connection.${NC}"
                 # Restore original remote
                 git remote set-url origin "$CURRENT_REMOTE"
@@ -378,7 +378,9 @@ export DEBIAN_FRONTEND=noninteractive
 apt update -qq
 # Ensure critical packages are present
 # sqlite3 is needed by post_update_fixes() to read settings from DB
-apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs npm python3-pip openssl fail2ban certbot python3-certbot-nginx sqlite3
+# NOTE: Do NOT force-install Ubuntu's `npm` package when NodeSource `nodejs` is present.
+# It can cause dependency conflicts (nodejs Conflicts: npm). NodeSource nodejs ships with npm.
+apt install -y openvpn wireguard wireguard-tools iptables iptables-persistent nodejs python3-pip openssl fail2ban certbot python3-certbot-nginx sqlite3
 echo -e "${GREEN}✓ certbot: $(certbot --version 2>&1 | head -1)${NC}"
 record_summary "System packages" "ok" "dependencies install completed"
 
