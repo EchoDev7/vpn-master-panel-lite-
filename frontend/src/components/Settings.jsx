@@ -150,6 +150,52 @@ const Settings = () => {
     const showToast = (message, type = 'success') => setToast({ message, type });
     const closeToast = () => setToast(null);
 
+    const applyOvpnBypassPreset = useCallback((preset) => {
+        setSettings(prev => {
+            const next = { ...prev };
+
+            if (preset === 'balanced') {
+                next.ovpn_protocol = 'tcp';
+                next.ovpn_port = '443';
+                next.ovpn_tls_control_channel = 'tls-crypt';
+                next.ovpn_tun_mtu = '1420';
+                next.ovpn_mssfix = '1380';
+                next.ovpn_keepalive_timeout = '90';
+                next.ovpn_http_proxy_enabled = '0';
+                next.ovpn_remote_random_hostname = '0';
+            } else if (preset === 'proxy') {
+                next.ovpn_protocol = 'tcp';
+                next.ovpn_port = '443';
+                next.ovpn_tls_control_channel = 'tls-crypt';
+                next.ovpn_http_proxy_enabled = '1';
+                next.ovpn_http_proxy_port = next.ovpn_http_proxy_port || '80';
+                next.ovpn_keepalive_timeout = '90';
+            } else if (preset === 'aggressive') {
+                next.ovpn_protocol = 'tcp';
+                next.ovpn_port = '443';
+                next.ovpn_tls_control_channel = 'tls-crypt';
+                next.ovpn_connect_retry = '3';
+                next.ovpn_connect_retry_max_interval = '15';
+                next.ovpn_server_poll_timeout = '8';
+                next.ovpn_keepalive_timeout = '90';
+                if (!next.ovpn_remote_servers || !next.ovpn_remote_servers.trim()) {
+                    next.ovpn_remote_servers = 'edge1.example.com:443:tcp,edge2.example.com:443:tcp';
+                }
+                if (next.ovpn_remote_address_type === 'domain' && next.ovpn_remote_domain) {
+                    next.ovpn_remote_random_hostname = '1';
+                }
+            }
+
+            return next;
+        });
+
+        if (preset === 'proxy') {
+            showToast('Proxy preset applied. Set Proxy Host/Port and Host header before saving.', 'warning');
+        } else {
+            showToast('Anti-censorship preset applied. Review and save settings.');
+        }
+    }, [showToast]);
+
     const confirmAction = (title, message, onConfirm, confirmText = 'Confirm', confirmColor = 'blue') => {
         setConfirmation({ isOpen: true, title, message, onConfirm, confirmText, confirmColor });
     };
@@ -332,6 +378,42 @@ const Settings = () => {
                         <p className="text-gray-400 text-xs mt-1">These options are practical and executable with standard OpenVPN/OpenVPN Connect clients. For hard DPI, combine multiple layers: TCP/443 + tls-crypt + HTTP CONNECT proxy + multi-remote failover.</p>
                     </div>
                 </div>
+            </div>
+
+            <SectionTitle>Quick Presets (One Click)</SectionTitle>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <button
+                    onClick={() => applyOvpnBypassPreset('balanced')}
+                    className="bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg p-3 text-left"
+                >
+                    <div className="text-sm font-semibold text-white">Balanced (Default)</div>
+                    <div className="text-xs text-gray-400 mt-1">TCP/443 + tls-crypt + stable MTU/MSS</div>
+                </button>
+                <button
+                    onClick={() => applyOvpnBypassPreset('proxy')}
+                    className="bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg p-3 text-left"
+                >
+                    <div className="text-sm font-semibold text-white">Proxy Camouflage</div>
+                    <div className="text-xs text-gray-400 mt-1">Adds HTTP CONNECT layer for stricter DPI paths</div>
+                </button>
+                <button
+                    onClick={() => applyOvpnBypassPreset('aggressive')}
+                    className="bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg p-3 text-left"
+                >
+                    <div className="text-sm font-semibold text-white">Aggressive Failover</div>
+                    <div className="text-xs text-gray-400 mt-1">Retry tuning + multi-remote defaults for unstable links</div>
+                </button>
+            </div>
+
+            <div className="bg-gray-900/60 border border-gray-700 rounded-lg p-4 text-xs text-gray-300 space-y-2">
+                <p className="font-semibold text-gray-200">Operator Guide (Recommended Order)</p>
+                <ol className="list-decimal list-inside space-y-1">
+                    <li>Start with <span className="text-white">Balanced</span> and test on mobile data.</li>
+                    <li>If blocked, enable <span className="text-white">Proxy Camouflage</span> and set real proxy host/port/header.</li>
+                    <li>Add at least 2 backup remotes in Multi-Server Failover.</li>
+                    <li>Use Random Hostname only when wildcard DNS exists (e.g. <code>*.vpn.example.com</code>).</li>
+                    <li>After changes: Save → Generate &amp; Apply server.conf → re-download iOS/Android profile.</li>
+                </ol>
             </div>
 
             <SectionTitle>Native HTTP Proxy Payload (Domain Fronting)</SectionTitle>
