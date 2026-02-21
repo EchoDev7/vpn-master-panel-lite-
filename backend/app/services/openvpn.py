@@ -181,6 +181,10 @@ class OpenVPNService:
         if defaults.get("dev_type") and defaults.get("dev") != defaults.get("dev_type"):
             defaults["dev"] = defaults["dev_type"]
 
+        # Lite panel does not provision per-client tls-crypt-v2 keys.
+        if defaults.get("tls_control_channel") == "tls-crypt-v2":
+            defaults["tls_control_channel"] = "tls-crypt"
+
         return defaults
 
     # ------------------------------------------------------------------
@@ -236,6 +240,30 @@ class OpenVPNService:
 
         if settings.get("http_proxy_enabled") == "1" and not settings.get("http_proxy_host", "").strip():
             warnings.append("HTTP proxy is enabled but proxy host is empty.")
+
+        if settings.get("remote_random_hostname", "0") == "1":
+            addr_type = settings.get("remote_address_type", "auto")
+            remote_domain = settings.get("remote_domain", "").strip()
+            if addr_type != "domain" or not remote_domain:
+                warnings.append(
+                    "remote-random-hostname is enabled but remote domain is not configured. "
+                    "Set Remote Address Type=domain and provide ovpn_remote_domain."
+                )
+
+        for entry in settings.get("remote_servers", "").split(","):
+            item = entry.strip()
+            if not item:
+                continue
+            parts = item.split(":")
+            if len(parts) < 2:
+                warnings.append(
+                    f"Invalid remote_servers entry '{item}'. Expected host:port[:proto]."
+                )
+                continue
+            if len(parts) >= 3 and parts[2].strip().lower() not in ("tcp", "udp", "tcp4", "udp4", "tcp6", "udp6"):
+                warnings.append(
+                    f"Invalid remote_servers proto in '{item}'. Use tcp or udp (optionally tcp4/udp4/tcp6/udp6)."
+                )
 
         if settings.get("fragment", "0") not in ("", "0"):
             warnings.append(
