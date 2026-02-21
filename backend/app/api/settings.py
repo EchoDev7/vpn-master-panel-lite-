@@ -106,7 +106,9 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart={py} {script} --listen-port {listen_port_n} --allowed-target 127.0.0.1:{target_port_n}
+# Allow CONNECT to any host as long as the destination port matches OpenVPN,
+# then forward the tunnel to localhost OpenVPN to avoid open-proxy abuse.
+ExecStart={py} {script} --listen-port {listen_port_n} --allowed-port {target_port_n} --forward-host 127.0.0.1
 Restart=always
 RestartSec=2
 

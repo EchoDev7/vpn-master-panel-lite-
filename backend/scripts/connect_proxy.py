@@ -54,7 +54,8 @@ async def handle_client(
     client_reader: asyncio.StreamReader,
     client_writer: asyncio.StreamWriter,
     *,
-    allowed_target: Tuple[str, int],
+    allowed_port: int,
+    forward_host: str,
     timeout: float,
 ) -> None:
     peer = client_writer.get_extra_info("peername")
@@ -93,8 +94,11 @@ async def handle_client(
             await client_writer.drain()
             return
 
-        if (dst_host, dst_port) != allowed_target:
-            logging.warning("blocked target=%s from=%s allowed=%s:%s", target, peer, allowed_target[0], allowed_target[1])
+        # We intentionally ignore dst_host and only enforce dst_port.
+        # Then we forward the tunnel to a fixed local destination to avoid
+        # becoming an open proxy.
+        if dst_port != allowed_port:
+            logging.warning("blocked target=%s from=%s allowed_port=%s", target, peer, allowed_port)
             client_writer.write(b"HTTP/1.1 403 Forbidden\r\n\r\n")
             await client_writer.drain()
             return
@@ -102,11 +106,18 @@ async def handle_client(
         # Connect to target
         try:
             remote_reader, remote_writer = await asyncio.wait_for(
-                asyncio.open_connection(dst_host, dst_port),
+                asyncio.open_connection(forward_host, allowed_port),
                 timeout=timeout,
             )
         except Exception as exc:
-            logging.warning("connect failed target=%s from=%s err=%s", target, peer, exc)
+            logging.warning(
+                "connect failed target=%s -> forward=%s:%s from=%s err=%s",
+                target,
+                forward_host,
+                allowed_port,
+                peer,
+                exc,
+            )
             client_writer.write(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
             await client_writer.drain()
             return
@@ -135,16 +146,28 @@ async def handle_client(
             pass
 
 
-async def main_async(listen_host: str, listen_port: int, allowed_target: Tuple[str, int], timeout: float) -> None:
+async def main_async(listen_host: str, listen_port: int, allowed_port: int, forward_host: str, timeout: float) -> None:
     server = await asyncio.start_server(
-        lambda r, w: handle_client(r, w, allowed_target=allowed_target, timeout=timeout),
+        lambda r, w: handle_client(
+            r,
+            w,
+            allowed_port=allowed_port,
+            forward_host=forward_host,
+            timeout=timeout,
+        ),
         host=listen_host,
         port=listen_port,
         reuse_port=True,
     )
 
     addrs = ", ".join(str(sock.getsockname()) for sock in (server.sockets or []))
-    logging.info("listening on %s; allowed CONNECT=%s:%s", addrs, allowed_target[0], allowed_target[1])
+    logging.info(
+        "listening on %s; allowed CONNECT port=%s; forward=%s:%s",
+        addrs,
+        allowed_port,
+        forward_host,
+        allowed_port,
+    )
 
     async with server:
         await server.serve_forever()
@@ -155,9 +178,15 @@ def main() -> None:
     p.add_argument("--listen-host", default="0.0.0.0")
     p.add_argument("--listen-port", type=int, required=True)
     p.add_argument(
-        "--allowed-target",
+        "--allowed-port",
+        type=int,
         required=True,
-        help="Only allow CONNECT to this host:port (example: 127.0.0.1:443)",
+        help="Only allow CONNECT to this destination port (example: 443)",
+    )
+    p.add_argument(
+        "--forward-host",
+        default="127.0.0.1",
+        help="Where to forward the tunnel (default: 127.0.0.1)",
     )
     p.add_argument("--timeout", type=float, default=10.0)
     args = p.parse_args()
@@ -165,9 +194,18 @@ def main() -> None:
     if not (1 <= args.listen_port <= 65535):
         raise SystemExit("invalid listen port")
 
-    allowed_target = _parse_hostport(args.allowed_target)
+    if not (1 <= args.allowed_port <= 65535):
+        raise SystemExit("invalid allowed port")
 
-    asyncio.run(main_async(args.listen_host, args.listen_port, allowed_target, args.timeout))
+    asyncio.run(
+        main_async(
+            args.listen_host,
+            args.listen_port,
+            args.allowed_port,
+            args.forward_host,
+            args.timeout,
+        )
+    )
 
 
 if __name__ == "__main__":
