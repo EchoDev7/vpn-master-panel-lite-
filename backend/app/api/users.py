@@ -457,6 +457,7 @@ async def regenerate_token(
 @router.get("/{user_id}/config/openvpn", response_model=dict)
 async def get_openvpn_config(
     user_id: int,
+    platform: str = Query("generic", description="OpenVPN profile platform: generic|ios|android"),
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
@@ -471,11 +472,15 @@ async def get_openvpn_config(
     from ..services.openvpn import openvpn_service
     config_content = openvpn_service.generate_client_config(
         username=user.username,
+        platform=platform,
         db=db,
     )
+    platform_suffix = ""
+    if platform in ("ios", "android"):
+        platform_suffix = f"-{platform}"
     
     return {
-        "filename": f"{user.username}.ovpn",
+        "filename": f"{user.username}{platform_suffix}.ovpn",
         "content": config_content
     }
 
