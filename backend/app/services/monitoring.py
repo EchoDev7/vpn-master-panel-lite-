@@ -79,7 +79,10 @@ class TrafficMonitor:
         
         # 2. Update Database
         with get_db_context() as db:
-            users = db.query(User).filter(User.status != UserStatus.DELETED).all()
+            # NOTE: Lite edition does not have a DELETED state in UserStatus.
+            # Querying all users avoids AttributeError("DELETED") and keeps the
+            # monitor resilient across schema changes.
+            users = db.query(User).all()
             
             # Set of current active sessions in this cycle (username_protocol)
             current_active_keys = set()

@@ -4,7 +4,6 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
 from ..models.user import User, UserStatus
-from ..services.monitoring import MonitoringService
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +16,6 @@ class LightweightScheduler:
     def __init__(self):
         self._check_interval = 60  # seconds
         self._is_running = False
-        self._monitoring_service = MonitoringService()
 
     async def start(self):
         """Start the scheduler loop"""
@@ -46,7 +44,8 @@ class LightweightScheduler:
         await self.check_expired_users()
         
         # 2. Monitor traffic (optional/simplified)
-        # await self._monitoring_service.update_stats() 
+        # Traffic monitoring is handled by services/monitoring.py (traffic_monitor)
+        # Keep scheduler focused on periodic DB maintenance tasks.
 
     async def check_expired_users(self):
         """Check for users whose expiry date has passed"""
@@ -73,4 +72,8 @@ class LightweightScheduler:
         finally:
             db.close()
 
-scheduler = LightweightScheduler()
+# Export name used by app.main
+scheduler_service = LightweightScheduler()
+
+# Backward/compat alias (if any older code imports scheduler)
+scheduler = scheduler_service

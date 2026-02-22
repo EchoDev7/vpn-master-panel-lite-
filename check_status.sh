@@ -113,12 +113,48 @@ else
     print_status "Internet Connectivity Check" "fail"
 fi
 
+# Detect OpenVPN listen port/proto (config-first, socket fallback)
+detect_openvpn_listen() {
+    local conf="/etc/openvpn/server.conf"
+    local port=""
+    local proto=""
+
+    if [ -f "$conf" ]; then
+        port=$(awk '/^[[:space:]]*port[[:space:]]+[0-9]+/ {print $2; exit}' "$conf" 2>/dev/null || true)
+        proto=$(awk '/^[[:space:]]*proto[[:space:]]+/ {print $2; exit}' "$conf" 2>/dev/null || true)
+    fi
+
+    case "$proto" in
+        tcp|tcp-server|tcp4|tcp4-server|tcp6|tcp6-server) proto="tcp" ;;
+        udp|udp4|udp6) proto="udp" ;;
+        "") proto="udp" ;;
+        *) proto="udp" ;;
+    esac
+
+    port=${port:-1194}
+
+    # Socket fallback if config is missing/empty
+    if command -v ss >/dev/null 2>&1; then
+        if ss -H -lntp 2>/dev/null | grep -q "\bopenvpn\b"; then
+            port=$(ss -H -lntp 2>/dev/null | awk '/openvpn/ {split($4,a,":"); print a[length(a)]; exit}')
+            proto="tcp"
+        elif ss -H -lnup 2>/dev/null | grep -q "\bopenvpn\b"; then
+            port=$(ss -H -lnup 2>/dev/null | awk '/openvpn/ {split($4,a,":"); print a[length(a)]; exit}')
+            proto="udp"
+        fi
+    fi
+
+    echo "$port" "$proto"
+}
+
+read -r OVPN_PORT OVPN_PROTO < <(detect_openvpn_listen)
+
 # Listening Ports
 echo -e "\n${CYAN}Active Listening Ports:${NC}"
 if command -v netstat >/dev/null; then
-    netstat -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $4, $7}' | grep -E '(:8000|:3000|:1194|:443|:80|:22)'
+    netstat -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $4, $7}' | grep -E "(:8000|:3000|:${OVPN_PORT}|:443|:80|:22)"
 else
-    ss -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $5, $7}' | grep -E '(:8000|:3000|:1194|:443|:80|:22)'
+    ss -tulnp | grep 'LISTEN' | awk '{printf "  %-20s %-20s\n", $5, $7}' | grep -E "(:8000|:3000|:${OVPN_PORT}|:443|:80|:22)"
 fi
 
 # Firewall Rules Count
@@ -271,23 +307,19 @@ fi
 
 # OpenVPN Config & CERT CHECK
 if [ -f "/etc/openvpn/server.conf" ]; then
-    # Check config file setting
-    CONFIG_PORT=$(grep '^port ' /etc/openvpn/server.conf | awk '{print $2}')
-    
-# Check if OpenVPN is listening on configured port (default 1194 UDP)
-# We now also have Management Interface on 7505, so we must be specific
-if netstat -ulnp | grep -q ":1194 "; then
-    echo -e "${GREEN}[  OK  ] OpenVPN Running (UDP Port 1194)${NC}"
-elif netstat -tlnp | grep -q ":1194 "; then
-    echo -e "${GREEN}[  OK  ] OpenVPN Running (TCP Port 1194)${NC}"
-else
-    # Fallback check for process
-    if pgrep -x "openvpn" > /dev/null; then
-        echo -e "${YELLOW}[ WARN ] OpenVPN Process Running but Port 1194 not detected (Check config)${NC}"
+    # Check if OpenVPN is listening on configured port (or socket-detected one)
+    if [ "$OVPN_PROTO" = "udp" ] && (netstat -ulnp 2>/dev/null | grep -q ":${OVPN_PORT} "); then
+        echo -e "${GREEN}[  OK  ] OpenVPN Running (UDP Port ${OVPN_PORT})${NC}"
+    elif [ "$OVPN_PROTO" = "tcp" ] && (netstat -tlnp 2>/dev/null | grep -q ":${OVPN_PORT} "); then
+        echo -e "${GREEN}[  OK  ] OpenVPN Running (TCP Port ${OVPN_PORT})${NC}"
     else
-        echo -e "${RED}[ FAIL ] OpenVPN is NOT running${NC}"
+        # Fallback check for process
+        if pgrep -x "openvpn" > /dev/null; then
+            echo -e "${YELLOW}[ WARN ] OpenVPN Process Running but Port ${OVPN_PORT}/${OVPN_PROTO} not detected (Check config)${NC}"
+        else
+            echo -e "${RED}[ FAIL ] OpenVPN is NOT running${NC}"
+        fi
     fi
-fi
     
     # Check Cert Expiry
     if [ -f "/etc/openvpn/server.crt" ]; then

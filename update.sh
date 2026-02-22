@@ -432,6 +432,23 @@ EOF
 
 # Check Firewall (SECURED: Only necessary ports)
 echo -e "${CYAN}🔥 Configuring Firewall...${NC}"
+
+# Remove known legacy/insecure rules from older versions (best-effort)
+ufw --force delete allow 51820/udp > /dev/null 2>&1 || true
+ufw --force delete allow 1:65535/tcp > /dev/null 2>&1 || true
+ufw --force delete allow 1:65535/udp > /dev/null 2>&1 || true
+
+# Detect OpenVPN port/proto from server.conf (so panel-custom ports work automatically)
+OVPN_PORT=$(awk '/^[[:space:]]*port[[:space:]]+[0-9]+/ {print $2; exit}' /etc/openvpn/server.conf 2>/dev/null || true)
+OVPN_PROTO_RAW=$(awk '/^[[:space:]]*proto[[:space:]]+/ {print $2; exit}' /etc/openvpn/server.conf 2>/dev/null || true)
+case "$OVPN_PROTO_RAW" in
+    tcp|tcp-server|tcp4|tcp4-server|tcp6|tcp6-server) OVPN_PROTO="tcp" ;;
+    udp|udp4|udp6) OVPN_PROTO="udp" ;;
+    "") OVPN_PROTO="udp" ;;
+    *) OVPN_PROTO="udp" ;;
+esac
+OVPN_PORT=${OVPN_PORT:-1194}
+
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp > /dev/null 2>&1
@@ -439,8 +456,8 @@ ufw allow 80/tcp > /dev/null 2>&1
 ufw allow 443/tcp > /dev/null 2>&1
 ufw allow 3000/tcp > /dev/null 2>&1
 ufw allow 8000/tcp > /dev/null 2>&1
-# VPN Ports (customizable via panel later, but defaults here)
-ufw allow 1194/udp > /dev/null 2>&1
+# VPN Port (read from OpenVPN config so panel-custom ports work)
+ufw allow ${OVPN_PORT}/${OVPN_PROTO} > /dev/null 2>&1
 
 ufw --force enable > /dev/null 2>&1
 

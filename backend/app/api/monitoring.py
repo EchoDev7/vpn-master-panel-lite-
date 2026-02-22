@@ -123,25 +123,35 @@ async def get_traffic_stats(
     current_admin: User = Depends(get_current_admin)
 ):
     """Get traffic statistics for the last N days"""
-    from sqlalchemy import func, cast, Date
+    from sqlalchemy import func
     
     start_date = datetime.utcnow() - timedelta(days=days)
     
-    # Group by date
-    daily_traffic = db.query(
-        cast(TrafficLog.recorded_at, Date).label('date'),
-        func.sum(TrafficLog.upload_bytes).label('upload'),
-        func.sum(TrafficLog.download_bytes).label('download')
-    ).filter(
-        TrafficLog.recorded_at >= start_date
-    ).group_by(
-        cast(TrafficLog.recorded_at, Date)
-    ).all()
+    # NOTE: On SQLite, casting DateTime->Date can trigger driver-level date parsing
+    # and lead to TypeError: fromisoformat: argument must be str.
+    # Using func.date() keeps it as a plain string (YYYY-MM-DD) across drivers.
+    date_key = func.date(TrafficLog.recorded_at)
+
+    daily_traffic = (
+        db.query(
+            date_key.label("date"),
+            func.sum(TrafficLog.upload_bytes).label("upload"),
+            func.sum(TrafficLog.download_bytes).label("download"),
+        )
+        .filter(TrafficLog.recorded_at >= start_date)
+        .group_by(date_key)
+        .all()
+    )
     
     result = []
     for day in daily_traffic:
+        date_value = day.date
+        if hasattr(date_value, "isoformat"):
+            date_str = date_value.isoformat()
+        else:
+            date_str = str(date_value)
         result.append({
-            "date": day.date.isoformat(),
+            "date": date_str,
             "upload_gb": round((day.upload or 0) / (1024**3), 2),
             "download_gb": round((day.download or 0) / (1024**3), 2),
             "total_gb": round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2)
@@ -367,7 +377,7 @@ async def get_traffic_by_type(
     """Get traffic statistics separated by type (direct vs tunnel)"""
     try:
         from ..models.user import TrafficType
-        from sqlalchemy import cast, Date
+        from sqlalchemy import func
         
         start_date = datetime.utcnow() - timedelta(days=days)
         
@@ -387,40 +397,49 @@ async def get_traffic_by_type(
             TrafficLog.recorded_at >= start_date
         ).scalar() or 0
         
+        date_key = func.date(TrafficLog.recorded_at)
+
         # Daily breakdown
-        daily_direct = db.query(
-            cast(TrafficLog.recorded_at, Date).label('date'),
-            func.sum(TrafficLog.upload_bytes).label('upload'),
-            func.sum(TrafficLog.download_bytes).label('download')
-        ).filter(
-            TrafficLog.traffic_type == TrafficType.DIRECT,
-            TrafficLog.recorded_at >= start_date
-        ).group_by(
-            cast(TrafficLog.recorded_at, Date)
-        ).all()
+        daily_direct = (
+            db.query(
+                date_key.label("date"),
+                func.sum(TrafficLog.upload_bytes).label("upload"),
+                func.sum(TrafficLog.download_bytes).label("download"),
+            )
+            .filter(
+                TrafficLog.traffic_type == TrafficType.DIRECT,
+                TrafficLog.recorded_at >= start_date,
+            )
+            .group_by(date_key)
+            .all()
+        )
         
-        daily_tunnel = db.query(
-            cast(TrafficLog.recorded_at, Date).label('date'),
-            func.sum(TrafficLog.upload_bytes).label('upload'),
-            func.sum(TrafficLog.download_bytes).label('download')
-        ).filter(
-            TrafficLog.traffic_type == TrafficType.TUNNEL,
-            TrafficLog.recorded_at >= start_date
-        ).group_by(
-            cast(TrafficLog.recorded_at, Date)
-        ).all()
+        daily_tunnel = (
+            db.query(
+                date_key.label("date"),
+                func.sum(TrafficLog.upload_bytes).label("upload"),
+                func.sum(TrafficLog.download_bytes).label("download"),
+            )
+            .filter(
+                TrafficLog.traffic_type == TrafficType.TUNNEL,
+                TrafficLog.recorded_at >= start_date,
+            )
+            .group_by(date_key)
+            .all()
+        )
         
         # Combine daily data
         daily_combined = {}
         for day in daily_direct:
-            daily_combined[day.date.isoformat()] = {
-                "date": day.date.isoformat(),
+            day_date = day.date.isoformat() if hasattr(day.date, "isoformat") else str(day.date)
+            daily_combined[day_date] = {
+                "date": day_date,
                 "direct_gb": round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2),
                 "tunnel_gb": 0
             }
         
         for day in daily_tunnel:
-            date_str = day.date.isoformat()
+            date_str = day.date.isoformat() if hasattr(day.date, "isoformat") else str(day.date)
             if date_str in daily_combined:
                 daily_combined[date_str]["tunnel_gb"] = round(((day.upload or 0) + (day.download or 0)) / (1024**3), 2)
             else:
