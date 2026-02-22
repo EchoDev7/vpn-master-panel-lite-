@@ -59,6 +59,9 @@ function MainLayout() {
                             <Link to="/servers" className="text-gray-300 hover:text-white transition-colors">
                                 Servers
                             </Link>
+                            <Link to="/tunnels" className="text-gray-300 hover:text-white transition-colors">
+                                Tunnels
+                            </Link>
                             <Link to="/users" className="text-gray-300 hover:text-white transition-colors">
                                 Users
                             </Link>

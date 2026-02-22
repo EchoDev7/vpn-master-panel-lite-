@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 
+import os
+import subprocess
+
 from ..database import get_db
 from ..models.setting import Setting
 from ..models.user import User
@@ -50,7 +53,122 @@ async def update_settings(
             db.add(new_setting)
             
     db.commit()
+
     return {"message": "Settings updated successfully"}
+
+
+# =============================================
+# Domain + SSL (Let's Encrypt)
+# =============================================
+
+
+class PanelSSLRequest(BaseModel):
+    domain: str
+    email: str
+    https_port: int = 8443
+
+
+def _get_setting_value(db: Session, key: str, default: str = "") -> str:
+    s = db.query(Setting).filter(Setting.key == key).first()
+    return (s.value if s and s.value is not None else default) or default
+
+
+def _set_setting_value(db: Session, key: str, value: str, category: str = "general") -> None:
+    s = db.query(Setting).filter(Setting.key == key).first()
+    if s:
+        s.value = value
+        if not s.category:
+            s.category = category
+    else:
+        db.add(Setting(key=key, value=value, category=category))
+
+
+@router.get("/panel-ssl/status")
+async def get_panel_ssl_status(
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+):
+    """Get current domain/SSL status (cert present, expiry, nginx config)."""
+    domain = _get_setting_value(db, "panel_domain")
+    email = _get_setting_value(db, "panel_ssl_email")
+    https_port = _get_setting_value(db, "panel_https_port", "8443")
+
+    cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem" if domain else ""
+    key_path = f"/etc/letsencrypt/live/{domain}/privkey.pem" if domain else ""
+    cert_exists = bool(domain) and os.path.exists(cert_path)
+
+    cert_expiry = None
+    if cert_exists:
+        try:
+            out = subprocess.check_output(
+                ["openssl", "x509", "-enddate", "-noout", "-in", cert_path],
+                text=True,
+            ).strip()
+            if "=" in out:
+                cert_expiry = out.split("=", 1)[1].strip()
+        except Exception:
+            cert_expiry = None
+
+    nginx_conf = f"/etc/nginx/sites-available/vpn_panel_{domain}" if domain else ""
+    nginx_enabled = f"/etc/nginx/sites-enabled/vpn_panel_{domain}" if domain else ""
+
+    return {
+        "domain": domain,
+        "email": email,
+        "https_port": https_port,
+        "cert": {
+            "exists": cert_exists,
+            "cert_path": cert_path if cert_exists else None,
+            "key_path": key_path if cert_exists else None,
+            "expiry": cert_expiry,
+        },
+        "nginx": {
+            "conf_path": nginx_conf if domain else None,
+            "enabled_path": nginx_enabled if domain else None,
+            "conf_exists": bool(domain) and os.path.exists(nginx_conf),
+            "enabled_exists": bool(domain) and os.path.exists(nginx_enabled),
+        },
+    }
+
+
+@router.post("/panel-ssl/issue")
+async def issue_panel_ssl(
+    req: PanelSSLRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+):
+    """Issue/Renew Let's Encrypt cert and auto-write Nginx SSL config."""
+    # Persist requested settings first (so UI reload shows them)
+    _set_setting_value(db, "panel_domain", req.domain.strip(), category="general")
+    _set_setting_value(db, "panel_ssl_email", req.email.strip(), category="general")
+    _set_setting_value(db, "panel_https_port", str(req.https_port), category="general")
+    db.commit()
+
+    try:
+        from ..services.ssl_service import SSLService
+
+        svc = SSLService()
+        logs = "".join(list(svc.stream_letsencrypt_cert(req.domain.strip(), req.email.strip(), req.https_port)))
+        return {"status": "ok", "logs": logs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/panel-ssl/apply-nginx")
+async def apply_panel_ssl_nginx(
+    req: PanelSSLRequest,
+    current_admin: User = Depends(get_current_admin),
+):
+    """(Re)write Nginx SSL config using existing certificate (restore_ssl_nginx.sh)."""
+    try:
+        # restore_ssl_nginx.sh is shipped with the project root.
+        cmd = ["bash", "/opt/vpn-master-panel/restore_ssl_nginx.sh", req.domain.strip(), str(req.https_port)]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
+        return {"status": "ok", "output": out}
+    except subprocess.CalledProcessError as e:
+        return {"status": "error", "output": e.output}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Initialize default settings
 def init_default_settings(db: Session):
@@ -148,6 +266,12 @@ def init_default_settings(db: Session):
         # General — Panel Features
         # =============================================
         "admin_contact": "",
+
+        # Domain + SSL for panel (Nginx)
+        # NOTE: Default HTTPS port is 8443 to avoid conflict when OpenVPN uses 443.
+        "panel_domain": "",
+        "panel_ssl_email": "",
+        "panel_https_port": "8443",
 
         # Subscription Links (OpenVPN)
         "subscription_enabled": "0",

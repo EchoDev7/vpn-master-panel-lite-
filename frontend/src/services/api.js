@@ -217,6 +217,20 @@ class APIService {
     return this.client.get('/settings/openvpn/version');
   }
 
+  // Domain + SSL
+  async getPanelSSLStatus() {
+    return this.client.get('/settings/panel-ssl/status');
+  }
+
+  async issuePanelSSL({ domain, email, https_port = 8443 }) {
+    return this.client.post('/settings/panel-ssl/issue', { domain, email, https_port });
+  }
+
+  async applyPanelSSLNginx({ domain, email = '', https_port = 8443 }) {
+    // email is ignored by backend for apply-nginx, but keeping the signature consistent helps UI reuse.
+    return this.client.post('/settings/panel-ssl/apply-nginx', { domain, email, https_port });
+  }
+
   // Diagnostics
   async getFullDiagnostics() {
     return this.client.get('/diagnostics/full');

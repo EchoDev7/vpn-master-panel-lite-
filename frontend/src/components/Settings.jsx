@@ -26,6 +26,7 @@ const OPENVPN_TABS = [
 ];
 
 const GENERAL_TABS = [
+    { id: 'gen_panel_ssl', label: '🌍 Domain & SSL' },
     { id: 'gen_subscription', label: '🔗 Subscription' },
     { id: 'gen_telegram', label: '📱 Telegram Bot' },
     { id: 'gen_smartproxy', label: '🎯 Smart Proxy' },
@@ -59,10 +60,14 @@ const Settings = () => {
     const [pkiInfo, setPkiInfo] = useState(null);
     const [ovpnVersion, setOvpnVersion] = useState(null);
 
+    const [panelSslStatus, setPanelSslStatus] = useState(null);
+    const [panelSslLogs, setPanelSslLogs] = useState('');
+    const [panelSslBusy, setPanelSslBusy] = useState(false);
+
     const [confirmation, setConfirmation] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, confirmText: 'Confirm', confirmColor: 'blue' });
     const [toast, setToast] = useState(null); // { message, type }
 
-    useEffect(() => { loadSettings(); loadVersions(); }, []);
+    useEffect(() => { loadSettings(); loadVersions(); loadPanelSslStatus(); }, []);
 
     const loadSettings = async () => {
         try {
@@ -72,6 +77,16 @@ const Settings = () => {
             console.error("Failed to load settings:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const loadPanelSslStatus = async () => {
+        try {
+            const res = await apiService.getPanelSSLStatus();
+            setPanelSslStatus(res.data);
+        } catch (e) {
+            // Optional feature on some installs; keep UI resilient
+            setPanelSslStatus(null);
         }
     };
 
@@ -164,6 +179,117 @@ const Settings = () => {
                     <S_Check {...sp} settingKey="ovpn_explicit_exit_notify" label="Explicit Exit Notify" tip="Notify server on disconnect (UDP only). Faster reconnection." />
                 </div>
             </div>
+        </div>
+    );
+
+    const renderPanelSSL = () => (
+        <div className="space-y-6">
+            <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                    <Globe className="w-5 h-5 text-indigo-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                        <p className="text-indigo-300 font-semibold text-sm">Domain + SSL (Let's Encrypt)</p>
+                        <p className="text-gray-400 text-xs mt-1">Auto-issue certificate and configure Nginx for the panel. Default HTTPS port is 8443 (recommended when OpenVPN uses 443).</p>
+                    </div>
+                </div>
+            </div>
+
+            <SectionTitle>Configuration</SectionTitle>
+            <S_Input {...sp} settingKey="panel_domain" label="Domain" placeholder="panel.example.com" tip="A record must point to this server IP. If using Cloudflare, set DNS to 'DNS only' during issuance." />
+            <S_Input {...sp} settingKey="panel_ssl_email" label="Email" placeholder="admin@example.com" tip="Let's Encrypt account email." />
+            <S_Select {...sp} settingKey="panel_https_port" label="HTTPS Port" options={[
+                { value: '8443', label: '8443 (Recommended with OpenVPN on 443)' },
+                { value: '2053', label: '2053' },
+                { value: '2083', label: '2083' },
+                { value: '2087', label: '2087' },
+                { value: '2096', label: '2096' },
+            ]} />
+
+            <div className="flex gap-3">
+                <button
+                    disabled={panelSslBusy}
+                    onClick={() => confirmAction(
+                        'Issue / Renew SSL',
+                        'This will request/renew a certificate via certbot. Port 80 must be reachable from the internet. Continue?',
+                        async () => {
+                            setPanelSslBusy(true);
+                            setPanelSslLogs('');
+                            try {
+                                const domain = (settings.panel_domain || '').trim();
+                                const email = (settings.panel_ssl_email || '').trim();
+                                const https_port = parseInt(settings.panel_https_port || '8443', 10);
+                                const res = await apiService.issuePanelSSL({ domain, email, https_port });
+                                setPanelSslLogs(res.data?.logs || '');
+                                showToast('SSL request finished (see logs).');
+                                await loadPanelSslStatus();
+                            } catch (e) {
+                                setPanelSslLogs(e?.response?.data?.detail || String(e));
+                                showToast('SSL request failed', 'error');
+                            } finally {
+                                setPanelSslBusy(false);
+                            }
+                        },
+                        'Issue SSL',
+                        'orange'
+                    )}
+                    className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-3 rounded-lg text-sm font-medium transition-colors"
+                >
+                    {panelSslBusy ? 'Working...' : '🔐 Issue / Renew SSL'}
+                </button>
+
+                <button
+                    disabled={panelSslBusy}
+                    onClick={() => confirmAction(
+                        'Apply Nginx SSL Config',
+                        'This will rewrite and enable the Nginx SSL site config based on existing certificate files. Continue?',
+                        async () => {
+                            setPanelSslBusy(true);
+                            try {
+                                const domain = (settings.panel_domain || '').trim();
+                                const https_port = parseInt(settings.panel_https_port || '8443', 10);
+                                const res = await apiService.applyPanelSSLNginx({ domain, https_port });
+                                setPanelSslLogs(res.data?.output || '');
+                                showToast('Nginx SSL config applied (see logs).');
+                                await loadPanelSslStatus();
+                            } catch (e) {
+                                setPanelSslLogs(e?.response?.data?.detail || String(e));
+                                showToast('Apply failed', 'error');
+                            } finally {
+                                setPanelSslBusy(false);
+                            }
+                        },
+                        'Apply Nginx',
+                        'blue'
+                    )}
+                    className="flex-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-3 rounded-lg text-sm font-medium border border-gray-600 transition-colors"
+                >
+                    🧩 Apply Nginx
+                </button>
+            </div>
+
+            <SectionTitle>Status</SectionTitle>
+            {panelSslStatus ? (
+                <div className="bg-gray-900 rounded-lg p-4 border border-gray-700 space-y-2">
+                    <p className="text-xs text-gray-400">Domain: <span className="text-gray-200">{panelSslStatus.domain || '-'}</span></p>
+                    <p className="text-xs text-gray-400">HTTPS Port: <span className="text-gray-200">{panelSslStatus.https_port || '-'}</span></p>
+                    <p className="text-xs text-gray-400">Cert: <span className={panelSslStatus.cert?.exists ? 'text-green-400' : 'text-yellow-400'}>{panelSslStatus.cert?.exists ? 'Present' : 'Missing'}</span></p>
+                    {panelSslStatus.cert?.expiry && <p className="text-xs text-gray-400">Expiry: <span className="text-gray-200">{panelSslStatus.cert.expiry}</span></p>}
+                    <p className="text-xs text-gray-400">Nginx site config: <span className={panelSslStatus.nginx?.conf_exists ? 'text-green-400' : 'text-yellow-400'}>{panelSslStatus.nginx?.conf_exists ? 'Exists' : 'Missing'}</span></p>
+                    <p className="text-xs text-gray-400">Nginx enabled: <span className={panelSslStatus.nginx?.enabled_exists ? 'text-green-400' : 'text-yellow-400'}>{panelSslStatus.nginx?.enabled_exists ? 'Enabled' : 'Not enabled'}</span></p>
+                </div>
+            ) : (
+                <div className="text-xs text-gray-500">Status unavailable (backend endpoint not reachable yet).</div>
+            )}
+
+            {(panelSslLogs || '').trim() && (
+                <div className="bg-gray-900 rounded-lg border border-gray-700 overflow-hidden">
+                    <div className="flex justify-between items-center p-3 bg-gray-800 border-b border-gray-700">
+                        <span className="text-sm font-medium text-gray-300">SSL Logs</span>
+                        <button onClick={() => setPanelSslLogs('')} className="text-gray-400 hover:text-white text-sm">✕</button>
+                    </div>
+                    <textarea readOnly value={panelSslLogs} className="w-full h-64 bg-transparent text-gray-300 p-4 font-mono text-xs resize-none focus:outline-none" />
+                </div>
+            )}
         </div>
     );
 
@@ -544,6 +670,7 @@ const Settings = () => {
             case 'ovpn_connection': return renderOvpnConnection();
             case 'ovpn_advanced': return renderOvpnAdvanced();
             case 'ovpn_certificates': return renderOvpnCertificates();
+            case 'gen_panel_ssl': return renderPanelSSL();
             case 'gen_subscription': return renderSubscription();
             case 'gen_telegram': return renderTelegram();
             case 'gen_smartproxy': return renderSmartProxy();
