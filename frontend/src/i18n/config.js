@@ -8,20 +8,20 @@ import LanguageDetector from 'i18next-browser-languagedetector';
 
 // Import translations
 import en from './locales/en.json';
+import fa from './locales/fa.json';
 
 // RTL languages
-const RTL_LANGUAGES = ['ar'];
+const RTL_LANGUAGES = ['fa', 'ar'];
 
 i18n
     .use(LanguageDetector)
     .use(initReactI18next)
     .init({
         resources: {
-            en: { translation: en }
+            en: { translation: en },
+            fa: { translation: fa }
         },
-        lng: 'en',
         fallbackLng: 'en',
-        supportedLngs: ['en'],
         debug: false,
         interpolation: {
             escapeValue: false

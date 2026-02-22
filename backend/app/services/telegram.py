@@ -102,8 +102,7 @@ class TelegramBotService:
         await update.message.reply_text(
             "🔗 *Active Connections*\n\n"
             "Total: 45\n"
-            "OpenVPN: 30\n"
-            "WireGuard: 15",
+            "OpenVPN: 45",
             parse_mode='Markdown'
         )
     
@@ -125,29 +124,20 @@ class TelegramBotService:
         if not self.application:
             logger.warning("Bot not initialized")
             return
-
+            
         chat_ids = [chat_id] if chat_id else self.admin_chat_ids
-
+        
         for cid in chat_ids:
-            if cid and str(cid).strip():
+            if cid:
                 try:
                     await self.application.bot.send_message(
-                        chat_id=str(cid).strip(),
+                        chat_id=cid,
                         text=message,
-                        parse_mode='HTML'
+                        parse_mode='Markdown'
                     )
                 except Exception as e:
                     logger.error(f"Failed to send notification to {cid}: {e}")
-
-    async def send_admin_alert(self, message: str):
-        """Send an alert to all configured admin chat IDs.
-
-        Alias for send_notification() — broadcasts to every admin in
-        TELEGRAM_ADMIN_CHAT_IDS.  Called by services/users.py on new user
-        creation and other system events.
-        """
-        await self.send_notification(message)
-
+    
     async def shutdown(self):
         """Shutdown the bot"""
         if self.application:

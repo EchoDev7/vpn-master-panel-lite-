@@ -104,8 +104,10 @@ python3 reset_admin.py
 ---
 
 ## 🆘 Still having issues?
-Run the built-in diagnostic tool and check the output:
+Collect basic diagnostics and check the logs:
 
 ```bash
-sudo ./debug_server.sh
+sudo systemctl status vpnmaster-backend --no-pager
+sudo journalctl -u vpnmaster-backend -n 200 --no-pager
+sudo ./check_status.sh
 ```

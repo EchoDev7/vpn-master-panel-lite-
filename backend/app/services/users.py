@@ -5,7 +5,6 @@ from typing import Optional
 from ..database import get_db_context
 from ..models.user import User
 from ..services.openvpn import openvpn_service
-from ..services.wireguard import wireguard_service
 from ..services.email import email_service
 from ..services.telegram import telegram_service
 
@@ -14,9 +13,8 @@ logger = logging.getLogger(__name__)
 async def _provision_new_user(user_id: int):
     """
     Auto-provision a newly created user (F5):
-    1. Add WireGuard peer (if applicable)
-    2. Send Welcome Email
-    3. Notify Admin via Telegram
+    1. Send Welcome Email (optional)
+    2. Notify Admin via Telegram
     """
     logger.info(f"Starting provisioning for user_id={user_id}")
     
@@ -27,23 +25,7 @@ async def _provision_new_user(user_id: int):
             logger.error(f"Provisioning failed: User {user_id} not found")
             return
 
-        # 1. WireGuard Provisioning
-        # If user has WG enabled and keys generated, ensure peer is added.
-        # Note: Usually `create_user` might have already called `add_peer`, but doing it here ensures consistency
-        # especially if keys were generated but peer addition failed or was deferred.
-        if user.wireguard_enabled and user.wireguard_public_key:
-            try:
-                # This is idempotent in our implementation usually
-                wireguard_service.add_peer(
-                    user.wireguard_public_key,
-                    user.wireguard_ip,
-                    user.wireguard_preshared_key
-                )
-                logger.info(f"WireGuard peer active for {user.username}")
-            except Exception as e:
-                logger.error(f"WireGuard provision failed for {user.username}: {e}")
-
-        # 2. Send Welcome Email
+        # 1. Send Welcome Email
         if user.email:
             try:
                 # Generate OpenVPN config content to attach/include
@@ -63,7 +45,7 @@ async def _provision_new_user(user_id: int):
             except Exception as e:
                 logger.error(f"Welcome email failed for {user.username}: {e}")
 
-        # 3. Notify Admin via Telegram
+        # 2. Notify Admin via Telegram
         try:
             expiry_str = user.expiry_date.strftime("%Y-%m-%d") if user.expiry_date else "Unlimited/Never"
             limit_str = f"{user.data_limit_gb} GB" if user.data_limit_gb > 0 else "Unlimited"

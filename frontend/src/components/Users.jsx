@@ -5,19 +5,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsToolti
 import ConfirmationModal from './ConfirmationModal';
 import Toast from './Toast';
 
-const getDefaultSubscriptionBaseUrl = () => {
-    const configured = import.meta.env.VITE_API_URL;
-    if (configured) {
-        return configured.replace(/\/$/, '');
-    }
-
-    if (window.location.port === '5173') {
-        return `${window.location.protocol}//${window.location.hostname}:8001`;
-    }
-
-    return window.location.origin;
-};
-
 const Users = () => {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -62,9 +49,7 @@ const Users = () => {
         connection_limit: 3,
         speed_limit_mbps: 0,
         status: 'active',
-        openvpn_enabled: true,
-        wireguard_enabled: true,
-        l2tp_enabled: false
+        openvpn_enabled: true
     };
 
     const [formData, setFormData] = useState(initialFormState);
@@ -72,10 +57,6 @@ const Users = () => {
     useEffect(() => {
         loadUsers();
     }, [page, pageSize, filterStatus]);
-
-    useEffect(() => {
-        loadSubscriptionBaseUrl();
-    }, []);
 
     const loadUsers = async () => {
         try {
@@ -121,9 +102,7 @@ const Users = () => {
             connection_limit: user.connection_limit || 3,
             speed_limit_mbps: user.speed_limit_mbps || 0,
             status: user.status,
-            openvpn_enabled: user.openvpn_enabled,
-            wireguard_enabled: user.wireguard_enabled,
-            l2tp_enabled: user.l2tp_enabled
+            openvpn_enabled: user.openvpn_enabled
         });
         setShowModal(true);
     };
@@ -175,7 +154,6 @@ const Users = () => {
     const [showConfigModal, setShowConfigModal] = useState(false);
     const [selectedConfigUser, setSelectedConfigUser] = useState(null);
     const [configType, setConfigType] = useState('openvpn');
-    const [configPlatform, setConfigPlatform] = useState('ios');
     const [configContent, setConfigContent] = useState(null);
     const [configLoading, setConfigLoading] = useState(false);
 
@@ -184,26 +162,16 @@ const Users = () => {
         setShowConfigModal(true);
         setConfigContent(null);
         setConfigType('openvpn');
-        setConfigPlatform('ios');
-        loadConfig(user.id, 'openvpn', 'ios');
+        loadConfig(user.id, 'openvpn');
     };
 
-    const loadConfig = async (userId, type, platform = 'generic') => {
+    const loadConfig = async (userId, type) => {
         try {
             setConfigLoading(true);
             setConfigType(type);
-            if (type === 'openvpn') {
-                setConfigPlatform(platform);
-            }
             setConfigContent(null);
 
-            let response;
-            if (type === 'openvpn') {
-                response = await apiService.getUserConfigOpenVPN(userId, platform);
-            } else {
-                response = await apiService.getUserConfigWireGuard(userId);
-            }
-
+            const response = await apiService.getUserConfigOpenVPN(userId);
             setConfigContent(response.data);
         } catch (error) {
             console.error('Failed to load config:', error);
@@ -266,26 +234,6 @@ const Users = () => {
     const [showRegenerateModal, setShowRegenerateModal] = useState(false); // Deprecated
     // const [userToRegenerate, setUserToRegenerate] = useState(null); // Deprecated
     const [copiedUserId, setCopiedUserId] = useState(null);
-    const [subscriptionBaseUrl, setSubscriptionBaseUrl] = useState(getDefaultSubscriptionBaseUrl());
-
-    const loadSubscriptionBaseUrl = async () => {
-        try {
-            const response = await apiService.getSettings();
-            const allSettings = response?.data || {};
-            const domain = (allSettings.subscription_domain || '').trim();
-            const port = parseInt(allSettings.sub_https_port || '443', 10);
-
-            if (domain) {
-                const resolved = port === 443 ? `https://${domain}` : `https://${domain}:${port}`;
-                setSubscriptionBaseUrl(resolved);
-                return;
-            }
-        } catch (error) {
-            console.warn('Failed to load subscription domain settings, using default URL:', error);
-        }
-
-        setSubscriptionBaseUrl(getDefaultSubscriptionBaseUrl());
-    };
 
     const handleDeleteClick = (user) => {
         confirmAction(
@@ -421,41 +369,22 @@ const Users = () => {
         );
     };
 
-    const handleCopySubscription = async (user) => {
+    const handleCopySubscription = (user) => {
         if (!user.subscription_token) {
             showToast('User does not have a subscription token.', 'error');
             return;
         }
-
-        const base = (subscriptionBaseUrl || getDefaultSubscriptionBaseUrl()).replace(/\/$/, '');
-        const link = `${base}/sub/${user.subscription_token}`;
-
-        try {
-            if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(link);
-            } else {
-                const temp = document.createElement('textarea');
-                temp.value = link;
-                temp.style.position = 'fixed';
-                temp.style.opacity = '0';
-                document.body.appendChild(temp);
-                temp.focus();
-                temp.select();
-                const copied = document.execCommand('copy');
-                document.body.removeChild(temp);
-
-                if (!copied) {
-                    throw new Error('execCommand copy failed');
-                }
-            }
-
-            showToast('Subscription link copied.', 'success');
-            setCopiedUserId(user.id);
-            setTimeout(() => setCopiedUserId(null), 2000);
-        } catch (err) {
-            console.error('Copy failed:', err);
-            showToast('Failed to copy subscription link.', 'error');
-        }
+        const link = `${window.location.protocol}//${window.location.host}/sub/${user.subscription_token}`;
+        navigator.clipboard.writeText(link)
+            .then(() => {
+                showToast('لینک اشتراک کپی شد', 'success');
+                setCopiedUserId(user.id);
+                setTimeout(() => setCopiedUserId(null), 2000);
+            })
+            .catch((err) => {
+                console.error('Copy failed:', err);
+                showToast('کپی لینک ناموفق بود', 'error');
+            });
     };
 
     const handleOpenRegenerate = (user) => {
@@ -840,24 +769,6 @@ const Users = () => {
                                             />
                                             <span className="text-gray-300 text-sm">OpenVPN</span>
                                         </label>
-                                        <label className="flex items-center gap-2 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={formData.wireguard_enabled}
-                                                onChange={e => setFormData({ ...formData, wireguard_enabled: e.target.checked })}
-                                                className="form-checkbox bg-gray-600 border-gray-500 rounded text-green-500 focus:ring-0 focus:ring-offset-0"
-                                            />
-                                            <span className="text-gray-300 text-sm">WireGuard</span>
-                                        </label>
-                                        <label className="flex items-center gap-2 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={formData.l2tp_enabled}
-                                                onChange={e => setFormData({ ...formData, l2tp_enabled: e.target.checked })}
-                                                className="form-checkbox bg-gray-600 border-gray-500 rounded text-purple-500 focus:ring-0 focus:ring-offset-0"
-                                            />
-                                            <span className="text-gray-300 text-sm">L2TP</span>
-                                        </label>
                                     </div>
                                 </div>
 
@@ -986,41 +897,12 @@ const Users = () => {
 
                             <div className="flex gap-2 mb-4">
                                 <button
-                                    onClick={() => loadConfig(selectedConfigUser.id, 'openvpn', configPlatform)}
+                                    onClick={() => loadConfig(selectedConfigUser.id, 'openvpn')}
                                     className={`px-4 py-2 rounded-lg flex-1 font-medium ${configType === 'openvpn' ? 'bg-primary-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                                 >
                                     OpenVPN
                                 </button>
-                                <button
-                                    onClick={() => loadConfig(selectedConfigUser.id, 'wireguard')}
-                                    className={`px-4 py-2 rounded-lg flex-1 font-medium ${configType === 'wireguard' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-                                >
-                                    WireGuard
-                                </button>
                             </div>
-
-                            {configType === 'openvpn' && (
-                                <div className="flex gap-2 mb-4">
-                                    <button
-                                        onClick={() => loadConfig(selectedConfigUser.id, 'openvpn', 'ios')}
-                                        className={`px-3 py-2 rounded-lg text-sm font-medium ${configPlatform === 'ios' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-                                    >
-                                        Download iOS
-                                    </button>
-                                    <button
-                                        onClick={() => loadConfig(selectedConfigUser.id, 'openvpn', 'android')}
-                                        className={`px-3 py-2 rounded-lg text-sm font-medium ${configPlatform === 'android' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-                                    >
-                                        Download Android
-                                    </button>
-                                    <button
-                                        onClick={() => loadConfig(selectedConfigUser.id, 'openvpn', 'generic')}
-                                        className={`px-3 py-2 rounded-lg text-sm font-medium ${configPlatform === 'generic' ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-                                    >
-                                        Download Generic
-                                    </button>
-                                </div>
-                            )}
 
                             <div className="flex-1 overflow-hidden bg-gray-900 rounded-lg border border-gray-700 relative">
                                 {configLoading ? (
@@ -1227,7 +1109,7 @@ const Users = () => {
                                     <div className="h-full flex flex-col">
                                         <div className="flex justify-between items-center mb-4">
                                             <h4 className="text-lg font-bold text-white flex items-center gap-2">
-                                                <Terminal size={20} className="text-gray-400" /> Connection Logs (Syslog & OpenVPN)
+                                                <Terminal size={20} className="text-gray-400" /> System Logs (OpenVPN)
                                             </h4>
                                             <button
                                                 onClick={() => handleFetchLogs(selectedUser.id)}
@@ -1253,8 +1135,7 @@ const Users = () => {
                                             )}
                                         </div>
                                         <p className="text-gray-500 text-xs mt-2">
-                                            Showing recent activity matching "{selectedUser.username}" from Syslog, Auth, & OpenVPN logs
-
+                                            Showing recent activity matching "{selectedUser.username}" from /var/log/openvpn/auth.log & openvpn.log
                                         </p>
                                     </div>
                                 )}

@@ -30,8 +30,6 @@ class ServerCreate(BaseModel):
     
     openvpn_enabled: bool = True
     openvpn_port: int = 1194
-    wireguard_enabled: bool = True
-    wireguard_port: int = 51820
 
 
 class ServerResponse(BaseModel):
@@ -48,9 +46,7 @@ class ServerResponse(BaseModel):
     disk_usage: float
     
     openvpn_enabled: bool
-    wireguard_enabled: bool
-    l2tp_enabled: bool
-    cisco_enabled: bool
+    
     
     created_at: datetime
     

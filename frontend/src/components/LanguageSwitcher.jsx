@@ -3,10 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { Globe } from 'lucide-react';
 
 const LanguageSwitcher = () => {
-    const { i18n } = useTranslation();
+    const { i18n, t } = useTranslation();
 
     const languages = [
-        { code: 'en', name: 'English', flag: '🇬🇧' }
+        { code: 'en', name: 'English', flag: '🇬🇧' },
+        { code: 'fa', name: 'فارسی', flag: '🇮🇷' }
     ];
 
     const changeLanguage = (lng) => {

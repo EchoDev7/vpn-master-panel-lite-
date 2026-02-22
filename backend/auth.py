@@ -1,227 +1,142 @@
 #!/usr/bin/python3
-"""
-OpenVPN Auth Script
-====================
-Called by OpenVPN via: auth-user-pass-verify /etc/openvpn/scripts/auth.sh via-file
-
-Reads a temp file containing:
-  line 1: username
-  line 2: password
-
-Validates against the SQLite database and exits with 0 (success) or 1 (failure).
-
-Security notes:
-  - Uses parameterised queries only — no SQL injection possible
-  - Password verified with bcrypt constant-time compare
-  - Connection limit checked against live management socket
-  - Expiry compared in UTC, timezone-aware
-"""
 import sys
 import os
 import logging
-import sqlite3
-from datetime import datetime, timezone
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+from passlib.context import CryptContext
 
-# ── Logging ─────────────────────────────────────────────────────────────
-logging.basicConfig(
-    filename="/var/log/openvpn/auth.log",
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-)
+# Configure logging
+logging.basicConfig(filename='/var/log/openvpn/auth.log', level=logging.INFO, format='%(asctime)s %(message)s')
 
-# ── Database path ─────────────────────────────────────────────────────────
-_DB_CANDIDATES = [
-    "/opt/vpn-master-panel/vpnmaster_lite.db",
-    "/opt/vpn-master-panel/backend/vpnmaster_lite.db",
-    os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "vpnmaster_lite.db",
-    ),
-]
+# Database Setup
+DB_PATH = "/opt/vpn-master-panel/backend/vpnmaster_lite.db"
+# Fallback for dev environment
+if not os.path.exists(DB_PATH):
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'vpnmaster_lite.db')
 
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
-def _resolve_db_path() -> str:
-    # Prefer a DB file that actually contains the expected users table.
-    for path in _DB_CANDIDATES:
-        if not os.path.exists(path):
-            continue
-        try:
-            with sqlite3.connect(path, timeout=1) as conn:
-                row = conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
-                ).fetchone()
-                if row:
-                    return path
-        except Exception:
-            continue
+# Password Hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-    # Fallback: first existing path, else canonical default.
-    return next((p for p in _DB_CANDIDATES if os.path.exists(p)), _DB_CANDIDATES[0])
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
 
-
-DB_PATH = _resolve_db_path()
-
-
-def _count_active_sessions(username: str) -> int:
-    """
-    Query the OpenVPN management socket for the number of active sessions
-    belonging to *username*.  Returns 0 on any error (fail-open).
-    """
-    import socket as _socket
-
-    try:
-        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
-            s.settimeout(2)
-            s.connect(("127.0.0.1", 7505))
-            s.recv(1024)  # consume banner
-            s.sendall(b"status 2\n")
-
-            resp = b""
-            while True:
-                chunk = s.recv(8192)
-                if not chunk:
-                    break
-                resp += chunk
-                if b"\nEND" in resp or b"ERROR" in resp:
-                    break
-            s.sendall(b"quit\n")
-
-        count = 0
-        for line in resp.decode(errors="ignore").splitlines():
-            if not line.startswith("CLIENT_LIST,") or "Common Name" in line:
-                continue
-            parts = line.split(",")
-            # parts[1]=Common Name, parts[9]=Username (auth-user-pass value)
-            cn      = parts[1].strip() if len(parts) > 1 else ""
-            auth_un = parts[9].strip() if len(parts) > 9 else ""
-            if cn == username or auth_un == username:
-                count += 1
-        return count
-
-    except Exception as exc:
-        logging.warning(f"Connection limit check failed (fail-open): {exc}")
-        return 0
-
-
-def auth_user(username: str, password: str) -> bool:
-    """
-    Authenticate *username* / *password* against the database.
-
-    Checks (in order):
-      1. User exists
-      2. Status == 'active'
-      3. Not expired (UTC-aware comparison)
-      4. Connection limit not exceeded
-      5. Password bcrypt match
-    """
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.orm import sessionmaker
-    from passlib.context import CryptContext
-
+def auth_user(username, password):
+    # F9: Brute-Force Detection - Log IP
     client_ip = os.environ.get("untrusted_ip", "unknown")
-    pwd_ctx   = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-    engine = create_engine(
-        f"sqlite:///{DB_PATH}",
-        connect_args={"check_same_thread": False},
-    )
-    Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    db = Session()
-
+    
     try:
-        row = db.execute(
-            text(
-                "SELECT hashed_password, status, expiry_date, connection_limit "
-                "FROM users WHERE username = :u"
-            ),
-            {"u": username},
-        ).fetchone()
-
-        if not row:
-            logging.warning(f"AUTH_FAILED user_not_found username={username} ip={client_ip}")
+        engine = create_engine(SQLALCHEMY_DATABASE_URL)
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        db = SessionLocal()
+        
+        # Raw SQL to avoid model dependency issues in standalone script
+        # Check active users who are not expired
+        query = text("SELECT hashed_password, status, expiry_date FROM users WHERE username = :username")
+        result = db.execute(query, {'username': username}).fetchone()
+        
+        if not result:
+            logging.warning(f"AUTH_FAILED: User {username} not found")
             return False
-
-        hashed_pw, status, expiry_raw, conn_limit = row
-
-        # ── Status check ─────────────────────────────────────────────
+            
+        hashed_pw, status, expiry = result
+        
         if str(status).lower() != "active":
-            logging.warning(
-                f"AUTH_FAILED status={status} username={username} ip={client_ip}"
-            )
+            logging.warning(f"AUTH_FAILED: User {username} is {status} (Expected: active)")
             return False
+            
+        if expiry:
+             from datetime import datetime
+             try:
+                 # Standard ISO format (User Request)
+                 expiry_dt = datetime.fromisoformat(str(expiry).replace('Z', ''))
+                 if datetime.utcnow() > expiry_dt:
+                     logging.warning(f"AUTH_FAILED: User {username} expired")
+                     return False
+             except ValueError:
+                 # Fallback for legacy formats if needed, or fail safe
+                 logging.warning(f"AUTH_ERROR: Invalid expiry format for {username}: {expiry}")
+                 return False
 
-        # ── Expiry check (UTC, timezone-aware) ───────────────────────
-        if expiry_raw:
-            try:
-                expiry_str = str(expiry_raw).strip().rstrip("Z")
-                expiry_str = expiry_str.replace("T", " ")
-                # Remove sub-second precision if present
-                if "." in expiry_str:
-                    expiry_str = expiry_str.split(".")[0]
-                expiry_dt = datetime.fromisoformat(expiry_str).replace(tzinfo=timezone.utc)
-                now_utc   = datetime.now(tz=timezone.utc)
-                if now_utc > expiry_dt:
-                    logging.warning(
-                        f"AUTH_FAILED expired username={username} expiry={expiry_dt.isoformat()}"
-                    )
-                    return False
-            except ValueError as exc:
-                logging.error(
-                    f"AUTH_ERROR bad_expiry_format username={username} "
-                    f"raw={expiry_raw!r} err={exc}"
-                )
-                return False  # fail-safe: reject if we cannot parse expiry
+        # Connection Limit Check (F3 - User Requested via Management Socket)
+        try:
+             # Check limit from DB
+             limit_query = text("SELECT connection_limit FROM users WHERE username = :username")
+             limit_res = db.execute(limit_query, {'username': username}).fetchone()
+             limit = limit_res[0] if limit_res else 0
+             
+             if limit > 0:
+                 # Helper to Get Active Connections via Socket (Inline to keep auth.py standalone)
+                 import socket
+                 def count_active_sessions(target_user):
+                     try:
+                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                             s.settimeout(2)
+                             s.connect(('127.0.0.1', 7505))
+                             s.recv(1024) # banner
+                             s.sendall(b'status 2\n')
+                             resp = b''
+                             while True:
+                                 chunk = s.recv(4096)
+                                 if not chunk: break
+                                 resp += chunk
+                                 if b'END' in resp or b'ERROR' in resp: break
+                             s.sendall(b'quit\n')
+                             
+                             # Parse
+                             count = 0
+                             for line in resp.decode(errors='ignore').splitlines():
+                                 if line.startswith('CLIENT_LIST,') and 'Common Name' not in line:
+                                     parts = line.split(',')
+                                     # parts[1] is username
+                                     if len(parts) > 1 and parts[1] == target_user:
+                                         count += 1
+                             return count
+                     except:
+                         return 0 # Fail open if mgmt socket down
+                 
+                 active_count = count_active_sessions(username)
+                 # Current attempt is NOT yet in the list (auth phase happens before)
+                 if active_count >= limit:
+                     logging.warning(f"AUTH_FAILED: User {username} connection limit exceeded ({active_count}/{limit})")
+                     return False
 
-        # ── Connection limit check ───────────────────────────────────
-        limit = int(conn_limit) if conn_limit else 0
-        if limit > 0:
-            active = _count_active_sessions(username)
-            if active >= limit:
-                logging.warning(
-                    f"AUTH_FAILED conn_limit username={username} "
-                    f"active={active} limit={limit}"
-                )
-                return False
+        except Exception as e:
+             logging.error(f"AUTH_LIMIT_CHECK_ERROR: {e}")
+             pass
 
-        # ── Password verification ────────────────────────────────────
-        if pwd_ctx.verify(password, hashed_pw):
-            logging.info(f"AUTH_SUCCESS username={username} ip={client_ip}")
+        if verify_password(password, hashed_pw):
+            logging.info(f"AUTH_SUCCESS: User {username} from {client_ip}")
             return True
         else:
-            logging.warning(
-                f"AUTH_FAILED wrong_password username={username} ip={client_ip}"
-            )
+            logging.warning(f"AUTH_FAILED: User {username} from {client_ip} wrong password")
             return False
-
-    except Exception as exc:
-        logging.error(f"AUTH_ERROR username={username} err={exc}")
+            
+    except Exception as e:
+        logging.error(f"AUTH_ERROR: {e}")
         return False
     finally:
         db.close()
-        engine.dispose()
-
-
-# ── Entry point ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # OpenVPN passes credentials via file
     if len(sys.argv) < 2:
-        logging.error("Missing credentials file argument")
+        logging.error("Missing password file argument")
         sys.exit(1)
-
-    cred_file = sys.argv[1]
-
+        
+    pass_file = sys.argv[1]
+    
     try:
-        with open(cred_file) as fh:
-            lines = fh.read().splitlines()
-            uname = lines[0].strip() if len(lines) > 0 else ""
-            pwd   = lines[1].strip() if len(lines) > 1 else ""
-
-        if not uname or not pwd:
-            logging.error("Empty username or password in credentials file")
+        with open(pass_file, 'r') as f:
+            username = f.readline().strip()
+            password = f.readline().strip()
+            
+        if auth_user(username, password):
+            sys.exit(0)
+        else:
             sys.exit(1)
-
-        sys.exit(0 if auth_user(uname, pwd) else 1)
-
-    except OSError as exc:
-        logging.error(f"Cannot read credentials file {cred_file!r}: {exc}")
+    except Exception as e:
+        logging.error(f"File Error: {e}")
         sys.exit(1)

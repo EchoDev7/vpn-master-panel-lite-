@@ -133,21 +133,6 @@ const ServerCard = ({ server, onRefresh }) => {
                         OpenVPN
                     </span>
                 )}
-                {server.wireguard_enabled && (
-                    <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs rounded-full">
-                        WireGuard
-                    </span>
-                )}
-                {server.l2tp_enabled && (
-                    <span className="px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs rounded-full">
-                        L2TP
-                    </span>
-                )}
-                {server.cisco_enabled && (
-                    <span className="px-2 py-1 bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 text-xs rounded-full">
-                        Cisco
-                    </span>
-                )}
             </div>
 
             <div className="flex gap-2">

@@ -7,7 +7,6 @@ from sqlalchemy.sql import func
 import enum
 
 from ..database import Base
-from .user import encrypt_field, decrypt_field
 
 
 class ServerType(str, enum.Enum):
@@ -42,24 +41,8 @@ class VPNServer(Base):
     ssh_host = Column(String(255))
     ssh_port = Column(Integer, default=22)
     ssh_username = Column(String(100))
-    _ssh_password = Column("ssh_password", String(512))    # stored encrypted
-    _ssh_private_key = Column("ssh_private_key", Text)     # stored encrypted
-
-    @property
-    def ssh_password(self) -> str:
-        return decrypt_field(self._ssh_password)
-
-    @ssh_password.setter
-    def ssh_password(self, value: str):
-        self._ssh_password = encrypt_field(value)
-
-    @property
-    def ssh_private_key(self) -> str:
-        return decrypt_field(self._ssh_private_key)
-
-    @ssh_private_key.setter
-    def ssh_private_key(self, value: str):
-        self._ssh_private_key = encrypt_field(value)
+    ssh_password = Column(String(255))
+    ssh_private_key = Column(Text)
     
     # Status
     status = Column(String(20), default=ServerStatus.OFFLINE)
@@ -76,16 +59,6 @@ class VPNServer(Base):
     openvpn_enabled = Column(Boolean, default=True)
     openvpn_port = Column(Integer, default=1194)
     openvpn_protocol = Column(String(10), default="udp")  # udp/tcp
-    
-    wireguard_enabled = Column(Boolean, default=True)
-    wireguard_port = Column(Integer, default=51820)
-    wireguard_public_key = Column(String(255))
-    
-    l2tp_enabled = Column(Boolean, default=False)
-    l2tp_psk = Column(String(255), default="vpnmaster")
-    
-    cisco_enabled = Column(Boolean, default=False)
-    cisco_port = Column(Integer, default=4443)
     
     # Visibility Settings
     show_in_client = Column(Boolean, default=True)

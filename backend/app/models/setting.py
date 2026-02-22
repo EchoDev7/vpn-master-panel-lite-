@@ -10,7 +10,7 @@ class Setting(Base):
     key = Column(String, primary_key=True, index=True)
     value = Column(Text, nullable=True)
     description = Column(String, nullable=True)
-    category = Column(String, default="general") # general, openvpn, wireguard, security
+    category = Column(String, default="general") # general, openvpn, security
 
     def __repr__(self):
         return f"<Setting {self.key}={self.value}>"

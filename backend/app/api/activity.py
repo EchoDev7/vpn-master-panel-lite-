@@ -15,25 +15,6 @@ from ..utils.security import get_current_admin
 router = APIRouter()
 
 
-def _safe_meta(raw: str) -> dict:
-    """Parse meta_data JSON string safely; return empty dict on failure."""
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw)
-    except (ValueError, TypeError):
-        return {}
-
-
-def _build_user_map(db: Session, activities) -> dict:
-    """Build {user_id: username} map in ONE query to avoid N+1 per activity."""
-    user_ids = {a.user_id for a in activities if a.user_id}
-    if not user_ids:
-        return {}
-    rows = db.query(User.id, User.username).filter(User.id.in_(user_ids)).all()
-    return {row.id: row.username for row in rows}
-
-
 @router.get("/activity/recent")
 async def get_recent_activity(
     limit: int = 10,
@@ -44,17 +25,15 @@ async def get_recent_activity(
     activities = db.query(ActivityLog).order_by(
         desc(ActivityLog.created_at)
     ).limit(limit).all()
-
-    user_map = _build_user_map(db, activities)
-
+    
     return [
         {
             "id": a.id,
             "type": a.type,
             "description": a.description,
-            "user": user_map.get(a.user_id, "system") if a.user_id else "system",
+            "user": db.query(User).filter(User.id == a.user_id).first().username if a.user_id else "system",
             "timestamp": a.created_at.isoformat() if a.created_at else datetime.utcnow().isoformat(),
-            "metadata": _safe_meta(a.meta_data)
+            "metadata": json.loads(a.meta_data) if a.meta_data else {}
         }
         for a in activities
     ]
@@ -72,9 +51,7 @@ async def get_all_activity(
     activities = db.query(ActivityLog).order_by(
         desc(ActivityLog.created_at)
     ).offset(skip).limit(limit).all()
-
-    user_map = _build_user_map(db, activities)
-
+    
     return {
         "total": total,
         "items": [
@@ -82,10 +59,10 @@ async def get_all_activity(
                 "id": a.id,
                 "type": a.type,
                 "description": a.description,
-                "user": user_map.get(a.user_id, "system") if a.user_id else "system",
+                "user": db.query(User).filter(User.id == a.user_id).first().username if a.user_id else "system",
                 "timestamp": a.created_at.isoformat() if a.created_at else datetime.utcnow().isoformat(),
                 "ip_address": a.ip_address,
-                "metadata": _safe_meta(a.meta_data)
+                "metadata": json.loads(a.meta_data) if a.meta_data else {}
             }
             for a in activities
         ]

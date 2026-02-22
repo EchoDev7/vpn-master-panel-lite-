@@ -13,11 +13,20 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = settings.SQLITE_URL
-engine_kwargs = {
-    "connect_args": {"check_same_thread": False},
-    "poolclass": StaticPool,
-}
+# Choose database based on settings
+if settings.USE_SQLITE:
+    DATABASE_URL = settings.SQLITE_URL
+    engine_kwargs = {
+        "connect_args": {"check_same_thread": False},
+        "poolclass": StaticPool,
+    }
+else:
+    DATABASE_URL = settings.DATABASE_URL
+    engine_kwargs = {
+        "pool_pre_ping": True,
+        "pool_size": 10,
+        "max_overflow": 20,
+    }
 
 # Create engine
 engine = create_engine(
@@ -160,8 +169,9 @@ def drop_db():
 
 
 # Enable foreign keys for SQLite
-@event.listens_for(engine, "connect")
-def set_sqlite_pragma(dbapi_conn, connection_record):
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+if settings.USE_SQLITE:
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()

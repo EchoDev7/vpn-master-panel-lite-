@@ -123,26 +123,16 @@ class PersianShieldTunnel:
         return data[4:4+data_length]
     
     def _create_tls_context(self) -> ssl.SSLContext:
-        """Create SSL context with obfuscated SNI.
-
-        Certificate verification is enabled by default to protect against
-        MITM attacks.  Set config key ``tls_verify: false`` only when
-        connecting to a self-signed relay you own and fully trust.
-        """
+        """Create SSL context with obfuscated SNI"""
         context = ssl.create_default_context()
-
-        # Use TLS 1.3 only (most secure)
+        
+        # Use TLS 1.3 only (more secure)
         context.minimum_version = ssl.TLSVersion.TLSv1_3
-
-        # Optionally allow self-signed certs for private relays.
-        if not self.config.get("tls_verify", True):
-            logger.warning(
-                "PersianShield: TLS certificate verification is DISABLED. "
-                "Only use this for trusted private relays you control."
-            )
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-
+        
+        # Disable certificate verification (we're tunneling)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        
         return context
     
     async def _create_websocket_handshake(self, host: str) -> bytes:

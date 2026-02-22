@@ -4,9 +4,8 @@ Users API Endpoints - CRUD operations for VPN users
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel, EmailStr, field_validator
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from ..database import get_db
@@ -18,9 +17,7 @@ from ..utils.security import (
 )
 from .activity import log_activity
 from .notifications import create_notification
-import logging
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -35,14 +32,11 @@ class UserCreate(BaseModel):
     # Limits
     data_limit_gb: float = 0  # 0 = unlimited
     connection_limit: int = 1
-    speed_limit_mbps: float = 0.0  # 0 = unlimited; float to match DB column
+    speed_limit_mbps: int = 0 # 0 = unlimited
     expiry_days: Optional[int] = 30
     
-    # Protocol settings
+    # Protocol settings (OpenVPN only)
     openvpn_enabled: bool = True
-    wireguard_enabled: bool = True
-    l2tp_enabled: bool = False
-    cisco_enabled: bool = False
     
     @field_validator('username')
     @classmethod
@@ -69,18 +63,15 @@ class UserUpdate(BaseModel):
     # Limits
     data_limit_gb: Optional[float] = None
     connection_limit: Optional[int] = None
-    speed_limit_mbps: Optional[float] = None
+    speed_limit_mbps: Optional[int] = None
     expiry_date: Optional[datetime] = None
     expiry_days: Optional[int] = None
     
     # Status
     status: Optional[UserStatus] = None
     
-    # Protocol settings
+    # Protocol settings (OpenVPN only)
     openvpn_enabled: Optional[bool] = None
-    wireguard_enabled: Optional[bool] = None
-    l2tp_enabled: Optional[bool] = None
-    cisco_enabled: Optional[bool] = None
 
 
 class UserResponse(BaseModel):
@@ -100,9 +91,6 @@ class UserResponse(BaseModel):
     data_usage_gb: Optional[float] = 0
     
     openvpn_enabled: Optional[bool] = False
-    wireguard_enabled: Optional[bool] = False
-    l2tp_enabled: Optional[bool] = False
-    cisco_enabled: Optional[bool] = False
     
     created_at: datetime
     last_connection: Optional[datetime] = None
@@ -120,7 +108,7 @@ class UserResponse(BaseModel):
     def set_default_one(cls, v):
         return v or 1
         
-    @field_validator('openvpn_enabled', 'wireguard_enabled', 'l2tp_enabled', 'cisco_enabled', mode='before')
+    @field_validator('openvpn_enabled', mode='before')
     def set_default_false(cls, v):
         if v is None:
             return False
@@ -161,10 +149,10 @@ async def create_user(
                 detail="Email already exists"
             )
     
-    # Calculate expiry date (timezone-aware UTC)
+    # Calculate expiry date
     expiry_date = None
     if user_data.expiry_days and user_data.expiry_days > 0:
-        expiry_date = datetime.now(timezone.utc) + timedelta(days=user_data.expiry_days)
+        expiry_date = datetime.utcnow() + timedelta(days=user_data.expiry_days)
     
     # Create user
     new_user = User(
@@ -175,12 +163,8 @@ async def create_user(
         role=user_data.role,
         data_limit_gb=user_data.data_limit_gb,
         connection_limit=user_data.connection_limit,
-        speed_limit_mbps=user_data.speed_limit_mbps,
         expiry_date=expiry_date,
         openvpn_enabled=user_data.openvpn_enabled,
-        wireguard_enabled=user_data.wireguard_enabled,
-        l2tp_enabled=user_data.l2tp_enabled,
-        cisco_enabled=user_data.cisco_enabled,
         created_by=current_admin.id
     )
 
@@ -188,50 +172,18 @@ async def create_user(
     import secrets
     new_user.subscription_token = secrets.token_urlsafe(32)
     
-    # Generate WireGuard keys if enabled
-    if user_data.wireguard_enabled:
-        try:
-            from ..services.wireguard import wireguard_service
-            keys = wireguard_service.generate_keypair()
-            keys["ip"] = wireguard_service.allocate_ip()
-            new_user.wireguard_private_key = keys['private_key']
-            new_user.wireguard_public_key = keys['public_key']
-            new_user.wireguard_ip = keys['ip']
-            try:
-                settings = wireguard_service._load_settings()
-                if settings.get("wg_preshared_key_enabled", "1") == "1":
-                    new_user.wireguard_preshared_key = wireguard_service.generate_preshared_key()
-            except Exception:
-                pass
-        except Exception as e:
-            logger.warning(f"Failed to generate WireGuard keys: {e}. Disabling WireGuard for this user.")
-            new_user.wireguard_enabled = False
-
     db.add(new_user)
-    try:
-        db.commit()
-    except SQLAlchemyError as e:
-        db.rollback()
-        logger.exception("Failed to create user %s", user_data.username)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create user: {str(e)}"
-        )
+    db.commit()
     db.refresh(new_user)
 
     # Auto-Provisioning Pipeline (F5 - User Requested)
-    # Use asyncio.ensure_future so we get a proper log if it fails,
-    # and it works correctly from within an async FastAPI request handler.
     try:
         import asyncio
         from ..services.users import _provision_new_user
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(_provision_new_user(new_user.id))
-        else:
-            logger.warning("No running event loop — skipping async provisioning for user %s", new_user.username)
+        asyncio.create_task(_provision_new_user(new_user.id))
     except Exception as e:
-        logger.warning("Provisioning task could not be scheduled for user %s: %s", new_user.username, e)
+        # Don't fail the request if async task logic has issues (e.g. event loop)
+        pass
 
     return new_user
 
@@ -332,9 +284,9 @@ async def update_user(
     if "expiry_days" in update_data:
         days = update_data.pop("expiry_days")
         if days is not None and days > 0:
-            update_data["expiry_date"] = datetime.now(timezone.utc) + timedelta(days=days)
+            update_data["expiry_date"] = datetime.utcnow() + timedelta(days=days)
         elif days == 0:
-            update_data["expiry_date"] = None  # Unlimited
+            update_data["expiry_date"] = None # Unlimited
     
     for field, value in update_data.items():
         setattr(user, field, value)
@@ -445,7 +397,7 @@ async def regenerate_token(
         raise HTTPException(status_code=404, detail="User not found")
         
     import secrets
-    user.subscription_token = secrets.token_urlsafe(32)
+    user.subscription_token = secrets.token_urlsafe(16)
     db.commit()
     db.refresh(user)
     
@@ -457,7 +409,6 @@ async def regenerate_token(
 @router.get("/{user_id}/config/openvpn", response_model=dict)
 async def get_openvpn_config(
     user_id: int,
-    platform: str = Query("generic", description="OpenVPN profile platform: generic|ios|android"),
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
@@ -471,102 +422,12 @@ async def get_openvpn_config(
         
     from ..services.openvpn import openvpn_service
     config_content = openvpn_service.generate_client_config(
-        username=user.username,
-        platform=platform,
-        db=db,
+        username=user.username
     )
-    platform_suffix = ""
-    if platform in ("ios", "android"):
-        platform_suffix = f"-{platform}"
     
     return {
-        "filename": f"{user.username}{platform_suffix}.ovpn",
+        "filename": f"{user.username}.ovpn",
         "content": config_content
-    }
-
-
-@router.get("/{user_id}/config/wireguard", response_model=dict)
-async def get_wireguard_config(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_admin: User = Depends(get_current_admin)
-):
-    """Get WireGuard configuration for user"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Auto-enable WireGuard for the user if not enabled
-    if not user.wireguard_enabled:
-        user.wireguard_enabled = True
-        db.commit()
-        db.refresh(user)
-
-    from ..services.wireguard import wireguard_service
-
-    # Auto-generate keys if missing
-    if not user.wireguard_private_key:
-        try:
-            keys = wireguard_service.generate_keypair()
-            user.wireguard_private_key = keys['private_key']
-            user.wireguard_public_key = keys['public_key']
-
-            # Allocate IP — always use the service which checks existing allocations
-            # to prevent address collisions. Only raise if allocation truly fails.
-            user.wireguard_ip = wireguard_service.allocate_ip()
-
-            # Generate PresharedKey if enabled
-            try:
-                settings = wireguard_service._load_settings()
-                if settings.get("wg_preshared_key_enabled", "1") == "1":
-                    user.wireguard_preshared_key = wireguard_service.generate_preshared_key()
-            except Exception:
-                pass
-
-            db.commit()
-            db.refresh(user)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to generate WireGuard keys: {str(e)}")
-    
-    # Get PresharedKey (safe access)
-    psk = getattr(user, 'wireguard_preshared_key', None)
-
-    # Generate config using service (reads all settings from DB)
-    try:
-        config_content = wireguard_service.generate_client_config(
-            client_private_key=user.wireguard_private_key,
-            client_ip=user.wireguard_ip,
-            preshared_key=psk,
-        )
-    except Exception as e:
-        # Fallback: generate a basic default config
-        server_keys = wireguard_service.get_server_keys()
-        endpoint_ip = wireguard_service.server_ip
-        client_ip = user.wireguard_ip or "10.66.66.2"  # safe static fallback; allocate_ip should have run
-        config_content = f"""[Interface]
-PrivateKey = {user.wireguard_private_key}
-Address = {client_ip}/24
-DNS = 1.1.1.1, 8.8.8.8
-MTU = 1380
-
-[Peer]
-PublicKey = {server_keys['public_key']}
-Endpoint = {endpoint_ip}:51820
-AllowedIPs = 0.0.0.0/0, ::/0
-PersistentKeepalive = 25
-"""
-
-    # Generate QR code (non-critical)
-    qr_code = None
-    try:
-        qr_code = wireguard_service.generate_qr_code(config_content)
-    except Exception:
-        pass
-    
-    return {
-        "filename": f"{user.username}.conf",
-        "content": config_content,
-        "qr_code": qr_code,
     }
 
 
@@ -636,10 +497,7 @@ async def get_user_details(
         "stats": {
             "total_traffic_gb": user.total_traffic_gb,
             "avg_daily_usage_gb": 0, # Placeholder for now
-            "days_until_expiry": (
-                (user.expiry_date.replace(tzinfo=timezone.utc) if user.expiry_date.tzinfo is None else user.expiry_date)
-                - datetime.now(timezone.utc)
-            ).days if user.expiry_date else None
+            "days_until_expiry": (user.expiry_date - datetime.utcnow()).days if user.expiry_date else None
         }
     }
 
@@ -695,21 +553,22 @@ async def get_user_logs(
         if not os.path.exists(filepath):
             return []
         try:
+            # We use a shell pipeline: grep "pattern" file | tail -n lines
+            # Use specific list arguments for security where possible, but pipeline needs checks
+            # Simplest: use grep's own max count? No, we want latest.
             import subprocess
-
-            # Use -F (fixed string) so username regex chars are treated literally,
-            # preventing unexpected regex injection via crafted usernames.
-            # shell=False is already enforced by passing a list to Popen.
-            cmd_grep = ["grep", "-F", "--", pattern, filepath]
+            
+            # 1. Grep all matches
+            cmd_grep = ["grep", pattern, filepath]
             p1 = subprocess.Popen(cmd_grep, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-            # Tail the last N lines of grep output
+            
+            # 2. Tail the last N
             cmd_tail = ["tail", "-n", str(n_lines)]
             p2 = subprocess.Popen(cmd_tail, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-            p1.stdout.close()  # Allow p1 to receive SIGPIPE if p2 exits.
+            
+            p1.stdout.close() # Allow p1 to receive SIGPIPE if p2 exits.
             output, _ = p2.communicate()
-
+            
             return output.splitlines()
         except Exception as e:
             return [f"Error reading {os.path.basename(filepath)}: {str(e)}"]
@@ -721,47 +580,12 @@ async def get_user_logs(
     if auth_logs:
         logs.extend([f"--- Auth Logs for {user.username} ---"] + auth_logs)
         
-    # 2. Check Syslog (Catch-all for "ovpn" + username)
-    # The user specifically requested: tail -f /var/log/syslog | grep ovpn
-    # We filter by both 'ovpn' AND username to minimize noise, or just 'ovpn' if relevant context needed?
-    # Context usually implies username match.
-    syslog_path = "/var/log/syslog"
-    if not os.path.exists(syslog_path):
-        syslog_path = "/var/log/messages"  # CentOS/RHEL fallback
-
-    sys_logs = []
-    if os.path.exists(syslog_path):
-        # Use -F (fixed string) on both grep stages to prevent regex/injection via username
-        import subprocess
-        try:
-            p1 = subprocess.Popen(
-                ["grep", "-F", "--", "ovpn", syslog_path],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-            p2 = subprocess.Popen(
-                ["grep", "-F", "--", user.username],
-                stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-            p3 = subprocess.Popen(
-                ["tail", "-n", str(lines)],
-                stdin=p2.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-            p1.stdout.close()
-            p2.stdout.close()
-            output, _ = p3.communicate()
-            if output:
-                sys_logs = output.splitlines()
-        except Exception as e:
-            sys_logs = [f"Error reading syslog: {e}"]
-
-    if sys_logs:
-        logs.extend([f"\n--- Syslog (OpenVPN) for {user.username} ---"] + sys_logs)
-
-    # 3. Check specific openvpn.log (Context)
+    # 2. Check System Log (Context)
     # This is noisier, maybe only if auth logs are empty or requested?
-    ovpn_log = grep_file("/var/log/openvpn/openvpn.log", user.username, 20)
-    if ovpn_log:
-         logs.extend([f"\n--- OpenVPN Log for {user.username} ---"] + ovpn_log)
+    # Let's include it but limit it.
+    sys_logs = grep_file("/var/log/openvpn/openvpn.log", user.username, 20)
+    if sys_logs:
+         logs.extend([f"\n--- System Logs for {user.username} ---"] + sys_logs)
          
     if not logs:
         logs = ["No recent connection attempts found in logs."]
@@ -817,15 +641,6 @@ async def kill_user_session(
                     results.append("OpenVPN: Management Interface Unreachable")
         except Exception as e:
             results.append(f"OpenVPN Error: {str(e)}")
-            
-    # WireGuard Kill (Reload)
-    if user.wireguard_enabled:
-        # WireGuard is stateless. Best we can do is ensure config is synced.
-        # If user is valid, 'kill' doesn't mean much unless we remove them.
-        # But if we just want to re-handshake, we can try to bounce the interface or specific peer.
-        # Realistically, 'killing' a WG session means removing the peer or changing keys.
-        # For now, we'll just log that WG is stateless.
-        results.append("WireGuard: Stateless (No active session to kill)")
         
     return {"status": "completed", "results": results}
 

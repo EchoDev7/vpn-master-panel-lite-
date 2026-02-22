@@ -91,12 +91,8 @@ class APIService {
     return this.client.delete(`/users/${userId}`);
   }
 
-  async getUserConfigOpenVPN(userId, platform = 'generic') {
-    return this.client.get(`/users/${userId}/config/openvpn`, { params: { platform } });
-  }
-
-  async getUserConfigWireGuard(userId) {
-    return this.client.get(`/users/${userId}/config/wireguard`);
+  async getUserConfigOpenVPN(userId) {
+    return this.client.get(`/users/${userId}/config/openvpn`);
   }
 
   // Phase 3: Ultimate User Management
@@ -221,27 +217,6 @@ class APIService {
     return this.client.get('/settings/openvpn/version');
   }
 
-  // WireGuard endpoints
-  async getWGServerConfigPreview() {
-    return this.client.get('/settings/wg-server-config/preview');
-  }
-
-  async applyWGServerConfig() {
-    return this.client.post('/settings/wg-server-config/apply');
-  }
-
-  async getWGStatus() {
-    return this.client.get('/settings/wg-status');
-  }
-
-  async regenerateWGKeys() {
-    return this.client.post('/settings/wg-keys/regenerate');
-  }
-
-  async getObfuscationScript() {
-    return this.client.get('/settings/wg-obfuscation/script');
-  }
-
   // Diagnostics
   async getFullDiagnostics() {
     return this.client.get('/diagnostics/full');
@@ -253,11 +228,6 @@ class APIService {
 
   async restartService(serviceName) {
     return this.client.post(`/diagnostics/restart/${serviceName}`);
-  }
-
-  // Domain & SSL Management
-  async requestLetsEncryptSSL(data) {
-    return this.client.post('/settings/ssl/request', data);
   }
 
   // Generic methods

@@ -12,29 +12,8 @@
 - **Simple Architecture**: Uses **SQLite** (file-based database) instead of heavy PostgreSQL/MySQL
 - **No Redis/Celery**: Background tasks are handled internally by Python
 - **Modern UI**: React + TailwindCSS dashboard with professional design
-- **Multi-Protocol**: WireGuard, OpenVPN, L2TP, Cisco AnyConnect
+- **OpenVPN-only**: Focused, simpler, and easier to operate
 - **User Management**: Create/Edit users, set traffic limits, expiry dates
-
-### 🎉 New in v2.0 (Professional Dashboard)
-- **📊 Advanced Analytics**: Usage heatmaps, traffic comparison, geographic user maps
-- **🔔 Real-time Notifications**: Database-backed notification system with filtering
-- **📝 Activity Timeline**: Visual log of all system activities
-- **📈 Protocol Distribution**: Real-time charts showing user distribution
-- **🗺️ User Location Map**: Interactive world map with user locations
-- **📤 Data Export**: Export users, logs, traffic in CSV/JSON formats
-- **🔍 Audit Logs**: Comprehensive audit trail with search and filtering
-- **💾 Backup & Restore**: One-click system backup and restore
-- **⚡ Performance**: Code splitting, lazy loading, optimized bundle size
-- **🛡️ Error Handling**: Comprehensive error boundaries and recovery
-- **🔄 Auto-Start**: Systemd services with automatic restart on failure
-
-### 🚀 New in v3.0 (Enterprise Features)
-- **⚡ WebSocket**: Real-time updates without page refresh
-- **🌍 Multi-language**: Support for 5 languages (English, Persian, Arabic, Turkish, Russian) with RTL
-- **📧 Email Notifications**: SMTP integration with HTML templates
-- **🤖 Telegram Bot**: Bot commands and admin notifications
-- **🔒 Automatic SSL**: Let's Encrypt integration with auto-renewal
-- **💳 Subscription Management**: Multiple plans with payment tracking
 
 ---
 

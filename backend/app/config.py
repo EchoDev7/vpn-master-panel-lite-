@@ -23,33 +23,30 @@ class Settings(BaseSettings):
     
     # VPN Ports
     OPENVPN_PORT: int = 1194
-    WIREGUARD_PORT: int = 51820
-    L2TP_PSK: str = "vpnmaster"
-    CISCO_PORT: int = 4443
     
     # Security
     SECRET_KEY: str = "CHANGE_THIS_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32"
-    ALGORITHM: str = "HS256"
-
+    
     @property
     def is_default_secret(self) -> bool:
         return self.SECRET_KEY == "CHANGE_THIS_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32"
+    ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # CORS
-    # In production set CORS_ORIGINS to your actual domain(s), e.g.:
-    #   CORS_ORIGINS=["https://panel.yourdomain.com"]
-    # Default keeps "*" so development works out-of-the-box, but a warning
-    # is logged at startup when the default secret key is also detected.
     CORS_ORIGINS: List[str] = ["*"]
     CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-    CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "Accept", "X-Requested-With"]
+    CORS_ALLOW_METHODS: List[str] = ["*"]
+    CORS_ALLOW_HEADERS: List[str] = ["*"]
     
-    # Database (SQLite Only)
-    SQLITE_URL: str = "sqlite:///./vpnmaster_lite.db"
+    # Database
+    DATABASE_URL: str = "sqlite:///./vpnmaster_lite.db"
     DATABASE_ECHO: bool = False
+    
+    # SQLite
+    SQLITE_URL: str = "sqlite:///./vpnmaster_lite.db"
+    USE_SQLITE: bool = True
     
     # Monitoring
     PROMETHEUS_ENABLED: bool = True
@@ -57,9 +54,6 @@ class Settings(BaseSettings):
     
     # VPN Service Paths
     OPENVPN_CONFIG_DIR: str = "/etc/openvpn"
-    WIREGUARD_CONFIG_DIR: str = "/etc/wireguard"
-    L2TP_CONFIG_DIR: str = "/etc/xl2tpd"
-    CISCO_CONFIG_DIR: str = "/etc/ocserv"
     
     # Tunnel Settings
     TUNNEL_HEALTH_CHECK_INTERVAL: int = 60  # seconds

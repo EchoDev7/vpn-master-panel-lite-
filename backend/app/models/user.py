@@ -4,49 +4,10 @@ User and Authentication Models
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import enum
-import base64
 
 from ..database import Base
-
-# ── Lightweight field-level encryption ──────────────────────────────────────
-# Uses Fernet (AES-128-CBC + HMAC-SHA256) from the cryptography library.
-# Key is derived from SECRET_KEY so no extra env var is needed.
-# Falls back to plaintext only when cryptography is not installed (dev).
-
-def _get_fernet():
-    """Return a Fernet cipher keyed from SECRET_KEY."""
-    try:
-        from cryptography.fernet import Fernet
-        import hashlib
-        from ..config import settings
-        key_bytes = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
-        fernet_key = base64.urlsafe_b64encode(key_bytes)
-        return Fernet(fernet_key)
-    except Exception:
-        return None
-
-def encrypt_field(value: str) -> str:
-    """Encrypt a sensitive string field before DB storage."""
-    if not value:
-        return value
-    f = _get_fernet()
-    if f is None:
-        return value  # fallback: store plain (dev without cryptography)
-    return f.encrypt(value.encode()).decode()
-
-def decrypt_field(value: str) -> str:
-    """Decrypt a sensitive string field after DB read."""
-    if not value:
-        return value
-    f = _get_fernet()
-    if f is None:
-        return value
-    try:
-        return f.decrypt(value.encode()).decode()
-    except Exception:
-        return value  # already plain (migration compat – existing rows)
 
 
 class UserRole(str, enum.Enum):
@@ -105,52 +66,8 @@ class User(Base):
     max_users = Column(Integer, default=0)  # For resellers
     max_data_gb = Column(Float, default=0)  # Total data quota for reseller
     
-    # VPN Credentials
+    # VPN Credentials (OpenVPN only)
     openvpn_enabled = Column(Boolean, default=True)
-    wireguard_enabled = Column(Boolean, default=True)
-    l2tp_enabled = Column(Boolean, default=True)
-    _l2tp_password = Column("l2tp_password", String(512))  # stored encrypted
-    cisco_enabled = Column(Boolean, default=True)
-    _cisco_password = Column("cisco_password", String(512))  # stored encrypted
-
-    # WireGuard Specific
-    wireguard_public_key = Column(String(255))
-    _wireguard_private_key = Column("wireguard_private_key", String(512))  # stored encrypted
-    wireguard_ip = Column(String(50))
-    _wireguard_preshared_key = Column("wireguard_preshared_key", String(512))  # stored encrypted
-
-    # ── Transparent encrypt/decrypt via Python properties ────────────────────
-    @property
-    def l2tp_password(self) -> str:
-        return decrypt_field(self._l2tp_password)
-
-    @l2tp_password.setter
-    def l2tp_password(self, value: str):
-        self._l2tp_password = encrypt_field(value)
-
-    @property
-    def cisco_password(self) -> str:
-        return decrypt_field(self._cisco_password)
-
-    @cisco_password.setter
-    def cisco_password(self, value: str):
-        self._cisco_password = encrypt_field(value)
-
-    @property
-    def wireguard_private_key(self) -> str:
-        return decrypt_field(self._wireguard_private_key)
-
-    @wireguard_private_key.setter
-    def wireguard_private_key(self, value: str):
-        self._wireguard_private_key = encrypt_field(value)
-
-    @property
-    def wireguard_preshared_key(self) -> str:
-        return decrypt_field(self._wireguard_preshared_key)
-
-    @wireguard_preshared_key.setter
-    def wireguard_preshared_key(self, value: str):
-        self._wireguard_preshared_key = encrypt_field(value)
     
     # Subscription
     subscription_token = Column(String(100), unique=True, index=True, nullable=True)
@@ -181,14 +98,8 @@ class User(Base):
         """Check if user is active and not expired"""
         if self.status != UserStatus.ACTIVE:
             return False
-        if self.expiry_date:
-            now = datetime.now(timezone.utc)
-            expiry = self.expiry_date
-            # Normalize naive datetime from SQLite to UTC-aware
-            if expiry.tzinfo is None:
-                expiry = expiry.replace(tzinfo=timezone.utc)
-            if now > expiry:
-                return False
+        if self.expiry_date and datetime.utcnow() > self.expiry_date:
+            return False
         return True
     
     @property
@@ -217,12 +128,8 @@ class User(Base):
         """Check if user has been active in the last 3 minutes"""
         if not self.last_connection:
             return False
-        now = datetime.now(timezone.utc)
-        last = self.last_connection
-        # Normalize naive datetime from SQLite to UTC-aware
-        if last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
-        return (now - last) < timedelta(minutes=3)
+        # Use UTC for comparison
+        return datetime.utcnow() - self.last_connection < timedelta(minutes=3)
 
 
 class TrafficLog(Base):
@@ -254,7 +161,7 @@ class ConnectionLog(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    protocol = Column(String(20))  # openvpn, wireguard, l2tp, cisco
+    protocol = Column(String(20))  # openvpn
     server_id = Column(Integer, ForeignKey("vpn_servers.id"))
     
     # Connection details

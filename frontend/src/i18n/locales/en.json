@@ -137,7 +137,6 @@
         "connections": "Connections",
         "devices": "Devices",
         "config": "Configuration",
-        "qrCode": "QR Code",
         "downloadConfig": "Download Config",
         "resetPassword": "Reset Password",
         "suspendUser": "Suspend User",

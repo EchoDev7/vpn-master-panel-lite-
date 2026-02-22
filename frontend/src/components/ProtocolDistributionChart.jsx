@@ -5,7 +5,6 @@ import apiService from '../services/api';
 
 const COLORS = {
     openvpn: '#3b82f6',    // Blue
-    wireguard: '#10b981',  // Green
     other: '#6b7280'       // Gray
 };
 
@@ -27,8 +26,7 @@ const ProtocolDistributionChart = () => {
 
             // Transform data for pie chart
             const chartData = [
-                { name: 'OpenVPN', value: response.data.openvpn || 0, color: COLORS.openvpn },
-                { name: 'WireGuard', value: response.data.wireguard || 0, color: COLORS.wireguard }
+                { name: 'OpenVPN', value: response.data.openvpn || 0, color: COLORS.openvpn }
             ].filter(item => item.value > 0);
 
             setData(chartData);
@@ -44,7 +42,7 @@ const ProtocolDistributionChart = () => {
         if (active && payload && payload.length) {
             const data = payload[0];
             const total = payload[0].payload.total || data.value;
-            const percentage = total > 0 ? ((data.value / total) * 100).toFixed(1) : 0;
+            const percentage = ((data.value / total) * 100).toFixed(1);
 
             return (
                 <div className="bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg">

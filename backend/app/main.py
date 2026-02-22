@@ -3,6 +3,7 @@ VPN Master Panel - FastAPI Main Application
 """
 from fastapi import FastAPI, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
@@ -13,7 +14,6 @@ from typing import Dict, Any
 from .config import settings
 from .database import init_db, engine
 from . import models
-from .utils.security import get_current_admin
 
 # Setup logging
 logging.basicConfig(
@@ -29,16 +29,8 @@ async def lifespan(app: FastAPI):
     Lifespan events - startup and shutdown
     """
     # Startup
-    logger.info("Starting VPN Master Panel (Lite Edition)...")
-
-    # Security sanity check
-    if settings.is_default_secret:
-        logger.warning(
-            "⚠️  WARNING: Using default SECRET_KEY! "
-            "Set a strong SECRET_KEY env variable before deploying to production. "
-            "Run: openssl rand -hex 32"
-        )
-
+    logger.info("Starting VPN Master Panel (Lite Edition)...") # Modified log message
+    
     try:
         # Initialize database FIRST (Critical: Creates tables)
         init_db()
@@ -82,7 +74,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(start_heartbeat())
         logger.info("✅ WebSocket heartbeat started")
 
-        # Start Traffic Monitor (User Management 2.0)
+    # Start Traffic Monitor (User Management 2.0)
         try:
             from .services.monitoring import traffic_monitor
             asyncio.create_task(traffic_monitor.start())
@@ -92,7 +84,7 @@ async def lifespan(app: FastAPI):
 
         # Start Scheduler Service
         try:
-            from .services.scheduler import scheduler as scheduler_service
+            from .services.scheduler import scheduler_service
             asyncio.create_task(scheduler_service.start())
             logger.info("✅ Scheduler Service started")
         except Exception as e:
@@ -108,17 +100,7 @@ async def lifespan(app: FastAPI):
                 logger.info("ℹ️  Telegram bot not configured (skipped)")
         except Exception as e:
             logger.warning(f"⚠️  Telegram bot initialization failed: {e}")
-
-        # Initialize default settings
-        try:
-            from .database import get_db_context
-            from .api.settings import init_default_settings
-            with get_db_context() as db:
-                init_default_settings(db)
-            logger.info("✅ Default settings initialized")
-        except Exception as e:
-            logger.warning(f"⚠️  Default settings initialization failed: {e}")
-
+        
         logger.info("✅ VPN Master Panel started successfully!")
         
     except Exception as e:
@@ -132,7 +114,7 @@ async def lifespan(app: FastAPI):
 
     # Stop Scheduler
     try:
-        from .services.scheduler import scheduler as scheduler_service
+        from .services.scheduler import scheduler_service
         await scheduler_service.stop()
         logger.info("✅ Scheduler Service stopped")
     except Exception as e:
@@ -175,10 +157,8 @@ app.add_middleware(
     allow_headers=settings.CORS_ALLOW_HEADERS,
 )
 
-# NOTE: GZipMiddleware is intentionally NOT added here.
-# It buffers the entire response body before compressing, which breaks
-# StreamingResponse (certbot live output). Static file compression is
-# handled by Nginx (gzip on; in nginx.conf) — zero overhead on FastAPI side.
+# Add Gzip compression
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # Health check endpoint
@@ -212,19 +192,18 @@ async def root():
     }
 
 
-# System info endpoint — admin only
+# System info endpoint
 @app.get("/api/system/info")
-async def system_info(
-    current_admin=Depends(get_current_admin)
-):
-    """Get system information (Admin only)"""
+async def system_info():
+    """Get system information"""
     import psutil
     import platform
-
+    
     return {
         "platform": platform.system(),
         "platform_release": platform.release(),
         "architecture": platform.machine(),
+        "hostname": platform.node(),
         "cpu_count": psutil.cpu_count(),
         "cpu_percent": psutil.cpu_percent(interval=1),
         "memory": {
@@ -273,57 +252,42 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     """WebSocket endpoint for real-time updates"""
     from .websocket.manager import manager
     from .websocket.handlers import WebSocketHandler
-    from jose import JWTError
-    from .config import settings as app_settings
-    from jose import jwt as jose_jwt
-
-    # Validate token before accepting the WebSocket — decode_token raises
-    # HTTPException which WebSocket cannot handle gracefully, so we use
-    # jose directly and close with the correct WebSocket close code.
+    from .websocket.handlers import WebSocketHandler
+    from .utils.security import decode_token
+    
     try:
-        payload = jose_jwt.decode(
-            token, app_settings.SECRET_KEY, algorithms=[app_settings.ALGORITHM]
-        )
-    except JWTError as exc:
-        logger.warning(f"WebSocket rejected — invalid token: {exc}")
-        await websocket.close(code=1008, reason="Invalid token")
-        return
-    except Exception as exc:
-        logger.error(f"WebSocket token decode error: {exc}")
-        await websocket.close(code=1011, reason="Internal error")
-        return
-
-    user_id = payload.get("sub")
-    if not user_id:
-        await websocket.close(code=1008, reason="Invalid token payload")
-        return
-
-    is_admin = payload.get("role") in ("admin", "super_admin")
-
-    try:
-        # Accept and register connection
+        # Verify token
+        payload = decode_token(token)
+        if not payload:
+            await websocket.close(code=1008, reason="Invalid token")
+            return
+            
+        user_id = payload.get("sub")
+        is_admin = payload.get("is_admin", False)
+        
+        # Connect
         await manager.connect(websocket, user_id, is_admin)
-
+        
         try:
             while True:
                 # Receive messages from client
                 data = await websocket.receive_text()
                 message = json.loads(data)
-
+                
                 # Handle message
                 await WebSocketHandler.handle_message(websocket, message)
-
+                
         except WebSocketDisconnect:
             manager.disconnect(websocket)
         except Exception as e:
             logger.error(f"WebSocket error: {e}")
             manager.disconnect(websocket)
-
+            
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
         try:
             await websocket.close(code=1011, reason="Internal error")
-        except Exception:
+        except:
             pass
 
 
@@ -350,6 +314,14 @@ app.include_router(subscription.router, prefix="/sub", tags=["Subscription"])
 # Settings Router
 from .api import settings as api_settings
 app.include_router(api_settings.router, prefix=f"{settings.API_V1_PREFIX}/settings", tags=["Settings"])
+
+# Init default settings on startup
+@app.on_event("startup")
+async def startup_event():
+    from .database import get_db_context
+    from .api.settings import init_default_settings
+    with get_db_context() as db:
+        init_default_settings(db)
 
 
 if __name__ == "__main__":
