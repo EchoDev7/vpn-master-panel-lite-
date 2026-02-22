@@ -17,6 +17,16 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 INSTALL_DIR="/opt/vpn-master-panel"
+CANONICAL_ORIGIN_URL="https://github.com/EchoDev7/vpn-master-panel-lite.git"
+
+get_version() {
+    # Prefer tag-based version if available, otherwise fallback to short SHA
+    if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
+        git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo "unknown"
+    else
+        echo "unknown"
+    fi
+}
 
 echo -e "${CYAN}🚀 Starting VPN Master Panel Update...${NC}"
 
@@ -31,36 +41,51 @@ fi
 echo -e "${CYAN}📥 Updating Installation at $INSTALL_DIR...${NC}"
 cd "$INSTALL_DIR" || exit 1
 
+echo -e "${CYAN}📌 Effective install dir: $INSTALL_DIR${NC}"
+echo -e "${CYAN}📌 Current installed version (before update): $(get_version)${NC}"
+
 # Check if it's a git repo
 if [ -d ".git" ]; then
-    echo -e "${CYAN}Fetching updates...${NC}"
-    git fetch --all
+    # Fix old origin URL (GitHub redirects usually work, but make it clean)
+    CURRENT_ORIGIN_URL=$(git remote get-url origin 2>/dev/null || true)
+    if echo "$CURRENT_ORIGIN_URL" | grep -q "vpn-master-panel-lite-"; then
+        git remote set-url origin "$CANONICAL_ORIGIN_URL" >/dev/null 2>&1 || true
+    fi
 
-    # Stash local changes instead of hard reset
-    STASH_RESULT=$(git diff-index --quiet HEAD -- || echo "changed")
-    if [ "$STASH_RESULT" = "changed" ]; then
-        echo -e "${YELLOW}⚠️ Local changes detected. Stashing them...${NC}"
-        git stash
+    echo -e "${CYAN}Fetching updates...${NC}"
+    git fetch --all --tags
+
+    # Stash local changes (tracked + untracked) for safety.
+    # IMPORTANT: we do NOT auto-pop the stash (it can create conflicts and break updates).
+    # The stash is kept for manual recovery.
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        echo -e "${YELLOW}⚠️ Local changes detected (tracked/untracked). Stashing them...${NC}"
+        git stash push -u -m "vpnmaster-auto-stash $(date +%s)" >/dev/null 2>&1 || true
+        echo -e "${YELLOW}ℹ️  Local changes were stashed and WILL NOT be restored automatically.${NC}"
+        echo -e "${YELLOW}    If you need them later: git stash list && git stash show -p && git stash pop${NC}"
     fi
     
     git pull origin main
-    
-    # Restore local changes if we stashed them
-    if [ "$STASH_RESULT" = "changed" ]; then
-        echo -e "${YELLOW}♻️  Restoring local changes...${NC}"
-        git stash pop
+
+    # If a previous run left the repo in a conflicted state, clean it to avoid breaking the rest of update.
+    if [ -n "$(git diff --name-only --diff-filter=U 2>/dev/null)" ]; then
+        echo -e "${YELLOW}⚠️ Detected unresolved git conflicts. Resetting working tree to a clean state...${NC}"
+        git reset --hard >/dev/null 2>&1 || true
+        git clean -fd >/dev/null 2>&1 || true
     fi
 else
     echo -e "${YELLOW}⚠️ Not a git repository. Skipping git update.${NC}"
     echo -e "${YELLOW}To update manually, backup your config and reinstall.${NC}"
 fi
 
+echo -e "${CYAN}📌 Installed version (after git update): $(get_version)${NC}"
+
 # 2. Update System Packages
 echo -e "${CYAN}📦 Updating System Packages...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt update -qq
 # Ensure critical packages are present - Added fail2ban
-apt install -y openvpn iptables iptables-persistent nodejs python3-pip openssl fail2ban
+apt install -y openvpn iptables iptables-persistent ufw nodejs python3-pip openssl fail2ban netcat-openbsd sqlite3 git curl
 
 # Configure Fail2Ban if missing
 if [ ! -f "/etc/fail2ban/jail.local" ]; then
@@ -115,9 +140,12 @@ sed -i 's/DEFAULT_FORWARD_POLICY="REJECT"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /et
 
 # Detect Main Interface (e.g., eth0, ens3)
 MAIN_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
+if [ -z "$MAIN_IFACE" ]; then
+    MAIN_IFACE=$(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$' | head -n1)
+fi
 
 # Add NAT rules to before.rules if not present
-if ! grep -q "*nat" /etc/ufw/before.rules; then
+if ! grep -Fq "*nat" /etc/ufw/before.rules; then
     echo -e "${YELLOW}⚠️ Adding NAT rules to /etc/ufw/before.rules for interface $MAIN_IFACE${NC}"
     
     # Append NAT table rules to the end of the file
@@ -132,7 +160,28 @@ COMMIT
 EOT
     echo -e "${GREEN}✓ UFW NAT rules added${NC}"
 else
-    echo -e "${GREEN}✓ UFW NAT rules already present${NC}"
+    # NAT table exists, ensure our OpenVPN masquerade rule exists.
+    NAT_RULE="-A POSTROUTING -s 10.8.0.0/8 -o $MAIN_IFACE -j MASQUERADE"
+    if grep -Fq -- "$NAT_RULE" /etc/ufw/before.rules; then
+        echo -e "${GREEN}✓ UFW NAT rules already present${NC}"
+    else
+        echo -e "${YELLOW}⚠️ NAT table exists but OpenVPN MASQUERADE rule missing. Patching...${NC}"
+        tmpfile=$(mktemp)
+        awk -v rule="$NAT_RULE" '
+            BEGIN { in_nat=0; inserted=0 }
+            /^\*nat$/ { in_nat=1 }
+            in_nat && /^COMMIT$/ {
+                if (!inserted) {
+                    print rule
+                    inserted=1
+                }
+                in_nat=0
+            }
+            { print }
+        ' /etc/ufw/before.rules > "$tmpfile" && cat "$tmpfile" > /etc/ufw/before.rules
+        rm -f "$tmpfile"
+        echo -e "${GREEN}✓ UFW NAT rule patched${NC}"
+    fi
 fi
 
 # Ensure Tun Device Exists (Common VPS Issue)
@@ -159,7 +208,7 @@ if [ ! -f "$KEY_FILE" ]; then
 elif grep -q "ENCRYPTED" "$KEY_FILE" || grep -q "Proc-Type: 4,ENCRYPTED" "$KEY_FILE"; then
     echo -e "${YELLOW}⚠️ Detected Encrypted Server Key.${NC}"
     SHOULD_FIX_PKI=true
-elif systemctl is-failed --quiet openvpn@server; then
+elif systemctl is-failed --quiet openvpn@server 2>/dev/null; then
      echo -e "${YELLOW}⚠️ OpenVPN Service is in FAILED state.${NC}"
      SHOULD_FIX_PKI=true
 else
@@ -181,9 +230,10 @@ if [ "$SHOULD_FIX_PKI" = true ]; then
     DATA_DIR="/opt/vpn-master-panel/backend/data/openvpn"
     mkdir -p "$DATA_DIR"
     
-    # Stop Service
-    systemctl stop openvpn@server
-    systemctl stop openvpn
+    # Stop Service (support multiple unit names)
+    systemctl stop openvpn@server 2>/dev/null || true
+    systemctl stop openvpn-server@server 2>/dev/null || true
+    systemctl stop openvpn 2>/dev/null || true
 
     # Clean Old Keys
     rm -f $DATA_DIR/ca.crt $DATA_DIR/ca.key
@@ -268,7 +318,7 @@ if [ ! -d "venv" ]; then
 fi
 source venv/bin/activate
 pip install -r requirements.txt
-python -m py_compile app/main.py # Syntax check
+python3 -m py_compile app/main.py # Syntax check
 
 # 4.5 Run Database Migrations (Safe Python Script)
 echo -e "${CYAN}🗄️  Running Database Migrations...${NC}"
@@ -501,8 +551,10 @@ if [ -d "/opt/vpn-master-panel/backend/data" ]; then
 fi
 
 systemctl restart vpnmaster-backend
-# Restart OpenVPN to apply changes
-if systemctl list-units --full -all | grep -q "openvpn@server.service"; then
+# Restart OpenVPN to apply changes (support multiple unit names)
+if systemctl list-units --full -all | grep -q "openvpn-server@server.service"; then
+    systemctl restart openvpn-server@server
+elif systemctl list-units --full -all | grep -q "openvpn@server.service"; then
     systemctl restart openvpn@server
 else
     systemctl restart openvpn
@@ -522,5 +574,5 @@ fi
 
 echo -e "${GREEN}✅ Update Successfully Completed!${NC}"
 if [ -d ".git" ]; then
-    echo -e "${GREEN}   Version: $(git rev-parse --short HEAD)${NC}"
+    echo -e "${GREEN}   Version: $(get_version)${NC}"
 fi
