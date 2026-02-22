@@ -334,7 +334,7 @@ cd ..
 echo -e "${CYAN}⚛️  Rebuilding Frontend...${NC}"
 cd frontend
 # Install ALL dependencies (including devDependencies like vite)
-npm install
+npm install --no-package-lock
 npm run build
 
 # Verify Build Success
@@ -449,6 +449,11 @@ case "$OVPN_PROTO_RAW" in
 esac
 OVPN_PORT=${OVPN_PORT:-1194}
 
+# If user moved OpenVPN away from 1194/udp, close the legacy default (best-effort).
+if [ "$OVPN_PORT" != "1194" ] || [ "$OVPN_PROTO" != "udp" ]; then
+    ufw --force delete allow 1194/udp > /dev/null 2>&1 || true
+fi
+
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp > /dev/null 2>&1
@@ -530,7 +535,8 @@ echo -e "${CYAN}🔄 Restarting Services...${NC}"
 systemctl daemon-reload
 
 # Fix permissions so OpenVPN can execute auth script
-chmod +x /opt/vpn-master-panel/backend/auth.py
+# Do not chmod files inside /opt repo (it dirties git status on servers).
+# OpenVPN uses /etc/openvpn/scripts/auth.sh (wrapper) which is chmodded above.
 
 # Force Regenerate Server Config - DISABLED to preserve manual changes
 # echo -e "${CYAN}♻️  Regenerating OpenVPN Config...${NC}"
