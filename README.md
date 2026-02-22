@@ -22,8 +22,8 @@
 Copy and paste this command into your server terminal (Ubuntu 22.04 recommended):
 
 ```bash
-git clone https://github.com/EchoDev7/vpn-master-panel-lite-.git && \
-cd vpn-master-panel-lite- && \
+git clone https://github.com/EchoDev7/vpn-master-panel-lite.git && \
+cd vpn-master-panel-lite && \
 chmod +x install.sh && \
 sudo ./install.sh
 ```
@@ -57,7 +57,7 @@ Once the installation finishes, open your browser:
 To update your panel to the latest version without losing data:
 
 ```bash
-cd vpn-master-panel-lite-
+cd vpn-master-panel-lite
 git pull
 chmod +x update.sh
 sudo ./update.sh

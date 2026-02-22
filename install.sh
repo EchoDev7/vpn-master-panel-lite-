@@ -188,13 +188,13 @@ download_project() {
     print_step "Downloading VPN Master Panel"
     
     cd /opt
-    if [ -d "vpn-master-panel-lite-" ]; then
-        rm -rf vpn-master-panel-lite-
+    if [ -d "vpn-master-panel-lite" ]; then
+        rm -rf vpn-master-panel-lite
     fi
     
     # Clone the Lite repository
-    git clone --depth 1 -q https://github.com/EchoDev7/vpn-master-panel-lite-.git vpn-master-panel-lite- > /dev/null 2>&1
-    mv vpn-master-panel-lite- vpn-master-panel # Rename to standard folder for compatibility
+    git clone --depth 1 -q https://github.com/EchoDev7/vpn-master-panel-lite.git vpn-master-panel-lite > /dev/null 2>&1
+    mv vpn-master-panel-lite vpn-master-panel # Rename to standard folder for compatibility
     print_success "Project downloaded"
 }
 

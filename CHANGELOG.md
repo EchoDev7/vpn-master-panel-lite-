@@ -20,5 +20,5 @@ All notable changes to VPN Master Panel Lite will be documented in this file.
 - OpenVPN support
 - Basic monitoring
 
-[1.5.0]: https://github.com/EchoDev7/vpn-master-panel-lite-/compare/v1.0.0...v1.5.0
-[1.0.0]: https://github.com/EchoDev7/vpn-master-panel-lite-/releases/tag/v1.0.0
+[1.5.0]: https://github.com/EchoDev7/vpn-master-panel-lite/compare/v1.0.0...v1.5.0
+[1.0.0]: https://github.com/EchoDev7/vpn-master-panel-lite/releases/tag/v1.0.0
